@@ -49,12 +49,13 @@ That's it! The script will:
 
 ### View all APIs
 ```bash
+# No sudo needed for viewing
 api-manage list
 ```
 
 ### Add new API
 ```bash
-# Basic: api-manage add <name> <port>
+# Basic: sudo api-manage add <name> <port>
 sudo api-manage add my-service 3000
 
 # With custom path and description
@@ -63,19 +64,24 @@ sudo api-manage add payment-api 4000 /payments "Payment processing API"
 
 ### Remove API
 ```bash
+# Requires sudo
 sudo api-manage remove my-service
 ```
 
 ### Enable/Disable API
 ```bash
+# Requires sudo
 sudo api-manage disable my-service
 sudo api-manage enable my-service
 ```
 
 ### Reload configuration manually
 ```bash
+# Requires sudo
 sudo api-manage reload
 ```
+
+> **Note:** All configuration changes require root privileges. Use `sudo` for add/remove/enable/disable/reload commands. Only `list` can be run without sudo.
 
 ## Configuration
 
