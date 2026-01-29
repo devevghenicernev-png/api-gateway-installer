@@ -1,0 +1,98 @@
+╔════════════════════════════════════════════════════════════╗
+║            API GATEWAY INSTALLER - QUICK START             ║
+╚════════════════════════════════════════════════════════════╝
+
+📦 INSTALLATION (3 steps):
+
+1. Copy installer to your server:
+   
+   scp install.sh user@YOUR_SERVER_IP:~/
+
+2. SSH to server:
+   
+   ssh user@YOUR_SERVER_IP
+
+3. Run installer:
+   
+   chmod +x install.sh
+   sudo ./install.sh
+
+✅ Done! Your API Gateway is now running on port 422
+
+
+🎯 USAGE EXAMPLES:
+
+View all APIs:
+  api-manage list
+
+Add new API:
+  sudo api-manage add my-service 3000
+
+Add API with custom settings:
+  sudo api-manage add payment-api 4000 /payments "Payment API"
+
+Remove API:
+  sudo api-manage remove my-service
+
+Enable/Disable:
+  sudo api-manage disable my-service
+  sudo api-manage enable my-service
+
+
+🌐 ACCESS YOUR GATEWAY:
+
+The installer will detect your server IP and port automatically.
+
+Main page:
+  http://YOUR_SERVER_IP:YOUR_PORT
+
+Your APIs:
+  http://YOUR_SERVER_IP:YOUR_PORT/api-path/
+
+
+📝 CONFIGURATION FILE:
+
+Edit APIs manually:
+  sudo nano /etc/api-gateway/apis.json
+
+Changes auto-apply (no reload needed)
+
+
+🔧 TROUBLESHOOTING:
+
+Check Nginx:
+  sudo nginx -t
+  sudo systemctl status nginx
+
+Check logs:
+  sudo tail -f /var/log/nginx/error.log
+
+Restart everything:
+  sudo systemctl restart nginx
+  sudo systemctl restart api-gateway-watch
+
+
+❌ UNINSTALL:
+
+Run uninstaller:
+  chmod +x uninstall.sh
+  sudo ./uninstall.sh
+
+
+📁 FILES IN THIS PACKAGE:
+
+install.sh     - Main installer (run this first)
+uninstall.sh   - Complete removal tool
+README.md      - Full documentation
+QUICK_START.txt - This file
+
+
+💡 IMPORTANT NOTES:
+
+- Port 422 must be open/available
+- Installer is safe to run multiple times
+- Existing configs are backed up automatically
+- Changes to apis.json auto-reload Nginx
+
+
+🚀 ENJOY YOUR API GATEWAY!
