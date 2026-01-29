@@ -277,7 +277,7 @@ while IFS= read -r api; do
 done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
 
 # Create nginx config
-cat > "\$NGINX_CONFIG" << 'ENDCONFIG'
+/bin/cat > "\$NGINX_CONFIG" << 'ENDCONFIG'
 server {
     listen $LISTEN_PORT default_server;
     server_name _;
@@ -308,10 +308,10 @@ server {
 ENDCONFIG
 
 # Add generated HTML
-echo "        \${HTML_APIS}" >> "\$NGINX_CONFIG"
+/bin/echo "        \${HTML_APIS}" >> "\$NGINX_CONFIG"
 
 # Continue config
-cat >> "\$NGINX_CONFIG" << 'ENDCONFIG'
+/bin/cat >> "\$NGINX_CONFIG" << 'ENDCONFIG'
         <div class="footer">Auto-generated configuration | Use: <code>api-manage</code></div>
     </div>
 </body>
@@ -321,11 +321,11 @@ ENDCONFIG
 
 # Add proxy locations
 while IFS= read -r api; do
-    NAME=\$(echo "\$api" | /usr/bin/jq -r '.name')
-    APATH=\$(echo "\$api" | /usr/bin/jq -r '.path')
-    PORT=\$(echo "\$api" | /usr/bin/jq -r '.port')
+    NAME=\$(/bin/echo "\$api" | /usr/bin/jq -r '.name')
+    APATH=\$(/bin/echo "\$api" | /usr/bin/jq -r '.path')
+    PORT=\$(/bin/echo "\$api" | /usr/bin/jq -r '.port')
     
-    cat >> "\$NGINX_CONFIG" << PROXY
+    /bin/cat >> "\$NGINX_CONFIG" << PROXY
 
     # \$NAME
     location \$APATH/ {
@@ -343,16 +343,16 @@ PROXY
 done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
 
 # Close server block
-echo '}' >> "\$NGINX_CONFIG"
+/bin/echo '}' >> "\$NGINX_CONFIG"
 
 # Test and reload
 /usr/sbin/nginx -t && /usr/bin/systemctl reload nginx
 
 if [ \$? -eq 0 ]; then
-    echo "✅ Configuration generated and applied!"
-    echo "🌐 Access at http://$SERVER_IP:$LISTEN_PORT"
+    /bin/echo "✅ Configuration generated and applied!"
+    /bin/echo "🌐 Access at http://$SERVER_IP:$LISTEN_PORT"
 else
-    echo "❌ Nginx configuration error!"
+    /bin/echo "❌ Nginx configuration error!"
     exit 1
 fi
 EOF
@@ -386,7 +386,7 @@ case "$1" in
         DESC="${5:-API service $NAME}"
         
         /usr/bin/jq ".apis += [{\"name\": \"$NAME\", \"path\": \"$PATH\", \"port\": $PORT, \"description\": \"$DESC\", \"enabled\": true}]" "$CONFIG_FILE" > /tmp/apis.json
-        mv /tmp/apis.json "$CONFIG_FILE"
+        /bin/mv /tmp/apis.json "$CONFIG_FILE"
         
         echo "✅ API '$NAME' added on port $PORT"
         /usr/local/bin/generate-nginx-config
@@ -400,7 +400,7 @@ case "$1" in
         
         NAME="$2"
         /usr/bin/jq ".apis |= map(select(.name != \"$NAME\"))" "$CONFIG_FILE" > /tmp/apis.json
-        mv /tmp/apis.json "$CONFIG_FILE"
+        /bin/mv /tmp/apis.json "$CONFIG_FILE"
         
         echo "✅ API '$NAME' removed"
         /usr/local/bin/generate-nginx-config
@@ -414,7 +414,7 @@ case "$1" in
         
         NAME="$2"
         /usr/bin/jq ".apis |= map(if .name == \"$NAME\" then .enabled = true else . end)" "$CONFIG_FILE" > /tmp/apis.json
-        mv /tmp/apis.json "$CONFIG_FILE"
+        /bin/mv /tmp/apis.json "$CONFIG_FILE"
         
         echo "✅ API '$NAME' enabled"
         /usr/local/bin/generate-nginx-config
@@ -428,7 +428,7 @@ case "$1" in
         
         NAME="$2"
         /usr/bin/jq ".apis |= map(if .name == \"$NAME\" then .enabled = false else . end)" "$CONFIG_FILE" > /tmp/apis.json
-        mv /tmp/apis.json "$CONFIG_FILE"
+        /bin/mv /tmp/apis.json "$CONFIG_FILE"
         
         echo "✅ API '$NAME' disabled"
         /usr/local/bin/generate-nginx-config
