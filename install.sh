@@ -557,13 +557,13 @@ setup_goaccess_dashboard() {
     print_success "Dashboard directory created"
     
     # Create GoAccess configuration
-    cat > /etc/goaccess/goaccess.conf << 'GOACCESS_CONF'
+    cat > /etc/goaccess/goaccess.conf << EOF
 time-format %H:%M:%S
 date-format %d/%b/%Y
 log-format %h %^[%d:%t %^] "%r" %s %b "%R" "%u"
 
 real-time-html true
-ws-url wss://PLACEHOLDER:PORT/ws
+ws-url ws://$SERVER_IP:$LISTEN_PORT/ws
 port 7890
 addr 127.0.0.1
 output /var/www/dashboard/index.html
@@ -575,11 +575,24 @@ no-query-string false
 no-term-resolver false
 444-as-404 false
 4xx-to-unique-count false
-GOACCESS_CONF
+EOF
 
+    # Ensure nginx access log exists
+    if [ ! -f /var/log/nginx/access.log ]; then
+        print_info "Creating empty access log..."
+        touch /var/log/nginx/access.log
+        chown www-data:adm /var/log/nginx/access.log
+    fi
+    
     # Create GoAccess service script
     cat > "$SCRIPT_DIR/goaccess-dashboard" << 'GOACCESS_SCRIPT'
 #!/bin/bash
+# Ensure log file exists
+if [ ! -f /var/log/nginx/access.log ]; then
+    touch /var/log/nginx/access.log
+    chown www-data:adm /var/log/nginx/access.log
+fi
+
 /usr/bin/goaccess /var/log/nginx/access.log \
     --config-file=/etc/goaccess/goaccess.conf \
     --real-time-html \
@@ -607,6 +620,79 @@ WantedBy=multi-user.target
 GOACCESS_SERVICE
 
     print_success "GoAccess service created"
+    
+    # Create placeholder dashboard if no logs yet
+    if [ ! -f /var/www/dashboard/index.html ]; then
+        cat > /var/www/dashboard/index.html << 'PLACEHOLDER_HTML'
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="30">
+    <title>API Gateway Dashboard - Initializing</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 0; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 50px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 600px;
+        }
+        h1 { color: #333; margin-bottom: 20px; }
+        p { color: #666; line-height: 1.6; margin: 15px 0; }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 30px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .info {
+            background: #f0f4ff;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 API Gateway Dashboard</h1>
+        <div class="spinner"></div>
+        <p><strong>Инициализация дашборда...</strong></p>
+        <p>GoAccess ожидает первых запросов к API</p>
+        <div class="info">
+            <p>💡 <strong>Что делать:</strong></p>
+            <p>1. Сделайте несколько запросов к вашим API endpoints</p>
+            <p>2. Обновите эту страницу через 30 секунд</p>
+            <p>3. Дашборд автоматически заполнится данными</p>
+        </div>
+        <p style="margin-top: 30px; color: #999; font-size: 14px;">
+            Автообновление через 30 секунд...
+        </p>
+    </div>
+</body>
+</html>
+PLACEHOLDER_HTML
+        print_info "Created placeholder dashboard (will update after first requests)"
+    fi
     
     # Enable and start GoAccess service
     systemctl daemon-reload
