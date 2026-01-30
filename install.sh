@@ -566,30 +566,43 @@ setup_grafana_loki() {
     fi
     
     # Download Loki
-    print_info "Downloading Loki..."
-    wget -q https://github.com/grafana/loki/releases/download/v2.9.3/loki-linux-${LOKI_ARCH}.zip -O /tmp/loki.zip
-    unzip -q /tmp/loki.zip -d /opt/loki/
-    chmod +x /opt/loki/loki-linux-${LOKI_ARCH}
-    mv /opt/loki/loki-linux-${LOKI_ARCH} /opt/loki/loki
-    print_success "Loki downloaded"
+    if [ ! -f /opt/loki/loki ]; then
+        print_info "Downloading Loki..."
+        wget -q https://github.com/grafana/loki/releases/download/v2.9.3/loki-linux-${LOKI_ARCH}.zip -O /tmp/loki.zip
+        unzip -q -o /tmp/loki.zip -d /tmp/
+        chmod +x /tmp/loki-linux-${LOKI_ARCH}
+        mv /tmp/loki-linux-${LOKI_ARCH} /opt/loki/loki
+        print_success "Loki downloaded"
+    else
+        print_success "Loki already exists"
+    fi
     
     # Download Promtail
-    print_info "Downloading Promtail..."
-    wget -q https://github.com/grafana/loki/releases/download/v2.9.3/promtail-linux-${LOKI_ARCH}.zip -O /tmp/promtail.zip
-    unzip -q /tmp/promtail.zip -d /opt/promtail/
-    chmod +x /opt/promtail/promtail-linux-${LOKI_ARCH}
-    mv /opt/promtail/promtail-linux-${LOKI_ARCH} /opt/promtail/promtail
-    print_success "Promtail downloaded"
+    if [ ! -f /opt/promtail/promtail ]; then
+        print_info "Downloading Promtail..."
+        wget -q https://github.com/grafana/loki/releases/download/v2.9.3/promtail-linux-${LOKI_ARCH}.zip -O /tmp/promtail.zip
+        unzip -q -o /tmp/promtail.zip -d /tmp/
+        chmod +x /tmp/promtail-linux-${LOKI_ARCH}
+        mv /tmp/promtail-linux-${LOKI_ARCH} /opt/promtail/promtail
+        print_success "Promtail downloaded"
+    else
+        print_success "Promtail already exists"
+    fi
     
     # Download Grafana
     print_info "Downloading Grafana..."
+    if [ -d /opt/grafana-install ]; then
+        print_warning "Grafana already exists, removing old version..."
+        rm -rf /opt/grafana-install
+    fi
+    
     if [ "$LOKI_ARCH" = "arm64" ]; then
         wget -q https://dl.grafana.com/oss/release/grafana-10.2.3.linux-arm64.tar.gz -O /tmp/grafana.tar.gz
     else
         wget -q https://dl.grafana.com/oss/release/grafana-10.2.3.linux-amd64.tar.gz -O /tmp/grafana.tar.gz
     fi
-    tar -xzf /tmp/grafana.tar.gz -C /opt/
-    mv /opt/grafana-*/ /opt/grafana-install
+    tar -xzf /tmp/grafana.tar.gz -C /tmp/
+    mv /tmp/grafana-*/ /opt/grafana-install
     print_success "Grafana downloaded"
     
     # Create Loki configuration
