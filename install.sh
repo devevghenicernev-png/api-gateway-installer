@@ -359,16 +359,12 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
 
     # Grafana Dashboard
     location /grafana/ {
-        rewrite ^/grafana/(.*) /\$1 break;
-        proxy_pass http://localhost:3022/;
+        proxy_pass http://localhost:3022/grafana/;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "Upgrade";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_redirect http://localhost:3022/ http://\$host:\$server_port/grafana/;
     }
 DASHBOARD
 
@@ -708,22 +704,8 @@ RestartSec=10
 WantedBy=multi-user.target
 PROMTAIL_SERVICE
 
-    # Create Grafana configuration (use port 3022 to avoid conflict with user services)
-    cat > /opt/grafana/conf/custom.ini << GRAFANA_INI
-[server]
-http_port = 3022
-domain = $SERVER_IP
-
-[security]
-admin_user = admin
-admin_password = admin
-
-[auth.anonymous]
-enabled = false
-GRAFANA_INI
-
-    # Create Grafana systemd service
-    cat > /etc/systemd/system/grafana.service << 'GRAFANA_SERVICE'
+    # Create Grafana systemd service with all settings via environment variables
+    cat > /etc/systemd/system/grafana.service << GRAFANA_SERVICE
 [Unit]
 Description=Grafana
 After=network.target loki.service
@@ -733,8 +715,13 @@ Type=simple
 User=root
 WorkingDirectory=/opt/grafana-install
 Environment="GF_SERVER_HTTP_PORT=3022"
+Environment="GF_SERVER_DOMAIN=$SERVER_IP"
+Environment="GF_SERVER_ROOT_URL=http://$SERVER_IP:$LISTEN_PORT/grafana/"
+Environment="GF_SERVER_SERVE_FROM_SUB_PATH=true"
 Environment="GF_PATHS_DATA=/opt/grafana/data"
-Environment="GF_PATHS_CONFIG=/opt/grafana/conf/custom.ini"
+Environment="GF_SECURITY_ADMIN_USER=admin"
+Environment="GF_SECURITY_ADMIN_PASSWORD=admin"
+Environment="GF_AUTH_ANONYMOUS_ENABLED=false"
 ExecStart=/opt/grafana-install/bin/grafana-server
 Restart=always
 RestartSec=10
