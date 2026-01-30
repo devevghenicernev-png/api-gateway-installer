@@ -654,6 +654,7 @@ EOF
     cat > /opt/promtail/promtail-config.yaml << 'PROMTAIL_EOF'
 server:
   http_listen_port: 9080
+  grpc_listen_port: 0
 
 positions:
   filename: /opt/promtail/positions.yaml
