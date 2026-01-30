@@ -359,6 +359,7 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
 
     # Grafana Dashboard
     location /grafana/ {
+        rewrite ^/grafana/(.*) /\$1 break;
         proxy_pass http://localhost:3000/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -367,6 +368,7 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_redirect http://localhost:3000/ http://\$host:\$server_port/grafana/;
     }
 DASHBOARD
 
@@ -706,13 +708,11 @@ RestartSec=10
 WantedBy=multi-user.target
 PROMTAIL_SERVICE
 
-    # Create Grafana configuration for subpath
+    # Create Grafana configuration
     cat > /opt/grafana/conf/custom.ini << GRAFANA_INI
 [server]
 http_port = 3000
 domain = $SERVER_IP
-root_url = http://$SERVER_IP:$LISTEN_PORT/grafana/
-serve_from_sub_path = true
 
 [security]
 admin_user = admin
