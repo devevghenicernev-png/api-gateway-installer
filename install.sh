@@ -202,6 +202,15 @@ install_dependencies() {
         apt-get install -y inotify-tools
         print_success "inotify-tools installed"
     fi
+    
+    # Check and install goaccess
+    if command -v goaccess &> /dev/null; then
+        print_success "GoAccess already installed"
+    else
+        print_info "Installing GoAccess for dashboard..."
+        apt-get install -y goaccess
+        print_success "GoAccess installed"
+    fi
 }
 
 create_config_directory() {
@@ -341,6 +350,27 @@ while IFS= read -r api; do
     }
 PROXY
 done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
+
+# Add dashboard location
+/bin/cat >> "\$NGINX_CONFIG" << 'DASHBOARD'
+
+    # GoAccess Dashboard
+    location /dashboard {
+        alias /var/www/dashboard;
+        index index.html;
+        auth_basic "API Gateway Dashboard";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+    }
+    
+    # WebSocket for real-time updates
+    location /ws {
+        proxy_pass http://127.0.0.1:7890;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host \$host;
+    }
+DASHBOARD
 
 # Close server block
 /bin/echo '}' >> "\$NGINX_CONFIG"
@@ -519,6 +549,99 @@ SERVICE_END
     fi
 }
 
+setup_goaccess_dashboard() {
+    print_header "Setting Up GoAccess Dashboard"
+    
+    # Create dashboard directory
+    mkdir -p /var/www/dashboard
+    print_success "Dashboard directory created"
+    
+    # Create GoAccess configuration
+    cat > /etc/goaccess/goaccess.conf << 'GOACCESS_CONF'
+time-format %H:%M:%S
+date-format %d/%b/%Y
+log-format %h %^[%d:%t %^] "%r" %s %b "%R" "%u"
+
+real-time-html true
+ws-url wss://PLACEHOLDER:PORT/ws
+port 7890
+addr 127.0.0.1
+output /var/www/dashboard/index.html
+
+html-prefs {"theme":"bright","perPage":10,"layout":"horizontal","showTables":true}
+html-report-title API Gateway Dashboard
+json-pretty-print false
+no-query-string false
+no-term-resolver false
+444-as-404 false
+4xx-to-unique-count false
+GOACCESS_CONF
+
+    # Create GoAccess service script
+    cat > "$SCRIPT_DIR/goaccess-dashboard" << 'GOACCESS_SCRIPT'
+#!/bin/bash
+/usr/bin/goaccess /var/log/nginx/access.log \
+    --config-file=/etc/goaccess/goaccess.conf \
+    --real-time-html \
+    --daemonize
+GOACCESS_SCRIPT
+
+    chmod +x "$SCRIPT_DIR/goaccess-dashboard"
+    print_success "GoAccess script created"
+    
+    # Create GoAccess systemd service
+    cat > /etc/systemd/system/goaccess-dashboard.service << 'GOACCESS_SERVICE'
+[Unit]
+Description=GoAccess Dashboard Service
+After=network.target nginx.service
+
+[Service]
+Type=forking
+User=root
+ExecStart=/usr/local/bin/goaccess-dashboard
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+GOACCESS_SERVICE
+
+    print_success "GoAccess service created"
+    
+    # Enable and start GoAccess service
+    systemctl daemon-reload
+    systemctl enable goaccess-dashboard.service
+    systemctl start goaccess-dashboard.service
+    
+    if systemctl is-active --quiet goaccess-dashboard.service; then
+        print_success "GoAccess dashboard service started"
+    else
+        print_warning "GoAccess dashboard service failed to start (non-critical)"
+    fi
+}
+
+setup_dashboard_password() {
+    print_header "Setting Up Dashboard Password"
+    
+    echo -e "${CYAN}Set a password for the dashboard:${NC}"
+    echo ""
+    
+    # Install apache2-utils for htpasswd
+    if ! command -v htpasswd &> /dev/null; then
+        print_info "Installing apache2-utils..."
+        apt-get install -y apache2-utils
+    fi
+    
+    # Create password file
+    read -p "Enter dashboard username [admin]: " dashboard_user
+    dashboard_user="${dashboard_user:-admin}"
+    
+    htpasswd -c /etc/nginx/.htpasswd "$dashboard_user"
+    
+    print_success "Dashboard password configured for user: $dashboard_user"
+    echo ""
+}
+
 configure_nginx() {
     print_header "Configuring Nginx"
     
@@ -568,6 +691,10 @@ print_completion_info() {
     echo -e "${GREEN}Access your API Gateway at:${NC}"
     echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT${NC}"
     echo ""
+    echo -e "${GREEN}📊 Dashboard Access:${NC}"
+    echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/dashboard${NC}"
+    echo -e "  ${CYAN}Real-time monitoring of all API requests${NC}"
+    echo ""
     echo -e "${GREEN}Management Commands:${NC}"
     echo -e "  ${YELLOW}api-manage list${NC}                   - List all APIs (no sudo needed)"
     echo -e "  ${YELLOW}sudo api-manage add <name> <port>${NC} - Add new API"
@@ -577,11 +704,13 @@ print_completion_info() {
     echo -e "${GREEN}Configuration Files:${NC}"
     echo -e "  APIs config:     ${BLUE}$CONFIG_FILE${NC}"
     echo -e "  Nginx config:    ${BLUE}$NGINX_SITES_AVAILABLE/apis${NC}"
+    echo -e "  Dashboard:       ${BLUE}/var/www/dashboard${NC}"
     echo ""
     echo -e "${YELLOW}Next Steps:${NC}"
     echo "  1. Edit $CONFIG_FILE to add your APIs"
     echo "  2. Or use: api-manage add my-service 3000"
     echo "  3. Configuration will auto-reload on changes"
+    echo "  4. Access the dashboard to monitor requests"
     echo ""
 }
 
@@ -616,6 +745,8 @@ main() {
     create_generator_script
     create_management_script
     setup_auto_reload
+    setup_dashboard_password
+    setup_goaccess_dashboard
     configure_nginx
     print_completion_info
     
