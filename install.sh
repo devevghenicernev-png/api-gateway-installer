@@ -203,13 +203,16 @@ install_dependencies() {
         print_success "inotify-tools installed"
     fi
     
-    # Check and install goaccess
-    if command -v goaccess &> /dev/null; then
-        print_success "GoAccess already installed"
-    else
-        print_info "Installing GoAccess for dashboard..."
-        apt-get install -y goaccess
-        print_success "GoAccess installed"
+    # Check and install curl, wget, unzip for Grafana/Loki
+    MISSING_TOOLS=""
+    command -v curl &> /dev/null || MISSING_TOOLS="$MISSING_TOOLS curl"
+    command -v wget &> /dev/null || MISSING_TOOLS="$MISSING_TOOLS wget"
+    command -v unzip &> /dev/null || MISSING_TOOLS="$MISSING_TOOLS unzip"
+    
+    if [ -n "$MISSING_TOOLS" ]; then
+        print_info "Installing required tools:$MISSING_TOOLS..."
+        apt-get install -y $MISSING_TOOLS
+        print_success "Required tools installed"
     fi
 }
 
@@ -354,21 +357,16 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
 # Add dashboard location
 /bin/cat >> "\$NGINX_CONFIG" << 'DASHBOARD'
 
-    # GoAccess Dashboard
-    location /dashboard {
-        alias /var/www/dashboard;
-        index index.html;
-        auth_basic "API Gateway Dashboard";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-    }
-    
-    # WebSocket for real-time updates
-    location /ws {
-        proxy_pass http://127.0.0.1:7890;
+    # Grafana Dashboard
+    location /grafana/ {
+        proxy_pass http://localhost:3000/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "Upgrade";
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 DASHBOARD
 
@@ -549,182 +547,213 @@ SERVICE_END
     fi
 }
 
-setup_goaccess_dashboard() {
-    print_header "Setting Up GoAccess Dashboard"
+setup_grafana_loki() {
+    print_header "Setting Up Grafana + Loki Dashboard"
     
-    # Create dashboard directory
-    mkdir -p /var/www/dashboard
-    print_success "Dashboard directory created"
+    # Create directories
+    mkdir -p /opt/loki /opt/promtail /opt/grafana/data
+    print_success "Directories created"
     
-    # Create GoAccess configuration
-    cat > /etc/goaccess/goaccess.conf << EOF
-time-format %H:%M:%S
-date-format %d/%b/%Y
-log-format %h %^[%d:%t %^] "%r" %s %b "%R" "%u"
-
-real-time-html true
-ws-url ws://$SERVER_IP:$LISTEN_PORT/ws
-port 7890
-addr 127.0.0.1
-output /var/www/dashboard/index.html
-
-html-prefs {"theme":"bright","perPage":10,"layout":"horizontal","showTables":true}
-html-report-title API Gateway Dashboard
-json-pretty-print false
-no-query-string false
-no-term-resolver false
-444-as-404 false
-4xx-to-unique-count false
-EOF
-
-    # Ensure nginx access log exists
-    if [ ! -f /var/log/nginx/access.log ]; then
-        print_info "Creating empty access log..."
-        touch /var/log/nginx/access.log
-        chown www-data:adm /var/log/nginx/access.log
+    # Detect architecture
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "aarch64" ]; then
+        LOKI_ARCH="arm64"
+    elif [ "$ARCH" = "x86_64" ]; then
+        LOKI_ARCH="amd64"
+    else
+        print_warning "Unknown architecture: $ARCH, using amd64"
+        LOKI_ARCH="amd64"
     fi
     
-    # Create GoAccess service script
-    cat > "$SCRIPT_DIR/goaccess-dashboard" << 'GOACCESS_SCRIPT'
-#!/bin/bash
-# Ensure log file exists
-if [ ! -f /var/log/nginx/access.log ]; then
-    touch /var/log/nginx/access.log
-    chown www-data:adm /var/log/nginx/access.log
-fi
-
-/usr/bin/goaccess /var/log/nginx/access.log \
-    --config-file=/etc/goaccess/goaccess.conf \
-    --real-time-html \
-    --daemonize
-GOACCESS_SCRIPT
-
-    chmod +x "$SCRIPT_DIR/goaccess-dashboard"
-    print_success "GoAccess script created"
+    # Download Loki
+    print_info "Downloading Loki..."
+    wget -q https://github.com/grafana/loki/releases/download/v2.9.3/loki-linux-${LOKI_ARCH}.zip -O /tmp/loki.zip
+    unzip -q /tmp/loki.zip -d /opt/loki/
+    chmod +x /opt/loki/loki-linux-${LOKI_ARCH}
+    mv /opt/loki/loki-linux-${LOKI_ARCH} /opt/loki/loki
+    print_success "Loki downloaded"
     
-    # Create GoAccess systemd service
-    cat > /etc/systemd/system/goaccess-dashboard.service << 'GOACCESS_SERVICE'
+    # Download Promtail
+    print_info "Downloading Promtail..."
+    wget -q https://github.com/grafana/loki/releases/download/v2.9.3/promtail-linux-${LOKI_ARCH}.zip -O /tmp/promtail.zip
+    unzip -q /tmp/promtail.zip -d /opt/promtail/
+    chmod +x /opt/promtail/promtail-linux-${LOKI_ARCH}
+    mv /opt/promtail/promtail-linux-${LOKI_ARCH} /opt/promtail/promtail
+    print_success "Promtail downloaded"
+    
+    # Download Grafana
+    print_info "Downloading Grafana..."
+    if [ "$LOKI_ARCH" = "arm64" ]; then
+        wget -q https://dl.grafana.com/oss/release/grafana-10.2.3.linux-arm64.tar.gz -O /tmp/grafana.tar.gz
+    else
+        wget -q https://dl.grafana.com/oss/release/grafana-10.2.3.linux-amd64.tar.gz -O /tmp/grafana.tar.gz
+    fi
+    tar -xzf /tmp/grafana.tar.gz -C /opt/
+    mv /opt/grafana-*/ /opt/grafana-install
+    print_success "Grafana downloaded"
+    
+    # Create Loki configuration
+    cat > /opt/loki/loki-config.yaml << EOF
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+  chunk_idle_period: 5m
+  chunk_retain_period: 30s
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 168h
+
+storage_config:
+  boltdb:
+    directory: /opt/loki/index
+  filesystem:
+    directory: /opt/loki/chunks
+
+limits_config:
+  enforce_metric_name: false
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+chunk_store_config:
+  max_look_back_period: 0s
+
+table_manager:
+  retention_deletes_enabled: false
+  retention_period: 0s
+EOF
+
+    # Create Promtail configuration
+    cat > /opt/promtail/promtail-config.yaml << 'PROMTAIL_EOF'
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /opt/promtail/positions.yaml
+
+clients:
+  - url: http://localhost:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: nginx
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx
+          __path__: /var/log/nginx/access.log
+PROMTAIL_EOF
+
+    # Create Loki systemd service
+    cat > /etc/systemd/system/loki.service << 'LOKI_SERVICE'
 [Unit]
-Description=GoAccess Dashboard Service
-After=network.target nginx.service
+Description=Loki Log Aggregation System
+After=network.target
 
 [Service]
-Type=forking
+Type=simple
 User=root
-ExecStart=/usr/local/bin/goaccess-dashboard
+ExecStart=/opt/loki/loki -config.file=/opt/loki/loki-config.yaml
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-GOACCESS_SERVICE
+LOKI_SERVICE
 
-    print_success "GoAccess service created"
-    
-    # Create placeholder dashboard if no logs yet
-    if [ ! -f /var/www/dashboard/index.html ]; then
-        cat > /var/www/dashboard/index.html << 'PLACEHOLDER_HTML'
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta http-equiv="refresh" content="30">
-    <title>API Gateway Dashboard - Initializing</title>
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 0; 
-            padding: 0; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-        .container {
-            background: white;
-            padding: 50px;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            text-align: center;
-            max-width: 600px;
-        }
-        h1 { color: #333; margin-bottom: 20px; }
-        p { color: #666; line-height: 1.6; margin: 15px 0; }
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 30px auto;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .info {
-            background: #f0f4ff;
-            padding: 20px;
-            border-radius: 5px;
-            margin-top: 20px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>📊 API Gateway Dashboard</h1>
-        <div class="spinner"></div>
-        <p><strong>Инициализация дашборда...</strong></p>
-        <p>GoAccess ожидает первых запросов к API</p>
-        <div class="info">
-            <p>💡 <strong>Что делать:</strong></p>
-            <p>1. Сделайте несколько запросов к вашим API endpoints</p>
-            <p>2. Обновите эту страницу через 30 секунд</p>
-            <p>3. Дашборд автоматически заполнится данными</p>
-        </div>
-        <p style="margin-top: 30px; color: #999; font-size: 14px;">
-            Автообновление через 30 секунд...
-        </p>
-    </div>
-</body>
-</html>
-PLACEHOLDER_HTML
-        print_info "Created placeholder dashboard (will update after first requests)"
-    fi
-    
-    # Enable and start GoAccess service
+    # Create Promtail systemd service
+    cat > /etc/systemd/system/promtail.service << 'PROMTAIL_SERVICE'
+[Unit]
+Description=Promtail Log Collector
+After=network.target loki.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/promtail/promtail -config.file=/opt/promtail/promtail-config.yaml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+PROMTAIL_SERVICE
+
+    # Create Grafana systemd service
+    cat > /etc/systemd/system/grafana.service << 'GRAFANA_SERVICE'
+[Unit]
+Description=Grafana
+After=network.target loki.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/grafana-install
+Environment="GF_SERVER_HTTP_PORT=3000"
+Environment="GF_PATHS_DATA=/opt/grafana/data"
+ExecStart=/opt/grafana-install/bin/grafana-server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+GRAFANA_SERVICE
+
+    # Start services
     systemctl daemon-reload
-    systemctl enable goaccess-dashboard.service
-    systemctl start goaccess-dashboard.service
+    systemctl enable loki promtail grafana
+    systemctl start loki
+    sleep 3
+    systemctl start promtail
+    sleep 2
+    systemctl start grafana
     
-    if systemctl is-active --quiet goaccess-dashboard.service; then
-        print_success "GoAccess dashboard service started"
+    if systemctl is-active --quiet loki && systemctl is-active --quiet promtail && systemctl is-active --quiet grafana; then
+        print_success "Grafana + Loki services started successfully"
     else
-        print_warning "GoAccess dashboard service failed to start (non-critical)"
+        print_warning "Some services failed to start (check with: systemctl status loki/promtail/grafana)"
     fi
+    
+    # Cleanup
+    rm -f /tmp/loki.zip /tmp/promtail.zip /tmp/grafana.tar.gz
 }
 
-setup_dashboard_password() {
-    print_header "Setting Up Dashboard Password"
+configure_grafana_datasource() {
+    print_header "Configuring Grafana Data Source"
     
-    echo -e "${CYAN}Set a password for the dashboard:${NC}"
-    echo ""
+    print_info "Waiting for Grafana to start..."
+    sleep 10
     
-    # Install apache2-utils for htpasswd
-    if ! command -v htpasswd &> /dev/null; then
-        print_info "Installing apache2-utils..."
-        apt-get install -y apache2-utils
-    fi
+    # Add Loki as datasource via API
+    curl -s -X POST -H "Content-Type: application/json" \
+        -d '{
+            "name":"Loki",
+            "type":"loki",
+            "url":"http://localhost:3100",
+            "access":"proxy",
+            "isDefault":true
+        }' \
+        http://admin:admin@localhost:3000/api/datasources > /dev/null 2>&1
     
-    # Create password file
-    read -p "Enter dashboard username [admin]: " dashboard_user
-    dashboard_user="${dashboard_user:-admin}"
+    print_success "Loki datasource configured in Grafana"
     
-    htpasswd -c /etc/nginx/.htpasswd "$dashboard_user"
-    
-    print_success "Dashboard password configured for user: $dashboard_user"
+    print_info "Default Grafana credentials:"
+    echo -e "  Username: ${YELLOW}admin${NC}"
+    echo -e "  Password: ${YELLOW}admin${NC}"
+    echo -e "  ${CYAN}(You will be asked to change password on first login)${NC}"
     echo ""
 }
 
@@ -777,9 +806,10 @@ print_completion_info() {
     echo -e "${GREEN}Access your API Gateway at:${NC}"
     echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT${NC}"
     echo ""
-    echo -e "${GREEN}📊 Dashboard Access:${NC}"
-    echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/dashboard${NC}"
-    echo -e "  ${CYAN}Real-time monitoring of all API requests${NC}"
+    echo -e "${GREEN}📊 Grafana Dashboard:${NC}"
+    echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/grafana${NC}"
+    echo -e "  ${CYAN}Username: admin / Password: admin${NC}"
+    echo -e "  ${CYAN}Search logs, filter requests, monitor in real-time${NC}"
     echo ""
     echo -e "${GREEN}Management Commands:${NC}"
     echo -e "  ${YELLOW}api-manage list${NC}                   - List all APIs (no sudo needed)"
@@ -790,13 +820,15 @@ print_completion_info() {
     echo -e "${GREEN}Configuration Files:${NC}"
     echo -e "  APIs config:     ${BLUE}$CONFIG_FILE${NC}"
     echo -e "  Nginx config:    ${BLUE}$NGINX_SITES_AVAILABLE/apis${NC}"
-    echo -e "  Dashboard:       ${BLUE}/var/www/dashboard${NC}"
+    echo -e "  Loki config:     ${BLUE}/opt/loki/loki-config.yaml${NC}"
+    echo -e "  Promtail config: ${BLUE}/opt/promtail/promtail-config.yaml${NC}"
     echo ""
     echo -e "${YELLOW}Next Steps:${NC}"
     echo "  1. Edit $CONFIG_FILE to add your APIs"
     echo "  2. Or use: api-manage add my-service 3000"
     echo "  3. Configuration will auto-reload on changes"
-    echo "  4. Access the dashboard to monitor requests"
+    echo "  4. Access Grafana to search and monitor logs"
+    echo "  5. In Grafana: Explore → Select Loki → Search logs"
     echo ""
 }
 
@@ -831,8 +863,8 @@ main() {
     create_generator_script
     create_management_script
     setup_auto_reload
-    setup_dashboard_password
-    setup_goaccess_dashboard
+    setup_grafana_loki
+    configure_grafana_datasource
     configure_nginx
     print_completion_info
     
