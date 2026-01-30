@@ -551,7 +551,7 @@ setup_grafana_loki() {
     print_header "Setting Up Grafana + Loki Dashboard"
     
     # Create directories
-    mkdir -p /opt/loki /opt/promtail /opt/grafana/data
+    mkdir -p /opt/loki /opt/promtail /opt/grafana/data /opt/grafana/conf
     print_success "Directories created"
     
     # Detect architecture
@@ -692,6 +692,22 @@ RestartSec=10
 WantedBy=multi-user.target
 PROMTAIL_SERVICE
 
+    # Create Grafana configuration for subpath
+    cat > /opt/grafana/conf/custom.ini << GRAFANA_INI
+[server]
+http_port = 3000
+domain = $SERVER_IP
+root_url = http://$SERVER_IP:$LISTEN_PORT/grafana/
+serve_from_sub_path = true
+
+[security]
+admin_user = admin
+admin_password = admin
+
+[auth.anonymous]
+enabled = false
+GRAFANA_INI
+
     # Create Grafana systemd service
     cat > /etc/systemd/system/grafana.service << 'GRAFANA_SERVICE'
 [Unit]
@@ -704,6 +720,7 @@ User=root
 WorkingDirectory=/opt/grafana-install
 Environment="GF_SERVER_HTTP_PORT=3000"
 Environment="GF_PATHS_DATA=/opt/grafana/data"
+Environment="GF_PATHS_CONFIG=/opt/grafana/conf/custom.ini"
 ExecStart=/opt/grafana-install/bin/grafana-server
 Restart=always
 RestartSec=10
