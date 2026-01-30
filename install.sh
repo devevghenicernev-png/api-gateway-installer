@@ -360,7 +360,7 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
     # Grafana Dashboard
     location /grafana/ {
         rewrite ^/grafana/(.*) /\$1 break;
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:3022/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "Upgrade";
@@ -368,7 +368,7 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_redirect http://localhost:3000/ http://\$host:\$server_port/grafana/;
+        proxy_redirect http://localhost:3022/ http://\$host:\$server_port/grafana/;
     }
 DASHBOARD
 
@@ -708,10 +708,10 @@ RestartSec=10
 WantedBy=multi-user.target
 PROMTAIL_SERVICE
 
-    # Create Grafana configuration
+    # Create Grafana configuration (use port 3022 to avoid conflict with user services)
     cat > /opt/grafana/conf/custom.ini << GRAFANA_INI
 [server]
-http_port = 3000
+http_port = 3022
 domain = $SERVER_IP
 
 [security]
@@ -732,7 +732,7 @@ After=network.target loki.service
 Type=simple
 User=root
 WorkingDirectory=/opt/grafana-install
-Environment="GF_SERVER_HTTP_PORT=3000"
+Environment="GF_SERVER_HTTP_PORT=3022"
 Environment="GF_PATHS_DATA=/opt/grafana/data"
 Environment="GF_PATHS_CONFIG=/opt/grafana/conf/custom.ini"
 ExecStart=/opt/grafana-install/bin/grafana-server
