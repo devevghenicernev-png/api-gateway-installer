@@ -50,6 +50,9 @@ confirm_uninstall() {
     echo "  - Nginx site configuration"
     echo "  - Management scripts"
     echo "  - Auto-reload service"
+    echo "  - OpenObserve + Fluent Bit"
+    echo ""
+    print_info "Your services on ports 3000, 3001, 3002, etc. will NOT be touched"
     echo ""
     read -p "Are you sure you want to continue? (yes/no): " confirm
     
@@ -70,8 +73,9 @@ backup_config() {
 }
 
 stop_services() {
-    print_info "Stopping services..."
+    print_info "Stopping API Gateway services..."
     
+    # Stop API Gateway services
     if systemctl is-active --quiet api-gateway-watch; then
         systemctl stop api-gateway-watch
         print_success "Stopped api-gateway-watch service"
@@ -81,6 +85,21 @@ stop_services() {
         systemctl disable api-gateway-watch
         print_success "Disabled api-gateway-watch service"
     fi
+    
+    # Stop OpenObserve/Fluent Bit services (NOT user services!)
+    for service in openobserve fluent-bit goaccess-dashboard; do
+        if systemctl is-active --quiet $service 2>/dev/null; then
+            systemctl stop $service
+            print_success "Stopped $service service"
+        fi
+        
+        if systemctl is-enabled --quiet $service 2>/dev/null; then
+            systemctl disable $service
+            print_success "Disabled $service service"
+        fi
+    done
+    
+    print_info "Your services on ports 3000, 3001, 3002 etc. are still running"
 }
 
 remove_files() {
@@ -108,11 +127,37 @@ remove_files() {
         print_success "Removed api-gateway-watch"
     fi
     
-    # Remove systemd service
-    if [ -f /etc/systemd/system/api-gateway-watch.service ]; then
-        rm /etc/systemd/system/api-gateway-watch.service
-        systemctl daemon-reload
-        print_success "Removed systemd service"
+    # Remove systemd services
+    for service in api-gateway-watch openobserve fluent-bit goaccess-dashboard; do
+        if [ -f /etc/systemd/system/$service.service ]; then
+            rm /etc/systemd/system/$service.service
+            print_success "Removed $service.service"
+        fi
+    done
+    
+    systemctl daemon-reload
+    print_success "Systemd reloaded"
+    
+    # Remove OpenObserve/Fluent Bit directories
+    for dir in /opt/openobserve /var/www/dashboard /etc/goaccess /etc/fluent-bit; do
+        if [ -d "$dir" ]; then
+            rm -rf "$dir"
+            print_success "Removed $dir"
+        fi
+    done
+    
+    # Remove dashboard scripts
+    for script in goaccess-dashboard fluent-bit; do
+        if [ -f /usr/local/bin/$script ]; then
+            rm /usr/local/bin/$script
+            print_success "Removed /usr/local/bin/$script"
+        fi
+    done
+    
+    # Remove password file
+    if [ -f /etc/nginx/.htpasswd ]; then
+        rm /etc/nginx/.htpasswd
+        print_success "Removed dashboard password file"
     fi
     
     # Remove nginx config
@@ -155,9 +200,14 @@ main() {
     echo ""
     print_success "API Gateway has been completely removed"
     echo ""
-    print_info "Note: Dependencies (nginx, jq, inotify-tools) were not removed"
-    print_info "To remove them manually:"
+    print_info "Note: The following were NOT removed:"
+    echo "  - System packages (nginx, jq, inotify-tools, curl, wget)"
+    echo "  - Your services running on ports 3000, 3001, 3002, etc."
+    echo ""
+    print_info "To remove system packages manually:"
     echo "  sudo apt-get remove nginx jq inotify-tools"
+    echo ""
+    print_info "Your backend services are still running and untouched!"
     echo ""
 }
 

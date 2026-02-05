@@ -22,21 +22,23 @@
 
 🎯 USAGE EXAMPLES:
 
-View all APIs:
+View all APIs (no sudo needed):
   api-manage list
 
-Add new API:
+Add new API (requires sudo):
   sudo api-manage add my-service 3000
 
-Add API with custom settings:
+Add API with custom settings (requires sudo):
   sudo api-manage add payment-api 4000 /payments "Payment API"
 
-Remove API:
+Remove API (requires sudo):
   sudo api-manage remove my-service
 
-Enable/Disable:
+Enable/Disable (requires sudo):
   sudo api-manage disable my-service
   sudo api-manage enable my-service
+
+⚠️  IMPORTANT: Use sudo for all commands except 'list'
 
 
 🌐 ACCESS YOUR GATEWAY:

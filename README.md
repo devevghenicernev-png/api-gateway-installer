@@ -10,6 +10,7 @@ Automatic installer for Nginx-based API Gateway system running on port 422.
 - ✅ Creates management CLI tool (`api-manage`)
 - ✅ Sets up auto-reload service (changes apply automatically)
 - ✅ Configures Nginx to serve on port 422
+- ✅ Installs OpenObserve for log analytics and monitoring
 - ✅ Backs up existing configurations
 - ✅ Handles re-installation (won't break existing setup)
 
@@ -49,12 +50,13 @@ That's it! The script will:
 
 ### View all APIs
 ```bash
+# No sudo needed for viewing
 api-manage list
 ```
 
 ### Add new API
 ```bash
-# Basic: api-manage add <name> <port>
+# Basic: sudo api-manage add <name> <port>
 sudo api-manage add my-service 3000
 
 # With custom path and description
@@ -63,19 +65,24 @@ sudo api-manage add payment-api 4000 /payments "Payment processing API"
 
 ### Remove API
 ```bash
+# Requires sudo
 sudo api-manage remove my-service
 ```
 
 ### Enable/Disable API
 ```bash
+# Requires sudo
 sudo api-manage disable my-service
 sudo api-manage enable my-service
 ```
 
 ### Reload configuration manually
 ```bash
+# Requires sudo
 sudo api-manage reload
 ```
+
+> **Note:** All configuration changes require root privileges. Use `sudo` for add/remove/enable/disable/reload commands. Only `list` can be run without sudo.
 
 ## Configuration
 
@@ -145,7 +152,13 @@ sudo nginx -t
 sudo netstat -tlnp | grep 422
 ```
 
-### View Nginx logs
+### View logs in OpenObserve
+Access the dashboard at:
+```
+http://YOUR_SERVER_IP:422/observe/
+```
+
+Or view raw Nginx logs:
 ```bash
 sudo tail -f /var/log/nginx/error.log
 sudo tail -f /var/log/nginx/access.log
@@ -160,6 +173,8 @@ sudo generate-nginx-config
 ```bash
 sudo systemctl restart nginx
 sudo systemctl restart api-gateway-watch
+sudo systemctl restart openobserve
+sudo systemctl restart fluent-bit
 ```
 
 ## Uninstallation
@@ -167,25 +182,18 @@ sudo systemctl restart api-gateway-watch
 To completely remove the API Gateway:
 
 ```bash
-# Stop services
-sudo systemctl stop api-gateway-watch
-sudo systemctl disable api-gateway-watch
-
-# Remove files
-sudo rm -rf /etc/api-gateway
-sudo rm /usr/local/bin/generate-nginx-config
-sudo rm /usr/local/bin/api-manage
-sudo rm /usr/local/bin/api-gateway-watch
-sudo rm /etc/systemd/system/api-gateway-watch.service
-sudo rm /etc/nginx/sites-available/apis
-sudo rm /etc/nginx/sites-enabled/apis
-
-# Reload systemd
-sudo systemctl daemon-reload
-
-# Restart nginx
-sudo systemctl restart nginx
+chmod +x uninstall.sh
+sudo ./uninstall.sh
 ```
+
+This will remove:
+- API Gateway configuration
+- Nginx configuration
+- Management scripts
+- OpenObserve and Fluent Bit
+- Auto-reload service
+
+Your backend services will remain untouched.
 
 ## Files Created
 
@@ -197,6 +205,8 @@ sudo systemctl restart nginx
 | `/usr/local/bin/api-manage` | Management CLI tool |
 | `/usr/local/bin/api-gateway-watch` | Auto-reload watcher |
 | `/etc/systemd/system/api-gateway-watch.service` | Systemd service |
+| `/opt/openobserve/` | OpenObserve installation and data |
+| `/etc/fluent-bit/fluent-bit.conf` | Log collector configuration |
 
 ## Re-installation
 
