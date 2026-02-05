@@ -6,6 +6,7 @@
 DEPLOY_CONFIG_DIR="/etc/api-gateway/deployments"
 DEPLOY_LOG_DIR="/var/log/api-gateway/deployments"
 DEPLOY_STATUS_FILE="/var/lib/api-gateway/deployment-status.json"
+APIS_CONFIG="/etc/api-gateway/apis.json"
 
 # Initialize deployment manager
 init_deployment_manager() {
@@ -74,6 +75,27 @@ EOF
     
     print_success "Deployment configuration created for $service_name"
     print_info "Config file: $config_file"
+    
+    # Auto-register in nginx (apis.json) so service is exposed at /$service_name
+    if [ -f "$APIS_CONFIG" ] && command -v jq &>/dev/null; then
+        if jq -e ".apis[] | select(.name == \"$service_name\")" "$APIS_CONFIG" &>/dev/null; then
+            print_info "Nginx route already exists for $service_name (port updated if changed)"
+            jq --arg name "$service_name" --argjson port "$port" \
+                '.apis |= map(if .name == $name then .port = $port else . end)' \
+                "$APIS_CONFIG" > "${APIS_CONFIG}.tmp" && mv "${APIS_CONFIG}.tmp" "$APIS_CONFIG"
+        else
+            local nginx_path="/$service_name"
+            jq ".apis += [{\"name\": \"$service_name\", \"path\": \"$nginx_path\", \"port\": $port, \"description\": \"Deployed from GitHub\", \"enabled\": true}]" \
+                "$APIS_CONFIG" > "${APIS_CONFIG}.tmp" && mv "${APIS_CONFIG}.tmp" "$APIS_CONFIG"
+            print_success "Nginx route added: ${nginx_path}/ → localhost:${port}"
+        fi
+        if [ -x /usr/local/bin/generate-nginx-config ]; then
+            /usr/local/bin/generate-nginx-config 2>/dev/null && print_info "Nginx config regenerated" || true
+        fi
+        [ -x /usr/local/bin/generate-fluentbit-config ] && /usr/local/bin/generate-fluentbit-config 2>/dev/null || true
+    else
+        print_warning "Run: api-manage add $service_name $port /$service_name  (to expose via nginx)"
+    fi
     
     # Update deployment status
     update_deployment_status "$service_name" "configured" "Deployment configuration created"
@@ -352,6 +374,18 @@ remove_deployment() {
     if [ -d "$deploy_path" ]; then
         print_info "Removing deployment files..."
         rm -rf "$deploy_path"
+    fi
+    
+    # Unregister from nginx
+    if [ -f "$APIS_CONFIG" ] && command -v jq &>/dev/null; then
+        if jq -e ".apis[] | select(.name == \"$service_name\")" "$APIS_CONFIG" &>/dev/null; then
+            jq --arg name "$service_name" '.apis |= map(select(.name != $name))' "$APIS_CONFIG" > "${APIS_CONFIG}.tmp" && mv "${APIS_CONFIG}.tmp" "$APIS_CONFIG"
+            print_info "Nginx route removed for $service_name"
+            if [ -x /usr/local/bin/generate-nginx-config ]; then
+                /usr/local/bin/generate-nginx-config 2>/dev/null || true
+            fi
+            [ -x /usr/local/bin/generate-fluentbit-config ] && /usr/local/bin/generate-fluentbit-config 2>/dev/null || true
+        fi
     fi
     
     # Remove configuration

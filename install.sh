@@ -970,6 +970,40 @@ REMOVE_SCRIPT
     chmod +x /opt/api-gateway/scripts/deploy-service.sh
     chmod +x /opt/api-gateway/scripts/remove-service.sh
     
+    # Start dashboard automatically so it's available right after install
+    if [ -f /opt/api-gateway/web-ui/server.js ] && command_exists node; then
+        print_info "Setting up and starting web dashboard..."
+        mkdir -p /var/log/api-gateway
+        cat > /etc/systemd/system/api-gateway-dashboard.service << 'DASHBOARD_SVC'
+[Unit]
+Description=API Gateway Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/api-gateway/web-ui
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+StandardOutput=append:/var/log/api-gateway/dashboard.log
+StandardError=append:/var/log/api-gateway/dashboard.log
+
+[Install]
+WantedBy=multi-user.target
+DASHBOARD_SVC
+        systemctl daemon-reload
+        systemctl enable api-gateway-dashboard
+        systemctl start api-gateway-dashboard
+        if systemctl is-active --quiet api-gateway-dashboard 2>/dev/null; then
+            print_success "Web dashboard started (available at /dashboard/)"
+        else
+            print_warning "Dashboard failed to start. Run: api-manage-extended dashboard start"
+        fi
+    fi
+    
     print_success "Extended modules installed successfully"
 }
 
@@ -1395,7 +1429,10 @@ print_completion_info() {
     echo -e "${GREEN}Access your API Gateway at:${NC}"
     echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT${NC}"
     echo ""
-    echo -e "${GREEN}📊 OpenObserve Dashboard:${NC}"
+    echo -e "${GREEN}🖥️ Deployment Dashboard:${NC}"
+    echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/dashboard/${NC}"
+    echo ""
+    echo -e "${GREEN}📊 OpenObserve:${NC}"
     echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/observe/${NC}"
     
     # Display OpenObserve credentials
@@ -1433,14 +1470,14 @@ print_completion_info() {
     echo -e "${YELLOW}Extended Features:${NC}"
     echo "  • GitHub Auto-Deploy: api-manage-extended deploy add <name> <repo> <branch> <port>"
     echo "  • Webhook Server: api-manage-extended webhook start"
-    echo "  • Web Dashboard: api-manage-extended dashboard start"
+    echo "  • Web Dashboard: http://$SERVER_IP:$LISTEN_PORT/dashboard/ (auto-started)"
     echo "  • System Status: api-manage-extended status"
     echo ""
     echo -e "${YELLOW}Quick Start with Auto-Deploy:${NC}"
     echo "  1. Add deployment: api-manage-extended deploy add my-app https://github.com/user/repo main 3000"
     echo "  2. Start webhook server: api-manage-extended webhook start"
     echo "  3. Setup GitHub webhook: api-manage-extended webhook setup my-app"
-    echo "  4. Start web dashboard: api-manage-extended dashboard start"
+    echo "  4. Dashboard ready at /dashboard/"
     echo ""
 }
 
