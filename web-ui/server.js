@@ -86,15 +86,14 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(WEB_UI_DIR, 'index.html'));
 });
 
-// Serve deployment dashboard
-app.get('/deployments', (req, res) => res.redirect(301, '/deployments/'));
-app.get('/deployments/', (req, res) => {
-    res.sendFile(path.join(WEB_UI_DIR, 'dashboard.html'));
-});
+// Serve deployment dashboard (no redirect to avoid loops)
+const sendDashboard = (req, res) => res.sendFile(path.join(WEB_UI_DIR, 'dashboard.html'));
+app.get('/deployments', sendDashboard);
+app.get('/deployments/', sendDashboard);
 
-// Backward compat: /dashboard -> /deployments
-app.get('/dashboard', (req, res) => res.redirect(301, '/deployments/'));
-app.get('/dashboard/', (req, res) => res.redirect(301, '/deployments/'));
+// Backward compat: /dashboard serves same dashboard (no redirect to avoid loops)
+app.get('/dashboard', sendDashboard);
+app.get('/dashboard/', sendDashboard);
 
 // Get APIs list for landing page
 app.get('/api/landing-apis', async (req, res) => {
