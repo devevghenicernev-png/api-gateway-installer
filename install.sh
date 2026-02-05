@@ -53,6 +53,10 @@ print_error() {
     echo -e "${RED}✗${NC} $1"
 }
 
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 # Safe apt function with lock checking and retries
 safe_apt() {
     local operation="$1"
