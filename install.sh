@@ -349,16 +349,6 @@ NGINX_CONFIG="/etc/nginx/sites-available/apis"
 LISTEN_PORT="$LISTEN_PORT"
 SERVER_IP="$SERVER_IP"
 
-# Generate HTML content from JSON
-HTML_APIS=""
-while IFS= read -r api; do
-    NAME=\$(echo "\$api" | /usr/bin/jq -r '.name')
-    APATH=\$(echo "\$api" | /usr/bin/jq -r '.path')
-    PORT=\$(echo "\$api" | /usr/bin/jq -r '.port')
-    DESC=\$(echo "\$api" | /usr/bin/jq -r '.description')
-    HTML_APIS="\${HTML_APIS}<div class=\\"api-item\\"><a href=\\"\${APATH}/\\">\${APATH}</a> - \${DESC} (port: \${PORT})</div>"
-done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
-
 # Create nginx config
 /bin/cat > "\$NGINX_CONFIG" << 'ENDCONFIG'
 # ---- API Gateway verbose logging ----
@@ -450,54 +440,15 @@ server {
     listen $LISTEN_PORT default_server;
     server_name _;
 
-    location = / {
-        add_header Content-Type text/html;
-        return 200 '<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>API Gateway</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-        .container { background: white; padding: 30px; border-radius: 8px; max-width: 800px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; margin-bottom: 10px; }
-        .info { color: #666; margin-bottom: 20px; font-size: 14px; }
-        h2 { color: #555; margin-top: 30px; margin-bottom: 15px; font-size: 18px; border-bottom: 2px solid #eee; padding-bottom: 8px; }
-        .api-item { padding: 15px; margin: 10px 0; background: #f9f9f9; border-left: 4px solid #4CAF50; border-radius: 4px; }
-        .api-item a { color: #2196F3; text-decoration: none; font-weight: bold; font-size: 16px; }
-        .api-item a:hover { text-decoration: underline; }
-        .monitoring-item { padding: 15px; margin: 10px 0; background: #fff9f0; border-left: 4px solid #FF9800; border-radius: 4px; }
-        .monitoring-item a { color: #F57C00; text-decoration: none; font-weight: bold; font-size: 16px; }
-        .monitoring-item a:hover { text-decoration: underline; }
-        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #999; font-size: 12px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 API Gateway</h1>
-        <div class="info">Server: <strong>$SERVER_IP:$LISTEN_PORT</strong></div>
-        
-        <h2>📡 APIs</h2>
-ENDCONFIG
-
-# Add generated HTML
-/bin/echo "        \${HTML_APIS}" >> "\$NGINX_CONFIG"
-
-# Continue config
-/bin/cat >> "\$NGINX_CONFIG" << 'ENDCONFIG'
-        
-        <h2>📊 Monitoring & Logs</h2>
-        <div class="monitoring-item">
-            <a href="/dashboard/" target="_blank">🖥️ Deployment Dashboard</a> - Manage deployments, view status and logs
-        </div>
-        <div class="monitoring-item">
-            <a href="/observe/" target="_blank">📈 OpenObserve Dashboard</a> - View logs, search, analyze in real-time
-        </div>
-        
-        <div class="footer">Auto-generated configuration | Use: <code>api-manage</code></div>
-    </div>
-</body>
-</html>';
+    # Gateway UI (home, deployments) - Node.js
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Prefix "";
     }
 ENDCONFIG
 
@@ -579,18 +530,17 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
         proxy_send_timeout 86400s;
     }
     
-    # Dashboard (Node.js on 8080) - single port access
+    # Dashboard (Node.js on 8080) - /deployments/ is main, /dashboard/ redirects
     location /dashboard/ {
-        proxy_pass http://127.0.0.1:8080/;
+        proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Prefix /dashboard;
     }
     location = /dashboard {
-        return 301 /dashboard/;
+        return 301 /deployments/;
     }
     
     # GitHub Webhook (Node.js on 9876) - single port access
@@ -1008,7 +958,7 @@ DASHBOARD_SVC
         systemctl enable api-gateway-dashboard
         systemctl start api-gateway-dashboard
         if systemctl is-active --quiet api-gateway-dashboard 2>/dev/null; then
-            print_success "Web dashboard started (available at /dashboard/)"
+            print_success "Web dashboard started (available at / and /deployments/)"
         else
             print_warning "Dashboard failed to start. Run: api-manage-extended dashboard start"
         fi
@@ -1439,8 +1389,9 @@ print_completion_info() {
     echo -e "${GREEN}Access your API Gateway at:${NC}"
     echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT${NC}"
     echo ""
-    echo -e "${GREEN}🖥️ Deployment Dashboard:${NC}"
-    echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/dashboard/${NC}"
+    echo -e "${GREEN}🖥️ Gateway UI:${NC}"
+    echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/${NC} (home)"
+    echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/deployments/${NC} (deployments)"
     echo ""
     echo -e "${GREEN}📊 OpenObserve:${NC}"
     echo -e "  ${BLUE}http://$SERVER_IP:$LISTEN_PORT/observe/${NC}"
@@ -1480,14 +1431,14 @@ print_completion_info() {
     echo -e "${YELLOW}Extended Features:${NC}"
     echo "  • GitHub Auto-Deploy: api-manage-extended deploy add <name> <repo> <branch> <port>"
     echo "  • Webhook Server: api-manage-extended webhook start"
-    echo "  • Web Dashboard: http://$SERVER_IP:$LISTEN_PORT/dashboard/ (auto-started)"
+    echo "  • Web UI: http://$SERVER_IP:$LISTEN_PORT/ (auto-started)"
     echo "  • System Status: api-manage-extended status"
     echo ""
     echo -e "${YELLOW}Quick Start with Auto-Deploy:${NC}"
     echo "  1. Add deployment: api-manage-extended deploy add my-app https://github.com/user/repo main 3000"
     echo "  2. Start webhook server: api-manage-extended webhook start"
     echo "  3. Setup GitHub webhook: api-manage-extended webhook setup my-app"
-    echo "  4. Dashboard ready at /dashboard/"
+    echo "  4. UI ready at / and /deployments/"
     echo ""
 }
 

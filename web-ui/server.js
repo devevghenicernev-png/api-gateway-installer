@@ -15,6 +15,7 @@ const cors = require('cors');
 const API_PORT = process.env.PORT || 8080;
 const DEPLOY_CONFIG_DIR = '/etc/api-gateway/deployments';
 const DEPLOY_STATUS_FILE = '/var/lib/api-gateway/deployment-status.json';
+const APIS_CONFIG = '/etc/api-gateway/apis.json';
 const LOG_DIR = '/var/log/api-gateway';
 const WEB_UI_DIR = __dirname;
 
@@ -80,9 +81,30 @@ const checkServiceStatus = async (serviceName, processManager = 'systemd') => {
 
 // API Routes
 
-// Serve main dashboard
+// Serve home page
 app.get('/', (req, res) => {
+    res.sendFile(path.join(WEB_UI_DIR, 'index.html'));
+});
+
+// Serve deployment dashboard
+app.get('/deployments', (req, res) => res.redirect(301, '/deployments/'));
+app.get('/deployments/', (req, res) => {
     res.sendFile(path.join(WEB_UI_DIR, 'dashboard.html'));
+});
+
+// Backward compat: /dashboard -> /deployments
+app.get('/dashboard', (req, res) => res.redirect(301, '/deployments/'));
+app.get('/dashboard/', (req, res) => res.redirect(301, '/deployments/'));
+
+// Get APIs list for landing page
+app.get('/api/landing-apis', async (req, res) => {
+    try {
+        const data = await loadJsonFile(APIS_CONFIG, { apis: [] });
+        const apis = (data.apis || []).filter(a => a.enabled !== false);
+        res.json({ success: true, apis });
+    } catch (e) {
+        res.json({ success: true, apis: [] });
+    }
 });
 
 // Get all deployments
