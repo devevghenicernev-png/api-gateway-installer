@@ -32,6 +32,7 @@ API MANAGEMENT:
     reload                          Reload nginx configuration
 
 DEPLOYMENT MANAGEMENT:
+    deploy setup-private            Wizard: set up SSH key for private GitHub repos
     deploy add <name> <repo> [branch] <port> [build_cmd] [start_cmd]
                                     Add deployment configuration
     deploy remove <name>            Remove deployment
@@ -358,6 +359,61 @@ restore_config() {
     fi
 }
 
+# Wizard: set up SSH key for private GitHub repos
+deploy_setup_private() {
+    print_header "Setup for private GitHub repositories"
+    
+    # Use root's .ssh so deploy (run as root) finds the key
+    local ssh_dir="/root/.ssh"
+    local key_file="$ssh_dir/id_ed25519"
+    local key_pub="$ssh_dir/id_ed25519.pub"
+    
+    mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir"
+    
+    if [ -f "$key_file" ]; then
+        print_success "SSH key already exists: $key_file"
+        echo ""
+        print_info "Your public key (add this to GitHub if you haven't yet):"
+        echo ""
+        echo -e "${CYAN}----------------------------------------${NC}"
+        cat "$key_pub"
+        echo -e "${CYAN}----------------------------------------${NC}"
+    else
+        print_info "Generating new SSH key (no passphrase, for non-interactive deploy)..."
+        ssh-keygen -t ed25519 -C "api-gateway-deploy" -f "$key_file" -N ""
+        chmod 600 "$key_file"
+        chmod 644 "$key_pub"
+        print_success "SSH key created: $key_file"
+        echo ""
+        print_info "Your public key (copy and add to GitHub):"
+        echo ""
+        echo -e "${CYAN}----------------------------------------${NC}"
+        cat "$key_pub"
+        echo -e "${CYAN}----------------------------------------${NC}"
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}What to do in GitHub:${NC}"
+    echo "  1. Open your repository on GitHub"
+    echo "  2. Go to: Settings → Deploy keys"
+    echo "  3. Click \"Add deploy key\""
+    echo "  4. Title: e.g. Orange Pi or this server name"
+    echo "  5. Key: paste the line above (the whole line from ssh-ed25519 to the end)"
+    echo "  6. Leave \"Allow write access\" unchecked (read is enough for deploy)"
+    echo "  7. Click \"Add key\""
+    echo ""
+    echo -e "${YELLOW}Then add the deployment (use SSH URL, not HTTPS):${NC}"
+    echo "  On this server run:"
+    echo ""
+    echo -e "  ${GREEN}api-manage-extended deploy add <name> git@github.com:USERNAME/REPO.git main <port>${NC}"
+    echo ""
+    echo "  Replace: <name> = service name, USERNAME = your GitHub user/org, REPO = repo name, <port> = app port (e.g. 3000)"
+    echo ""
+    echo -e "${YELLOW}Get the SSH URL in GitHub:${NC} repo → green \"Code\" button → tab \"SSH\" → copy"
+    echo ""
+}
+
 # Main command dispatcher
 main() {
     if [ $# -eq 0 ]; then
@@ -394,6 +450,9 @@ main() {
             local deploy_cmd="$1"
             shift
             case "$deploy_cmd" in
+                "setup-private")
+                    deploy_setup_private
+                    ;;
                 "add")
                     add_deployment "$@"
                     ;;
