@@ -122,6 +122,14 @@ EOF
     print_success "Deployment configuration created for $service_name"
     print_info "Config file: $config_file"
     
+    # Ensure webhook server is running (for auto-deploy on push)
+    if [ -f /etc/systemd/system/api-gateway-webhook.service ]; then
+        if ! systemctl is-active --quiet api-gateway-webhook 2>/dev/null; then
+            systemctl start api-gateway-webhook 2>/dev/null && print_info "Webhook server started for auto-deploy on push"
+        fi
+        print_info "Configure GitHub webhook: api-manage-extended webhook setup $service_name"
+    fi
+    
     # Auto-register in nginx (apis.json) so service is exposed at /$service_name
     if [ -f "$APIS_CONFIG" ] && command -v jq &>/dev/null; then
         if jq -e ".apis[] | select(.name == \"$service_name\")" "$APIS_CONFIG" &>/dev/null; then

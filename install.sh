@@ -317,19 +317,11 @@ create_initial_config() {
         print_info "Creating default configuration..."
         cat > "$CONFIG_FILE" << 'EOF'
 {
-  "apis": [
-    {
-      "name": "example-api",
-      "path": "/api",
-      "port": 3000,
-      "description": "Example API Service",
-      "enabled": true
-    }
-  ]
+  "apis": []
 }
 EOF
         print_success "Default configuration created"
-        print_info "Edit $CONFIG_FILE to add your APIs"
+        print_info "Add APIs: api-manage add <name> <port> [path]"
     fi
 }
 
@@ -964,6 +956,40 @@ DASHBOARD_SVC
         fi
     fi
     
+    # Start webhook server automatically for auto-deploy on push
+    if [ -f /opt/api-gateway/web-ui/webhook-server.js ] && command_exists node; then
+        print_info "Setting up and starting webhook server for auto-deploy..."
+        mkdir -p /var/log/api-gateway
+        cat > /etc/systemd/system/api-gateway-webhook.service << 'WEBHOOK_SVC'
+[Unit]
+Description=API Gateway GitHub Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/api-gateway/web-ui
+ExecStart=/usr/bin/node webhook-server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+StandardOutput=append:/var/log/api-gateway/webhook.log
+StandardError=append:/var/log/api-gateway/webhook.log
+
+[Install]
+WantedBy=multi-user.target
+WEBHOOK_SVC
+        systemctl daemon-reload
+        systemctl enable api-gateway-webhook
+        systemctl start api-gateway-webhook
+        if systemctl is-active --quiet api-gateway-webhook 2>/dev/null; then
+            print_success "Webhook server started (auto-deploy on push when GitHub webhook is configured)"
+        else
+            print_warning "Webhook failed to start. Run: api-manage-extended webhook start"
+        fi
+    fi
+    
     print_success "Extended modules installed successfully"
 }
 
@@ -1430,15 +1456,14 @@ print_completion_info() {
     echo ""
     echo -e "${YELLOW}Extended Features:${NC}"
     echo "  • GitHub Auto-Deploy: api-manage-extended deploy add <name> <repo> <branch> <port>"
-    echo "  • Webhook Server: api-manage-extended webhook start"
+    echo "  • Webhook Server: auto-started (configure GitHub: api-manage-extended webhook setup <name>)"
     echo "  • Web UI: http://$SERVER_IP:$LISTEN_PORT/ (auto-started)"
     echo "  • System Status: api-manage-extended status"
     echo ""
     echo -e "${YELLOW}Quick Start with Auto-Deploy:${NC}"
     echo "  1. Add deployment: api-manage-extended deploy add my-app https://github.com/user/repo main 3000"
-    echo "  2. Start webhook server: api-manage-extended webhook start"
-    echo "  3. Setup GitHub webhook: api-manage-extended webhook setup my-app"
-    echo "  4. UI ready at / and /deployments/"
+    echo "  2. Setup GitHub webhook: api-manage-extended webhook setup <name>"
+    echo "  3. UI ready at / and /deployments/"
     echo ""
 }
 
