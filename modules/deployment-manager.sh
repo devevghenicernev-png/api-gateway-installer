@@ -25,6 +25,52 @@ init_deployment_manager() {
     print_success "Deployment manager initialized"
 }
 
+# Use Node version from .nvmrc or .node-version in project (for build + PM2)
+# Call from deploy path. Exports NODE_BIN for later use in same shell.
+use_project_node_version() {
+    local deploy_path="${1:-.}"
+    local node_version_file=""
+    
+    [ -f "$deploy_path/.nvmrc" ] && node_version_file="$deploy_path/.nvmrc"
+    [ -z "$node_version_file" ] && [ -f "$deploy_path/.node-version" ] && node_version_file="$deploy_path/.node-version"
+    
+    [ -z "$node_version_file" ] && return 0
+    
+    local required=$(grep -v '^#' "$node_version_file" 2>/dev/null | head -1 | tr -d '[:space:]')
+    [ -z "$required" ] && return 0
+    
+    echo "Project requires Node: $required (from $(basename $node_version_file))"
+    
+    # nvm (load if not already)
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    if [ -s "$NVM_DIR/nvm.sh" ]; then
+        . "$NVM_DIR/nvm.sh"
+        if nvm install "$required" 2>/dev/null; then
+            nvm use "$required" 2>/dev/null && echo "Using Node $(node -v) via nvm" && return 0
+        fi
+        nvm use "$required" 2>/dev/null && echo "Using Node $(node -v) via nvm" && return 0
+    fi
+    
+    # fnm
+    if command -v fnm &>/dev/null; then
+        if fnm install "$required" 2>/dev/null; then
+            eval "$(fnm env)" && fnm use "$required" 2>/dev/null && echo "Using Node $(node -v) via fnm" && return 0
+        fi
+    fi
+    
+    # asdf
+    if command -v asdf &>/dev/null; then
+        if asdf plugin list 2>/dev/null | grep -q nodejs; then
+            asdf install nodejs "$required" 2>/dev/null
+            asdf local nodejs "$required" 2>/dev/null && echo "Using Node $(node -v) via asdf" && return 0
+        fi
+    fi
+    
+    local current=$(node -v 2>/dev/null)
+    echo "Warning: no nvm/fnm/asdf found. Using system Node ${current}. Add .nvmrc support: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+    return 0
+}
+
 # Detect preferred process manager (pm2 if available, else systemd)
 detect_process_manager() {
     if command -v pm2 &>/dev/null; then
@@ -148,6 +194,9 @@ deploy_service() {
             rm -rf ./*
             git clone -b "$branch" "$github_repo" .
         fi
+        
+        # Switch to Node version from .nvmrc/.node-version if present (nvm/fnm/asdf)
+        use_project_node_version "$deploy_path"
         
         # Run build command
         echo "Running build command: $build_command"

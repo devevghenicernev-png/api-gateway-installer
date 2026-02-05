@@ -34,7 +34,7 @@ API MANAGEMENT:
 DEPLOYMENT MANAGEMENT:
     deploy setup-private            Wizard: set up SSH key for private GitHub repos
     deploy add <name> <repo> [branch] <port> [build_cmd] [start_cmd]
-                                    Add deployment (auto-registers nginx: /<name>/)
+                                    Add deployment (auto nginx; .nvmrc = Node version)
     deploy remove <name>            Remove deployment
     deploy list                     List all deployments
     deploy status [name]            Show deployment status

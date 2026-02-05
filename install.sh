@@ -936,6 +936,16 @@ install_extended_modules() {
         }
     fi
     
+    # Install nvm for multi-Node-version support (deploy reads .nvmrc from repos)
+    local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+    if [ ! -d "$nvm_dir" ] && [ -n "$HOME" ]; then
+        print_info "Installing nvm (Node Version Manager) for .nvmrc support..."
+        export NVM_DIR="$nvm_dir"
+        curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash -s >/dev/null 2>&1 && {
+            print_success "nvm installed (use .nvmrc in repos to pin Node version)"
+        } || print_warning "nvm install skipped (optional)"
+    fi
+    
     # Create symlink for extended API manager
     if [ -f "/opt/api-gateway/scripts/api-manage-extended" ]; then
         ln -sf /opt/api-gateway/scripts/api-manage-extended /usr/local/bin/api-manage-extended
