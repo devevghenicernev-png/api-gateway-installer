@@ -141,7 +141,7 @@ dashboard_start() {
     # Install Node.js if needed
     if ! command_exists node; then
         print_info "Installing Node.js..."
-        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
         safe_apt install nodejs
     fi
     

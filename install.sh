@@ -564,8 +564,8 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
         return 301 /observe/;
     }
     
-    # Dashboard API (same backend as dashboard - for fetch() from /dashboard/)
-    location /api/ {
+    # Dashboard API (dedicated path to avoid conflict with user APIs at /api/)
+    location /gateway-api/ {
         proxy_pass http://127.0.0.1:8080/api/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -902,8 +902,8 @@ install_extended_modules() {
     
     # Install Node.js for web dashboard and webhook server
     if ! command_exists node; then
-        print_info "Installing Node.js..."
-        curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1
+        print_info "Installing Node.js 22 LTS..."
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
         if safe_apt install nodejs; then
             print_success "Node.js installed"
         else

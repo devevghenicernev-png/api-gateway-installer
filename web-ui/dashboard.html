@@ -439,7 +439,7 @@
         // Load deployments data
         async function loadDeployments() {
             try {
-                const response = await fetch('/api/deployments');
+                const response = await fetch('/gateway-api/deployments');
                 const data = await response.json();
                 
                 deployments = data.deployments || {};
@@ -569,7 +569,7 @@
             if (!confirm(`Deploy ${serviceName}?`)) return;
             
             try {
-                const response = await fetch(`/api/deploy/${serviceName}`, {
+                const response = await fetch(`/gateway-api/deploy/${serviceName}`, {
                     method: 'POST'
                 });
                 
@@ -589,7 +589,7 @@
             if (!confirm(`Restart ${serviceName}?`)) return;
             
             try {
-                const response = await fetch(`/api/restart/${serviceName}`, {
+                const response = await fetch(`/gateway-api/restart/${serviceName}`, {
                     method: 'POST'
                 });
                 
@@ -609,7 +609,7 @@
             if (!confirm(`Remove deployment for ${serviceName}? This will stop the service and delete all configuration.`)) return;
             
             try {
-                const response = await fetch(`/api/deployments/${serviceName}`, {
+                const response = await fetch(`/gateway-api/deployments/${serviceName}`, {
                     method: 'DELETE'
                 });
                 
@@ -635,7 +635,7 @@
             }
             
             try {
-                const response = await fetch(`/api/logs/${serviceName}`);
+                const response = await fetch(`/gateway-api/logs/${serviceName}`);
                 const logs = await response.text();
                 
                 logViewer.textContent = logs || 'No logs available';
