@@ -457,6 +457,7 @@ main() {
                     ;;
                 "add")
                     add_deployment "$@"
+                    [ $? -eq 0 ] && show_webhook_instructions "$1"
                     ;;
                 "remove")
                     remove_deployment "$@"
@@ -506,8 +507,14 @@ main() {
                     stop_webhook_server
                     ;;
                 "status")
-                    if [ -f "$WEBHOOK_PID_FILE" ] && kill -0 "$(cat "$WEBHOOK_PID_FILE")" 2>/dev/null; then
-                        print_success "Webhook server is running (PID: $(cat "$WEBHOOK_PID_FILE"))"
+                    if is_webhook_running; then
+                        if [ -f "$WEBHOOK_PID_FILE" ] && kill -0 "$(cat "$WEBHOOK_PID_FILE")" 2>/dev/null; then
+                            print_success "Webhook server is running (PID: $(cat "$WEBHOOK_PID_FILE"))"
+                        elif systemctl is-active --quiet api-gateway-webhook 2>/dev/null; then
+                            print_success "Webhook server is running (systemd)"
+                        else
+                            print_success "Webhook server is running (port $WEBHOOK_PORT)"
+                        fi
                         print_info "Port: $WEBHOOK_PORT"
                     else
                         print_error "Webhook server is not running"
