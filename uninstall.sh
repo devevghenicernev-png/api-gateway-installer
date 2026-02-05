@@ -48,9 +48,12 @@ confirm_uninstall() {
     echo "The following will be removed:"
     echo "  - Configuration directory: /etc/api-gateway"
     echo "  - Nginx site configuration"
-    echo "  - Management scripts"
-    echo "  - Auto-reload service"
+    echo "  - Management scripts (api-manage, api-manage-extended, generate-nginx-config, generate-fluentbit-config)"
+    echo "  - Auto-reload service (api-gateway-watch)"
+    echo "  - Web dashboard + webhook server (api-gateway-dashboard, api-gateway-webhook)"
     echo "  - OpenObserve + Fluent Bit"
+    echo "  - Extended modules: /opt/api-gateway"
+    echo "  - Deployment data: /var/lib/api-gateway, /var/log/api-gateway, /opt/deployments"
     echo ""
     print_info "Your services on ports 3000, 3001, 3002, etc. will NOT be touched"
     echo ""
@@ -86,6 +89,18 @@ stop_services() {
         print_success "Disabled api-gateway-watch service"
     fi
     
+    # Stop dashboard and webhook (extended)
+    for service in api-gateway-dashboard api-gateway-webhook; do
+        if systemctl is-active --quiet $service 2>/dev/null; then
+            systemctl stop $service
+            print_success "Stopped $service service"
+        fi
+        if systemctl is-enabled --quiet $service 2>/dev/null; then
+            systemctl disable $service
+            print_success "Disabled $service service"
+        fi
+    done
+    
     # Stop OpenObserve/Fluent Bit services (NOT user services!)
     for service in openobserve fluent-bit goaccess-dashboard; do
         if systemctl is-active --quiet $service 2>/dev/null; then
@@ -98,6 +113,18 @@ stop_services() {
             print_success "Disabled $service service"
         fi
     done
+    
+    # Remove PM2 apps that were created by api-gateway deploy (optional)
+    if command -v pm2 &>/dev/null && [ -d /etc/api-gateway/deployments ]; then
+        for config in /etc/api-gateway/deployments/*.json; do
+            [ -f "$config" ] || continue
+            name=$(basename "$config" .json)
+            if pm2 describe "$name" &>/dev/null; then
+                pm2 delete "$name" 2>/dev/null && print_success "Removed PM2 app: $name" || true
+            fi
+        done
+        pm2 save 2>/dev/null || true
+    fi
     
     print_info "Your services on ports 3000, 3001, 3002 etc. are still running"
 }
@@ -127,8 +154,18 @@ remove_files() {
         print_success "Removed api-gateway-watch"
     fi
     
+    if [ -f /usr/local/bin/generate-fluentbit-config ]; then
+        rm /usr/local/bin/generate-fluentbit-config
+        print_success "Removed generate-fluentbit-config"
+    fi
+    
+    if [ -f /usr/local/bin/api-manage-extended ]; then
+        rm /usr/local/bin/api-manage-extended
+        print_success "Removed api-manage-extended"
+    fi
+    
     # Remove systemd services
-    for service in api-gateway-watch openobserve fluent-bit goaccess-dashboard; do
+    for service in api-gateway-watch api-gateway-dashboard api-gateway-webhook openobserve fluent-bit goaccess-dashboard; do
         if [ -f /etc/systemd/system/$service.service ]; then
             rm /etc/systemd/system/$service.service
             print_success "Removed $service.service"
@@ -137,6 +174,14 @@ remove_files() {
     
     systemctl daemon-reload
     print_success "Systemd reloaded"
+    
+    # Remove extended modules and deployment data
+    for dir in /opt/api-gateway /opt/deployments /var/lib/api-gateway /var/log/api-gateway; do
+        if [ -d "$dir" ]; then
+            rm -rf "$dir"
+            print_success "Removed $dir"
+        fi
+    done
     
     # Remove OpenObserve/Fluent Bit directories
     for dir in /opt/openobserve /var/www/dashboard /etc/goaccess /etc/fluent-bit; do
