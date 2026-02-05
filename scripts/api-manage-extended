@@ -1,0 +1,538 @@
+#!/bin/bash
+
+# Extended API Management Script
+# Includes deployment management capabilities
+
+set -e
+
+# Configuration
+CONFIG_FILE="/etc/api-gateway/apis.json"
+SCRIPT_DIR="/opt/api-gateway/scripts"
+MODULE_DIR="/opt/api-gateway/modules"
+
+# Source modules
+source "$MODULE_DIR/common.sh"
+source "$MODULE_DIR/deployment-manager.sh"
+source "$MODULE_DIR/webhook-handler.sh"
+
+# Help function
+show_help() {
+    cat << 'EOF'
+API Gateway Extended Management Tool
+
+USAGE:
+    api-manage-extended <command> [options]
+
+API MANAGEMENT:
+    add <name> <port> [path]         Add new API service
+    remove <name>                    Remove API service
+    list                            List all API services
+    enable <name>                   Enable API service
+    disable <name>                  Disable API service
+    reload                          Reload nginx configuration
+
+DEPLOYMENT MANAGEMENT:
+    deploy add <name> <repo> [branch] <port> [build_cmd] [start_cmd]
+                                    Add deployment configuration
+    deploy remove <name>            Remove deployment
+    deploy list                     List all deployments
+    deploy status [name]            Show deployment status
+    deploy run <name>               Deploy/redeploy service
+    deploy logs <name>              Show deployment logs
+
+WEBHOOK MANAGEMENT:
+    webhook start                   Start webhook server
+    webhook stop                    Stop webhook server
+    webhook status                  Show webhook server status
+    webhook url <name>              Get webhook URL for service
+    webhook setup <name>            Show GitHub webhook setup instructions
+
+DASHBOARD MANAGEMENT:
+    dashboard start                 Start web dashboard
+    dashboard stop                  Stop web dashboard
+    dashboard status                Show dashboard status
+    dashboard url                   Get dashboard URL
+
+SYSTEM MANAGEMENT:
+    status                          Show overall system status
+    logs [service]                  Show system logs
+    backup                          Create configuration backup
+    restore <backup_file>           Restore from backup
+
+EXAMPLES:
+    # Add API service
+    api-manage-extended add my-api 3000
+
+    # Add deployment with auto-deploy
+    api-manage-extended deploy add my-app https://github.com/user/repo main 3000
+
+    # Start webhook server for auto-deployment
+    api-manage-extended webhook start
+
+    # Start web dashboard
+    api-manage-extended dashboard start
+
+    # Show system status
+    api-manage-extended status
+
+EOF
+}
+
+# API Management Functions
+api_add() {
+    local name="$1"
+    local port="$2"
+    local path="${3:-/$name}"
+    
+    if [ -z "$name" ] || [ -z "$port" ]; then
+        print_error "Usage: add <name> <port> [path]"
+        return 1
+    fi
+    
+    # Use original api-manage script
+    /opt/api-gateway/scripts/api-manage add "$name" "$port" "$path"
+}
+
+api_remove() {
+    local name="$1"
+    
+    if [ -z "$name" ]; then
+        print_error "Usage: remove <name>"
+        return 1
+    fi
+    
+    /opt/api-gateway/scripts/api-manage remove "$name"
+}
+
+api_list() {
+    /opt/api-gateway/scripts/api-manage list
+}
+
+api_enable() {
+    local name="$1"
+    
+    if [ -z "$name" ]; then
+        print_error "Usage: enable <name>"
+        return 1
+    fi
+    
+    /opt/api-gateway/scripts/api-manage enable "$name"
+}
+
+api_disable() {
+    local name="$1"
+    
+    if [ -z "$name" ]; then
+        print_error "Usage: disable <name>"
+        return 1
+    fi
+    
+    /opt/api-gateway/scripts/api-manage disable "$name"
+}
+
+api_reload() {
+    /opt/api-gateway/scripts/api-manage reload
+}
+
+# Dashboard Management Functions
+dashboard_start() {
+    print_header "Starting Web Dashboard"
+    
+    # Install Node.js if needed
+    if ! command_exists node; then
+        print_info "Installing Node.js..."
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        safe_apt install nodejs
+    fi
+    
+    # Install npm dependencies
+    if [ -f "/opt/api-gateway/web-ui/package.json" ]; then
+        print_info "Installing npm dependencies..."
+        cd /opt/api-gateway/web-ui
+        npm install --production --silent
+    fi
+    
+    # Create systemd service for dashboard
+    cat > /etc/systemd/system/api-gateway-dashboard.service << 'EOF'
+[Unit]
+Description=API Gateway Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/api-gateway/web-ui
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+# Logging
+StandardOutput=append:/var/log/api-gateway/dashboard.log
+StandardError=append:/var/log/api-gateway/dashboard.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Copy web UI files
+    mkdir -p /opt/api-gateway/web-ui
+    cp -r "$MODULE_DIR/../web-ui/"* /opt/api-gateway/web-ui/
+    chmod +x /opt/api-gateway/web-ui/server.js
+    chmod +x /opt/api-gateway/web-ui/webhook-server.js
+    
+    # Start service
+    systemctl daemon-reload
+    systemctl enable api-gateway-dashboard
+    systemctl start api-gateway-dashboard
+    
+    if service_is_running "api-gateway-dashboard"; then
+        print_success "Web dashboard started"
+        local server_ip=$(curl -s ifconfig.me 2>/dev/null || echo "localhost")
+        print_info "Dashboard URL: http://${server_ip}:8080"
+    else
+        print_error "Failed to start web dashboard"
+        return 1
+    fi
+}
+
+dashboard_stop() {
+    print_header "Stopping Web Dashboard"
+    
+    if service_is_running "api-gateway-dashboard"; then
+        systemctl stop api-gateway-dashboard
+        systemctl disable api-gateway-dashboard
+        print_success "Web dashboard stopped"
+    else
+        print_info "Web dashboard is not running"
+    fi
+}
+
+dashboard_status() {
+    print_header "Web Dashboard Status"
+    
+    if service_is_running "api-gateway-dashboard"; then
+        print_success "Dashboard is running"
+        local server_ip=$(curl -s ifconfig.me 2>/dev/null || echo "localhost")
+        print_info "Dashboard URL: http://${server_ip}:8080"
+    else
+        print_error "Dashboard is not running"
+    fi
+}
+
+dashboard_url() {
+    local server_ip=$(curl -s ifconfig.me 2>/dev/null || echo "localhost")
+    echo "http://${server_ip}:8080"
+}
+
+# System status overview
+show_system_status() {
+    print_header "API Gateway System Status"
+    
+    echo "=== Services ==="
+    echo "Nginx: $(get_service_status nginx)"
+    echo "OpenObserve: $(get_service_status openobserve)"
+    echo "Fluent Bit: $(get_service_status fluent-bit)"
+    echo "Webhook Server: $(get_service_status api-gateway-webhook)"
+    echo "Web Dashboard: $(get_service_status api-gateway-dashboard)"
+    echo ""
+    
+    echo "=== API Services ==="
+    if [ -f "$CONFIG_FILE" ]; then
+        jq -r '.apis[] | select(.enabled == true) | "✓ \(.name) (port \(.port)) - \(.path)"' "$CONFIG_FILE" 2>/dev/null || echo "No enabled APIs"
+    else
+        echo "No API configuration found"
+    fi
+    echo ""
+    
+    echo "=== Deployments ==="
+    if [ -d "$DEPLOY_CONFIG_DIR" ] && [ "$(ls -A "$DEPLOY_CONFIG_DIR" 2>/dev/null)" ]; then
+        for config_file in "$DEPLOY_CONFIG_DIR"/*.json; do
+            if [ -f "$config_file" ]; then
+                local service_name=$(basename "$config_file" .json)
+                local status=$(get_deployment_status "$service_name" | jq -r '.status // "unknown"')
+                local system_status="Stopped"
+                
+                if service_is_running "$service_name"; then
+                    system_status="Running"
+                fi
+                
+                echo "• $service_name: $status ($system_status)"
+            fi
+        done
+    else
+        echo "No deployments configured"
+    fi
+    echo ""
+    
+    echo "=== System Resources ==="
+    echo "Load Average: $(cat /proc/loadavg | cut -d' ' -f1-3)"
+    echo "Memory Usage: $(free -h | awk '/^Mem:/ {printf "%s/%s (%.1f%%)", $3, $2, ($3/$2)*100}')"
+    echo "Disk Usage: $(df -h / | awk 'NR==2 {printf "%s/%s (%s)", $3, $2, $5}')"
+    echo "Uptime: $(uptime -p)"
+}
+
+# Show logs
+show_logs() {
+    local service="$1"
+    
+    if [ -n "$service" ]; then
+        print_header "Logs for $service"
+        journalctl -u "$service" --no-pager -n 50
+    else
+        print_header "System Logs"
+        echo "Available log files:"
+        echo "• System: /var/log/api-gateway/system.log"
+        echo "• Webhook: /var/log/api-gateway/webhook.log"
+        echo "• Dashboard: /var/log/api-gateway/dashboard.log"
+        echo "• Deployments: /var/log/api-gateway/deployments/"
+        echo ""
+        echo "Recent system events:"
+        journalctl --no-pager -n 20
+    fi
+}
+
+# Backup configuration
+backup_config() {
+    local backup_dir="/var/backups/api-gateway"
+    local backup_file="$backup_dir/backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+    
+    print_header "Creating Configuration Backup"
+    
+    mkdir -p "$backup_dir"
+    
+    # Create backup
+    tar -czf "$backup_file" \
+        -C / \
+        etc/api-gateway \
+        etc/nginx/sites-available/apis \
+        var/lib/api-gateway \
+        opt/openobserve/.credentials 2>/dev/null || true
+    
+    if [ -f "$backup_file" ]; then
+        print_success "Backup created: $backup_file"
+        print_info "Backup size: $(du -h "$backup_file" | cut -f1)"
+    else
+        print_error "Failed to create backup"
+        return 1
+    fi
+}
+
+# Restore configuration
+restore_config() {
+    local backup_file="$1"
+    
+    if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
+        print_error "Usage: restore <backup_file>"
+        print_info "Available backups:"
+        ls -la /var/backups/api-gateway/*.tar.gz 2>/dev/null || echo "No backups found"
+        return 1
+    fi
+    
+    print_header "Restoring Configuration"
+    print_warning "This will overwrite current configuration!"
+    
+    read -p "Continue? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_info "Restore cancelled"
+        return 0
+    fi
+    
+    # Extract backup
+    tar -xzf "$backup_file" -C /
+    
+    if [ $? -eq 0 ]; then
+        print_success "Configuration restored from $backup_file"
+        print_info "Reloading services..."
+        
+        # Reload services
+        systemctl reload nginx
+        systemctl restart api-gateway-webhook 2>/dev/null || true
+        systemctl restart api-gateway-dashboard 2>/dev/null || true
+        
+        print_success "Services reloaded"
+    else
+        print_error "Failed to restore configuration"
+        return 1
+    fi
+}
+
+# Main command dispatcher
+main() {
+    if [ $# -eq 0 ]; then
+        show_help
+        return 0
+    fi
+    
+    local command="$1"
+    shift
+    
+    case "$command" in
+        # API Management
+        "add")
+            api_add "$@"
+            ;;
+        "remove")
+            api_remove "$@"
+            ;;
+        "list")
+            api_list "$@"
+            ;;
+        "enable")
+            api_enable "$@"
+            ;;
+        "disable")
+            api_disable "$@"
+            ;;
+        "reload")
+            api_reload "$@"
+            ;;
+        
+        # Deployment Management
+        "deploy")
+            local deploy_cmd="$1"
+            shift
+            case "$deploy_cmd" in
+                "add")
+                    add_deployment "$@"
+                    ;;
+                "remove")
+                    remove_deployment "$@"
+                    ;;
+                "list")
+                    list_deployments
+                    ;;
+                "status")
+                    if [ -n "$1" ]; then
+                        get_deployment_status "$1"
+                    else
+                        list_deployments
+                    fi
+                    ;;
+                "run")
+                    deploy_service "$@"
+                    ;;
+                "logs")
+                    if [ -n "$1" ]; then
+                        local log_file="/var/log/api-gateway/deployments/${1}-*.log"
+                        if ls $log_file 1> /dev/null 2>&1; then
+                            tail -f $(ls -t $log_file | head -1)
+                        else
+                            print_error "No deployment logs found for $1"
+                        fi
+                    else
+                        print_error "Service name required"
+                    fi
+                    ;;
+                *)
+                    print_error "Unknown deploy command: $deploy_cmd"
+                    show_help
+                    return 1
+                    ;;
+            esac
+            ;;
+        
+        # Webhook Management
+        "webhook")
+            local webhook_cmd="$1"
+            shift
+            case "$webhook_cmd" in
+                "start")
+                    start_webhook_server
+                    ;;
+                "stop")
+                    stop_webhook_server
+                    ;;
+                "status")
+                    if [ -f "$WEBHOOK_PID_FILE" ] && kill -0 "$(cat "$WEBHOOK_PID_FILE")" 2>/dev/null; then
+                        print_success "Webhook server is running (PID: $(cat "$WEBHOOK_PID_FILE"))"
+                        print_info "Port: $WEBHOOK_PORT"
+                    else
+                        print_error "Webhook server is not running"
+                    fi
+                    ;;
+                "url")
+                    if [ -n "$1" ]; then
+                        get_webhook_url "$1"
+                    else
+                        print_error "Service name required"
+                    fi
+                    ;;
+                "setup")
+                    if [ -n "$1" ]; then
+                        show_webhook_instructions "$1"
+                    else
+                        print_error "Service name required"
+                    fi
+                    ;;
+                *)
+                    print_error "Unknown webhook command: $webhook_cmd"
+                    show_help
+                    return 1
+                    ;;
+            esac
+            ;;
+        
+        # Dashboard Management
+        "dashboard")
+            local dashboard_cmd="$1"
+            shift
+            case "$dashboard_cmd" in
+                "start")
+                    dashboard_start
+                    ;;
+                "stop")
+                    dashboard_stop
+                    ;;
+                "status")
+                    dashboard_status
+                    ;;
+                "url")
+                    dashboard_url
+                    ;;
+                *)
+                    print_error "Unknown dashboard command: $dashboard_cmd"
+                    show_help
+                    return 1
+                    ;;
+            esac
+            ;;
+        
+        # System Management
+        "status")
+            show_system_status
+            ;;
+        "logs")
+            show_logs "$1"
+            ;;
+        "backup")
+            backup_config
+            ;;
+        "restore")
+            restore_config "$1"
+            ;;
+        
+        # Help
+        "help"|"-h"|"--help")
+            show_help
+            ;;
+        
+        *)
+            print_error "Unknown command: $command"
+            show_help
+            return 1
+            ;;
+    esac
+}
+
+# Check if running as root
+check_sudo
+
+# Initialize deployment manager if not already done
+if [ ! -d "$DEPLOY_CONFIG_DIR" ]; then
+    init_deployment_manager
+fi
+
+# Run main function
+main "$@"

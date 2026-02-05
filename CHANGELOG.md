@@ -2,6 +2,23 @@
 
 ## [Unreleased] - 2026-02-05
 
+### Added
+- **🚀 GitHub Auto-Deploy System**: Complete CI/CD integration with GitHub repositories
+- **📊 Web Dashboard**: Modern React-like UI for deployment management and monitoring
+- **🪝 Webhook Server**: GitHub webhook integration for automatic deployments
+- **📦 Modular Architecture**: Clean separation of concerns with reusable modules
+- **🔧 Extended API Manager**: Comprehensive management tool with deployment capabilities
+- **📋 Real-time Monitoring**: Live service status, logs, and system metrics
+- **🔄 Backup/Restore**: Configuration backup and restore functionality
+
+### Changed
+- **Technology Stack**: Migrated from Python to Node.js for better performance and compatibility
+- **Project Structure**: Reorganized into modular components for better maintainability
+- **Installation Process**: Enhanced with automatic dependency management
+- **User Interface**: Complete redesign with modern, responsive web interface
+
+## [Previous] - 2026-02-05
+
 ### Fixed
 - **Apt lock handling**: Добавлена функция `safe_apt()` для безопасной работы с пакетным менеджером
   - Автоматическое ожидание освобождения блокировки apt (до 5 минут)

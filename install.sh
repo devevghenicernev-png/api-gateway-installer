@@ -484,6 +484,9 @@ ENDCONFIG
         
         <h2>📊 Monitoring & Logs</h2>
         <div class="monitoring-item">
+            <a href="/dashboard/" target="_blank">🖥️ Deployment Dashboard</a> - Manage deployments, view status and logs
+        </div>
+        <div class="monitoring-item">
             <a href="/observe/" target="_blank">📈 OpenObserve Dashboard</a> - View logs, search, analyze in real-time
         </div>
         
@@ -555,6 +558,42 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
     # Redirect /observe to /observe/
     location = /observe {
         return 301 /observe/;
+    }
+    
+    # Dashboard API (same backend as dashboard - for fetch() from /dashboard/)
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+    
+    # Dashboard (Node.js on 8080) - single port access
+    location /dashboard/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Prefix /dashboard;
+    }
+    location = /dashboard {
+        return 301 /dashboard/;
+    }
+    
+    # GitHub Webhook (Node.js on 9876) - single port access
+    location /webhook/ {
+        proxy_pass http://127.0.0.1:9876/webhook/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_request_buffering off;
+        client_max_body_size 10m;
     }
 DASHBOARD
 
@@ -825,6 +864,83 @@ SCRIPT_END
 
     chmod +x "$SCRIPT_DIR/api-manage"
     print_success "Management script created"
+}
+
+install_extended_modules() {
+    print_header "Installing Extended Modules"
+    
+    # Create module directory structure
+    mkdir -p /opt/api-gateway/{modules,scripts,web-ui}
+    
+    # Copy modules from installer directory
+    local installer_dir="$(dirname "$0")"
+    
+    if [ -d "$installer_dir/modules" ]; then
+        print_info "Installing deployment and webhook modules..."
+        cp -r "$installer_dir/modules/"* /opt/api-gateway/modules/
+        chmod +x /opt/api-gateway/modules/*.sh
+        print_success "Modules installed"
+    fi
+    
+    if [ -d "$installer_dir/scripts" ]; then
+        print_info "Installing extended scripts..."
+        cp -r "$installer_dir/scripts/"* /opt/api-gateway/scripts/
+        chmod +x /opt/api-gateway/scripts/*
+        print_success "Scripts installed"
+    fi
+    
+    if [ -d "$installer_dir/web-ui" ]; then
+        print_info "Installing web dashboard..."
+        cp -r "$installer_dir/web-ui/"* /opt/api-gateway/web-ui/
+        chmod +x /opt/api-gateway/web-ui/*.py
+        print_success "Web dashboard installed"
+    fi
+    
+    # Install Node.js for web dashboard and webhook server
+    if ! command_exists node; then
+        print_info "Installing Node.js..."
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1
+        if safe_apt install nodejs; then
+            print_success "Node.js installed"
+        else
+            print_warning "Failed to install Node.js"
+            print_info "You may need to install Node.js manually"
+        fi
+    else
+        print_success "Node.js already installed"
+    fi
+    
+    # Install npm dependencies for web dashboard
+    if [ -f "/opt/api-gateway/web-ui/package.json" ] && command_exists npm; then
+        print_info "Installing npm dependencies..."
+        cd /opt/api-gateway/web-ui
+        npm install --production --silent >/dev/null 2>&1 || {
+            print_warning "Failed to install npm dependencies"
+        }
+    fi
+    
+    # Install PM2 for deployments (used by deploy add / webhook)
+    if command_exists npm && ! command_exists pm2; then
+        print_info "Installing PM2..."
+        npm install -g pm2 >/dev/null 2>&1 && print_success "PM2 installed" || {
+            print_warning "Failed to install PM2 (deployments will use systemd)"
+        }
+    fi
+    
+    # Create symlink for extended API manager
+    if [ -f "/opt/api-gateway/scripts/api-manage-extended" ]; then
+        ln -sf /opt/api-gateway/scripts/api-manage-extended /usr/local/bin/api-manage-extended
+        print_success "Extended API manager available as 'api-manage-extended'"
+    fi
+    
+    # Initialize deployment manager
+    if [ -f "/opt/api-gateway/modules/deployment-manager.sh" ]; then
+        source /opt/api-gateway/modules/common.sh
+        source /opt/api-gateway/modules/deployment-manager.sh
+        init_deployment_manager
+    fi
+    
+    print_success "Extended modules installed successfully"
 }
 
 setup_auto_reload() {
@@ -1284,6 +1400,18 @@ print_completion_info() {
     echo "  4. Access OpenObserve to search and analyze logs"
     echo "  5. In OpenObserve: Logs → Select stream → Run SQL queries"
     echo ""
+    echo -e "${YELLOW}Extended Features:${NC}"
+    echo "  • GitHub Auto-Deploy: api-manage-extended deploy add <name> <repo> <branch> <port>"
+    echo "  • Webhook Server: api-manage-extended webhook start"
+    echo "  • Web Dashboard: api-manage-extended dashboard start"
+    echo "  • System Status: api-manage-extended status"
+    echo ""
+    echo -e "${YELLOW}Quick Start with Auto-Deploy:${NC}"
+    echo "  1. Add deployment: api-manage-extended deploy add my-app https://github.com/user/repo main 3000"
+    echo "  2. Start webhook server: api-manage-extended webhook start"
+    echo "  3. Setup GitHub webhook: api-manage-extended webhook setup my-app"
+    echo "  4. Start web dashboard: api-manage-extended dashboard start"
+    echo ""
 }
 
 ###############################################################################
@@ -1317,10 +1445,18 @@ main() {
     create_generator_script
     create_fluentbit_generator_script
     create_management_script
+    install_extended_modules
     setup_auto_reload
     setup_openobserve
     configure_openobserve_ingestion
     configure_nginx
+    # Ensure nginx config includes /dashboard/ and /webhook/ from the start (single port)
+    print_info "Applying final Nginx config (dashboard + webhook on port $LISTEN_PORT)..."
+    "$SCRIPT_DIR/generate-nginx-config"
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx
+        print_success "Nginx config applied"
+    fi
     print_completion_info
     
     echo ""
