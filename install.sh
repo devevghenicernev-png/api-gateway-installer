@@ -892,7 +892,7 @@ install_extended_modules() {
     if [ -d "$installer_dir/web-ui" ]; then
         print_info "Installing web dashboard..."
         cp -r "$installer_dir/web-ui/"* /opt/api-gateway/web-ui/
-        chmod +x /opt/api-gateway/web-ui/*.py
+        chmod +x /opt/api-gateway/web-ui/*.js 2>/dev/null || true
         print_success "Web dashboard installed"
     fi
     
