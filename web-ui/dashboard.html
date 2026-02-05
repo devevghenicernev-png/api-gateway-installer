@@ -3,674 +3,633 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Gateway - Deployment Dashboard</title>
+    <title>API Gateway — Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --bg: #0f1419;
+            --surface: #1a2332;
+            --surface-hover: #243044;
+            --border: #2d3a4d;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --danger: #f85149;
+            --radius: 10px;
         }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
-            color: #333;
+            line-height: 1.5;
         }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
         .header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-
-        .header h1 {
-            color: #2c3e50;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
             display: flex;
             align-items: center;
-            gap: 15px;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            padding: 20px 24px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
         }
-
-        .header p {
-            color: #7f8c8d;
-            font-size: 1.1rem;
-        }
-
+        .header h1 { font-size: 1.5rem; font-weight: 600; display: flex; align-items: center; gap: 12px; }
+        .header p { color: var(--text-muted); font-size: 0.9rem; margin-top: 4px; }
+        .icon { width: 20px; height: 20px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        .icon-sm { width: 16px; height: 16px; }
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
         }
-
         .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 25px;
-            text-align: center;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .stat-number {
-            font-size: 2.5rem;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-
-        .stat-label {
-            color: #7f8c8d;
-            font-size: 1rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .running { color: #27ae60; }
-        .stopped { color: #e74c3c; }
-        .deploying { color: #f39c12; }
-        .total { color: #3498db; }
-
-        .main-content {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 30px;
-        }
-
-        .deployments-section, .actions-section {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-
-        .section-title {
-            font-size: 1.5rem;
-            margin-bottom: 20px;
-            color: #2c3e50;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .deployment-card {
-            border: 1px solid #e1e8ed;
-            border-radius: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             padding: 20px;
-            margin-bottom: 15px;
-            transition: all 0.3s ease;
+            transition: border-color 0.2s;
         }
-
-        .deployment-card:hover {
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-            transform: translateY(-2px);
+        .stat-card:hover { border-color: var(--accent); }
+        .stat-number { font-size: 2rem; font-weight: 700; }
+        .stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-top: 4px; }
+        .stat-card.running .stat-number { color: var(--success); }
+        .stat-card.stopped .stat-number { color: var(--danger); }
+        .stat-card.deploying .stat-number { color: var(--warning); }
+        .stat-card.total .stat-number { color: var(--accent); }
+        .main-content { display: grid; grid-template-columns: 1fr 280px; gap: 24px; }
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
         }
-
-        .deployment-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
+        .panel-title { font-size: 1rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .card {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: border-color 0.2s;
         }
-
-        .service-name {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #2c3e50;
-        }
-
-        .status-badge {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: bold;
+        .card:hover { border-color: var(--surface-hover); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .card-title { font-weight: 600; font-size: 1rem; }
+        .badge {
+            font-size: 0.7rem;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.04em;
+            padding: 4px 10px;
+            border-radius: 999px;
         }
-
-        .status-running {
-            background: #d4edda;
-            color: #155724;
+        .badge-running { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+        .badge-stopped { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+        .badge-deploying { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+        .card-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 12px; font-size: 0.85rem; }
+        .card-meta dt { color: var(--text-muted); font-weight: 500; }
+        .card-meta dd { margin-top: 2px; }
+        .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            transition: opacity 0.2s, transform 0.1s;
         }
-
-        .status-stopped {
-            background: #f8d7da;
-            color: #721c24;
+        .btn:hover { opacity: 0.9; }
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-success { background: var(--success); color: #fff; }
+        .btn-warning { background: var(--warning); color: #0f1419; }
+        .btn-danger { background: var(--danger); color: #fff; }
+        .btn-ghost { background: var(--surface-hover); color: var(--text); }
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 6px; color: var(--text-muted); }
+        .form-input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.9rem;
+            font-family: inherit;
         }
-
-        .status-deploying {
-            background: #fff3cd;
-            color: #856404;
+        .form-input:focus { outline: none; border-color: var(--accent); }
+        .log-viewer {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            height: 320px;
+            overflow: auto;
+            color: #c9d1d9;
+            white-space: pre-wrap;
+            word-break: break-all;
         }
-
-        .deployment-info {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 15px;
+        .log-viewer.empty { color: var(--text-muted); }
+        .section-logs { margin-top: 24px; }
+        .section-logs .panel-title { margin-bottom: 12px; }
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 24px;
         }
-
-        .info-item {
+        .modal-overlay.hidden { display: none; }
+        .modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            width: 100%;
+            max-width: 700px;
+            max-height: 85vh;
             display: flex;
             flex-direction: column;
         }
-
-        .info-label {
-            font-size: 0.8rem;
-            color: #7f8c8d;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 5px;
-        }
-
-        .info-value {
-            font-weight: 500;
-            color: #2c3e50;
-        }
-
-        .deployment-actions {
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
             display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
         }
-
-        .btn {
-            padding: 8px 16px;
+        .modal-title { font-weight: 600; font-size: 1.1rem; }
+        .modal-close {
+            background: none;
             border: none;
-            border-radius: 6px;
+            color: var(--text-muted);
             cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: 500;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            transition: all 0.3s ease;
+            padding: 4px;
+            border-radius: 4px;
         }
-
-        .btn-primary {
-            background: #3498db;
-            color: white;
-        }
-
-        .btn-success {
-            background: #27ae60;
-            color: white;
-        }
-
-        .btn-warning {
-            background: #f39c12;
-            color: white;
-        }
-
-        .btn-danger {
-            background: #e74c3c;
-            color: white;
-        }
-
-        .btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 500;
-            color: #2c3e50;
-        }
-
-        .form-input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 1rem;
-        }
-
-        .form-input:focus {
-            outline: none;
-            border-color: #3498db;
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
-        }
-
-        .logs-section {
-            margin-top: 30px;
-        }
-
-        .log-viewer {
-            background: #2c3e50;
-            color: #ecf0f1;
-            border-radius: 10px;
+        .modal-close:hover { color: var(--text); background: var(--surface-hover); }
+        .modal-body {
             padding: 20px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            overflow: auto;
+            flex: 1;
+        }
+        .modal-body .log-viewer { height: 360px; }
+        .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); text-align: right; }
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toast {
+            padding: 12px 18px;
+            border-radius: 8px;
             font-size: 0.9rem;
-            line-height: 1.4;
-            max-height: 400px;
-            overflow-y: auto;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            animation: toastIn 0.25s ease;
         }
-
-        .refresh-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.9rem;
-            color: #7f8c8d;
+        .toast.success { background: var(--success); color: #fff; }
+        .toast.error { background: var(--danger); color: #fff; }
+        .toast.info { background: var(--accent); color: #fff; }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-
-        .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid #e1e8ed;
-            border-top: 2px solid #3498db;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: #7f8c8d;
-        }
-
-        .empty-state h3 {
-            margin-bottom: 10px;
-            color: #2c3e50;
-        }
-
-        @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-            
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .deployment-info {
-                grid-template-columns: 1fr;
-            }
+        .empty-state { text-align: center; padding: 48px 24px; color: var(--text-muted); }
+        .empty-state h3 { color: var(--text); font-size: 1.1rem; margin-bottom: 8px; }
+        .empty-state p { font-size: 0.9rem; margin-bottom: 16px; }
+        .pulse { animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{ opacity: 1; } 50%{ opacity: 0.6; } }
+        @media (max-width: 900px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .main-content { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
+    <div class="toast-container" id="toast-container"></div>
+
     <div class="container">
         <div class="header">
-            <h1>
-                🚀 API Gateway Dashboard
-            </h1>
-            <p>Manage your deployments, monitor services, and track deployment status</p>
+            <div>
+                <h1>
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/></svg>
+                    API Gateway
+                </h1>
+                <p>Deployments and services · live via Server-Sent Events</p>
+            </div>
         </div>
 
         <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-number running" id="running-count">0</div>
-                <div class="stat-label">Running Services</div>
+            <div class="stat-card running">
+                <div class="stat-number" id="running-count">0</div>
+                <div class="stat-label">Running</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-number stopped" id="stopped-count">0</div>
-                <div class="stat-label">Stopped Services</div>
+            <div class="stat-card stopped">
+                <div class="stat-number" id="stopped-count">0</div>
+                <div class="stat-label">Stopped</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-number deploying" id="deploying-count">0</div>
+            <div class="stat-card deploying">
+                <div class="stat-number" id="deploying-count">0</div>
                 <div class="stat-label">Deploying</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-number total" id="total-count">0</div>
-                <div class="stat-label">Total Services</div>
+            <div class="stat-card total">
+                <div class="stat-number" id="total-count">0</div>
+                <div class="stat-label">Total</div>
             </div>
         </div>
 
         <div class="main-content">
-            <div class="deployments-section">
-                <div class="section-title">
-                    📦 Deployments
-                    <div class="refresh-indicator" id="refresh-indicator" style="display: none;">
-                        <div class="spinner"></div>
-                        Refreshing...
-                    </div>
+            <div class="panel">
+                <div class="panel-title">
+                    <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                    Deployments
                 </div>
-                <div id="deployments-list">
-                    <!-- Deployments will be loaded here -->
-                </div>
+                <div id="deployments-list"></div>
             </div>
-
-            <div class="actions-section">
-                <div class="section-title">⚡ Quick Actions</div>
-                
+            <div class="panel">
+                <div class="panel-title">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    Actions
+                </div>
                 <div class="form-group">
-                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 15px;" onclick="refreshData()">
-                        🔄 Refresh Data
+                    <button class="btn btn-ghost" style="width:100%;" onclick="refreshData()">
+                        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        Refresh now
                     </button>
                 </div>
-
                 <div class="form-group">
-                    <button class="btn btn-success" style="width: 100%; margin-bottom: 15px;" onclick="showAddDeploymentForm()">
-                        ➕ Add New Deployment
+                    <button class="btn btn-success" style="width:100%;" onclick="showAddDeploymentForm()">
+                        <svg class="icon icon-sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Add deployment
                     </button>
                 </div>
-
                 <div class="form-group">
-                    <label class="form-label">Service Logs</label>
-                    <select class="form-input" id="log-service-select" onchange="loadServiceLogs()">
-                        <option value="">Select a service...</option>
+                    <label class="form-label">Service logs</label>
+                    <select class="form-input" id="log-service-select">
+                        <option value="">Select service...</option>
                     </select>
                 </div>
-
                 <div class="form-group">
-                    <button class="btn btn-warning" style="width: 100%;" onclick="showSystemInfo()">
-                        📊 System Information
+                    <button class="btn btn-warning" style="width:100%;" onclick="showSystemInfo()">
+                        <svg class="icon icon-sm" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        System info
                     </button>
                 </div>
             </div>
         </div>
 
-        <div class="logs-section">
-            <div class="section-title">📋 Service Logs</div>
-            <div class="log-viewer" id="log-viewer">
-                Select a service to view logs...
+        <div class="section-logs panel">
+            <div class="panel-title">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+                Service logs
+                <span id="log-live-badge" style="margin-left:8px;font-size:0.7rem;color:var(--text-muted);font-weight:400;"></span>
+            </div>
+            <div class="log-viewer empty" id="log-viewer">Select a service to stream logs.</div>
+        </div>
+    </div>
+
+    <!-- Deploy progress modal -->
+    <div class="modal-overlay hidden" id="deploy-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title" id="deploy-modal-title">Deploying…</span>
+                <button class="modal-close" onclick="closeDeployModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="log-viewer" id="deploy-log-viewer">Starting deployment…</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" id="deploy-modal-close-btn" onclick="closeDeployModal()">Close</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Global variables
+        const API = '/gateway-api';
         let deployments = {};
-        let refreshInterval;
+        let deploymentsEventSource;
+        let logsEventSource;
+        let deployLogEventSource;
 
-        // Initialize dashboard
-        document.addEventListener('DOMContentLoaded', function() {
-            refreshData();
-            startAutoRefresh();
-        });
-
-        // Auto refresh every 30 seconds
-        function startAutoRefresh() {
-            refreshInterval = setInterval(refreshData, 30000);
+        function showToast(message, type = 'info') {
+            const el = document.createElement('div');
+            el.className = `toast ${type}`;
+            el.textContent = message;
+            document.getElementById('toast-container').appendChild(el);
+            setTimeout(() => el.remove(), 4000);
         }
 
-        // Refresh all data
-        async function refreshData() {
-            showRefreshIndicator(true);
-            
-            try {
-                await Promise.all([
-                    loadDeployments(),
-                    updateServiceSelect()
-                ]);
-            } catch (error) {
-                console.error('Error refreshing data:', error);
-            } finally {
-                showRefreshIndicator(false);
-            }
-        }
-
-        // Show/hide refresh indicator
-        function showRefreshIndicator(show) {
-            const indicator = document.getElementById('refresh-indicator');
-            indicator.style.display = show ? 'flex' : 'none';
-        }
-
-        // Load deployments data
-        async function loadDeployments() {
-            try {
-                const response = await fetch('/gateway-api/deployments');
-                const data = await response.json();
-                
-                deployments = data.deployments || {};
-                updateDeploymentsList();
-                updateStats();
-            } catch (error) {
-                console.error('Error loading deployments:', error);
-                showEmptyState();
-            }
-        }
-
-        // Update deployments list
-        function updateDeploymentsList() {
-            const container = document.getElementById('deployments-list');
-            
-            if (Object.keys(deployments).length === 0) {
-                showEmptyState();
-                return;
-            }
-
-            let html = '';
-            
-            Object.entries(deployments).forEach(([serviceName, deployment]) => {
-                const config = deployment.config || {};
-                const status = deployment.status || 'unknown';
-                const lastUpdated = deployment.last_updated || 'Never';
-                
-                html += `
-                    <div class="deployment-card">
-                        <div class="deployment-header">
-                            <div class="service-name">${serviceName}</div>
-                            <div class="status-badge status-${status}">${status}</div>
-                        </div>
-                        
-                        <div class="deployment-info">
-                            <div class="info-item">
-                                <div class="info-label">Repository</div>
-                                <div class="info-value">${config.github_repo || 'N/A'}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">Branch</div>
-                                <div class="info-value">${config.branch || 'main'}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">Port</div>
-                                <div class="info-value">${config.port || 'N/A'}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">Last Updated</div>
-                                <div class="info-value">${formatDate(lastUpdated)}</div>
-                            </div>
-                        </div>
-                        
-                        <div class="deployment-actions">
-                            <button class="btn btn-success" onclick="deployService('${serviceName}')">
-                                🚀 Deploy
-                            </button>
-                            <button class="btn btn-primary" onclick="viewLogs('${serviceName}')">
-                                📋 Logs
-                            </button>
-                            <button class="btn btn-warning" onclick="restartService('${serviceName}')">
-                                🔄 Restart
-                            </button>
-                            <button class="btn btn-danger" onclick="removeDeployment('${serviceName}')">
-                                🗑️ Remove
-                            </button>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            container.innerHTML = html;
-        }
-
-        // Show empty state
-        function showEmptyState() {
-            const container = document.getElementById('deployments-list');
-            container.innerHTML = `
-                <div class="empty-state">
-                    <h3>No deployments configured</h3>
-                    <p>Add your first deployment to get started</p>
-                    <button class="btn btn-primary" onclick="showAddDeploymentForm()">
-                        ➕ Add Deployment
-                    </button>
-                </div>
-            `;
-        }
-
-        // Update statistics
-        function updateStats() {
-            const stats = {
-                running: 0,
-                stopped: 0,
-                deploying: 0,
-                total: 0
-            };
-
-            Object.values(deployments).forEach(deployment => {
-                stats.total++;
-                const status = deployment.status || 'stopped';
-                
-                if (status === 'running') stats.running++;
-                else if (status === 'deploying') stats.deploying++;
-                else stats.stopped++;
-            });
-
-            document.getElementById('running-count').textContent = stats.running;
-            document.getElementById('stopped-count').textContent = stats.stopped;
-            document.getElementById('deploying-count').textContent = stats.deploying;
-            document.getElementById('total-count').textContent = stats.total;
-        }
-
-        // Update service select dropdown
-        function updateServiceSelect() {
-            const select = document.getElementById('log-service-select');
-            let html = '<option value="">Select a service...</option>';
-            
-            Object.keys(deployments).forEach(serviceName => {
-                html += `<option value="${serviceName}">${serviceName}</option>`;
-            });
-            
-            select.innerHTML = html;
-        }
-
-        // Deploy service
-        async function deployService(serviceName) {
-            if (!confirm(`Deploy ${serviceName}?`)) return;
-            
-            try {
-                const response = await fetch(`/gateway-api/deploy/${serviceName}`, {
-                    method: 'POST'
-                });
-                
-                if (response.ok) {
-                    alert(`Deployment started for ${serviceName}`);
-                    refreshData();
-                } else {
-                    alert('Deployment failed');
-                }
-            } catch (error) {
-                alert('Error starting deployment');
-            }
-        }
-
-        // Restart service
-        async function restartService(serviceName) {
-            if (!confirm(`Restart ${serviceName}?`)) return;
-            
-            try {
-                const response = await fetch(`/gateway-api/restart/${serviceName}`, {
-                    method: 'POST'
-                });
-                
-                if (response.ok) {
-                    alert(`${serviceName} restarted`);
-                    refreshData();
-                } else {
-                    alert('Restart failed');
-                }
-            } catch (error) {
-                alert('Error restarting service');
-            }
-        }
-
-        // Remove deployment
-        async function removeDeployment(serviceName) {
-            if (!confirm(`Remove deployment for ${serviceName}? This will stop the service and delete all configuration.`)) return;
-            
-            try {
-                const response = await fetch(`/gateway-api/deployments/${serviceName}`, {
-                    method: 'DELETE'
-                });
-                
-                if (response.ok) {
-                    alert(`${serviceName} removed`);
-                    refreshData();
-                } else {
-                    alert('Remove failed');
-                }
-            } catch (error) {
-                alert('Error removing deployment');
-            }
-        }
-
-        // Load service logs
-        async function loadServiceLogs() {
-            const serviceName = document.getElementById('log-service-select').value;
-            const logViewer = document.getElementById('log-viewer');
-            
-            if (!serviceName) {
-                logViewer.textContent = 'Select a service to view logs...';
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/gateway-api/logs/${serviceName}`);
-                const logs = await response.text();
-                
-                logViewer.textContent = logs || 'No logs available';
-                logViewer.scrollTop = logViewer.scrollHeight;
-            } catch (error) {
-                logViewer.textContent = 'Error loading logs';
-            }
-        }
-
-        // View logs for specific service
-        function viewLogs(serviceName) {
-            document.getElementById('log-service-select').value = serviceName;
-            loadServiceLogs();
-        }
-
-        // Show add deployment form (placeholder)
-        function showAddDeploymentForm() {
-            alert('Add deployment form will be implemented in the next version');
-        }
-
-        // Show system information (placeholder)
-        function showSystemInfo() {
-            alert('System information panel will be implemented in the next version');
-        }
-
-        // Format date
         function formatDate(dateString) {
             if (!dateString || dateString === 'Never') return 'Never';
-            
             try {
-                const date = new Date(dateString);
-                return date.toLocaleString();
+                return new Date(dateString).toLocaleString();
             } catch {
                 return dateString;
             }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            startDeploymentsSSE();
+            refreshData();
+        });
+
+        function startDeploymentsSSE() {
+            if (deploymentsEventSource) deploymentsEventSource.close();
+            deploymentsEventSource = new EventSource(API + '/sse/deployments');
+            deploymentsEventSource.addEventListener('deployments', function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.deployments) {
+                        deployments = data.deployments;
+                        updateDeploymentsList();
+                        updateStats();
+                        updateServiceSelect();
+                    }
+                } catch (_) {}
+            });
+            deploymentsEventSource.addEventListener('error', function() {
+                deploymentsEventSource.close();
+                setTimeout(startDeploymentsSSE, 3000);
+            });
+        }
+
+        async function refreshData(silent = true) {
+            try {
+                const res = await fetch(API + '/deployments');
+                const data = await res.json();
+                deployments = data.deployments || {};
+                updateDeploymentsList();
+                updateStats();
+                updateServiceSelect();
+            } catch (e) {
+                if (!silent) showToast('Failed to load deployments', 'error');
+            }
+        }
+
+        function updateDeploymentsList() {
+            const container = document.getElementById('deployments-list');
+            if (Object.keys(deployments).length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No deployments</h3>
+                        <p>Add a deployment to get started.</p>
+                        <button class="btn btn-primary" onclick="showAddDeploymentForm()">Add deployment</button>
+                    </div>`;
+                return;
+            }
+            let html = '';
+            for (const [name, d] of Object.entries(deployments)) {
+                const cfg = d.config || {};
+                const status = d.status || 'unknown';
+                html += `
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">${escapeHtml(name)}</span>
+                            <span class="badge badge-${status}">${status}</span>
+                        </div>
+                        <dl class="card-meta">
+                            <div><dt>Repo</dt><dd>${escapeHtml((cfg.github_repo || '—').split('/').pop())}</dd></div>
+                            <div><dt>Branch</dt><dd>${cfg.branch || 'main'}</dd></div>
+                            <div><dt>Port</dt><dd>${cfg.port || '—'}</dd></div>
+                            <div><dt>Updated</dt><dd>${formatDate(d.last_updated)}</dd></div>
+                        </dl>
+                        <div class="btn-row">
+                            <button class="btn btn-success" onclick="deployService('${escapeHtml(name)}')">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M15 3v4a2 2 0 0 0 2 2h4"/><path d="M10 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 12h4"/><path d="M10 16h4"/></svg>
+                                Deploy
+                            </button>
+                            <button class="btn btn-primary" onclick="viewLogs('${escapeHtml(name)}')">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                                Logs
+                            </button>
+                            <button class="btn btn-warning" onclick="restartService('${escapeHtml(name)}')">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                Restart
+                            </button>
+                            <button class="btn btn-danger" onclick="removeDeployment('${escapeHtml(name)}')">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                                Remove
+                            </button>
+                        </div>
+                    </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        function showEmptyState() {
+            document.getElementById('deployments-list').innerHTML = `
+                <div class="empty-state">
+                    <h3>No deployments</h3>
+                    <button class="btn btn-primary" onclick="showAddDeploymentForm()">Add deployment</button>
+                </div>`;
+        }
+
+        function updateStats() {
+            let running = 0, stopped = 0, deploying = 0;
+            Object.values(deployments).forEach(d => {
+                const s = d.status || 'stopped';
+                if (s === 'running') running++;
+                else if (s === 'deploying') deploying++;
+                else stopped++;
+            });
+            document.getElementById('running-count').textContent = running;
+            document.getElementById('stopped-count').textContent = stopped;
+            document.getElementById('deploying-count').textContent = deploying;
+            document.getElementById('total-count').textContent = Object.keys(deployments).length;
+        }
+
+        function updateServiceSelect() {
+            const sel = document.getElementById('log-service-select');
+            const cur = sel.value;
+            sel.innerHTML = '<option value="">Select service...</option>';
+            Object.keys(deployments).forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                sel.appendChild(opt);
+            });
+            if (cur && deployments[cur]) sel.value = cur;
+        }
+
+        function openDeployModal(serviceName) {
+            document.getElementById('deploy-modal-title').textContent = `Deploying ${serviceName}`;
+            document.getElementById('deploy-log-viewer').textContent = 'Connecting to log stream…';
+            document.getElementById('deploy-modal').classList.remove('hidden');
+        }
+
+        function closeDeployModal() {
+            document.getElementById('deploy-modal').classList.add('hidden');
+            if (deployLogEventSource) {
+                deployLogEventSource.close();
+                deployLogEventSource = null;
+            }
+        }
+
+        function startDeployLogSSE(serviceName) {
+            if (deployLogEventSource) deployLogEventSource.close();
+            const viewer = document.getElementById('deploy-log-viewer');
+            viewer.textContent = 'Starting log stream…';
+            deployLogEventSource = new EventSource(API + '/sse/deploy-log/' + encodeURIComponent(serviceName));
+            deployLogEventSource.addEventListener('log', function(e) {
+                const text = typeof e.data === 'string' ? e.data : (e.data || '');
+                viewer.textContent = viewer.textContent === 'Starting log stream…' || viewer.textContent === 'Connecting to log stream…' ? text : viewer.textContent + text;
+                viewer.classList.remove('empty');
+                viewer.scrollTop = viewer.scrollHeight;
+            });
+            deployLogEventSource.addEventListener('done', function() {
+                if (deployLogEventSource) {
+                    deployLogEventSource.close();
+                    deployLogEventSource = null;
+                }
+            });
+        }
+
+        async function deployService(serviceName) {
+            if (!confirm(`Deploy ${serviceName}?`)) return;
+            openDeployModal(serviceName);
+            try {
+                const res = await fetch(API + '/deploy/' + encodeURIComponent(serviceName), { method: 'POST' });
+                if (!res.ok) {
+                    closeDeployModal();
+                    showToast('Deploy request failed', 'error');
+                    return;
+                }
+                showToast('Deploy started', 'info');
+                startDeployLogSSE(serviceName);
+                const checkDone = setInterval(async () => {
+                    try {
+                        const r = await fetch(API + '/deployments');
+                        const data = await r.json();
+                        const d = data.deployments && data.deployments[serviceName];
+                        const status = d && d.status;
+                        if (status && status !== 'deploying') {
+                            clearInterval(checkDone);
+                            closeDeployModal();
+                            if (status === 'running') showToast(`${serviceName} deployed`, 'success');
+                            else showToast(`${serviceName} deploy: ${status}`, 'error');
+                            refreshData(false);
+                        }
+                    } catch (_) {}
+                }, 3000);
+                setTimeout(() => clearInterval(checkDone), 300000);
+            } catch (e) {
+                closeDeployModal();
+                showToast('Error starting deploy', 'error');
+            }
+        }
+
+        async function restartService(serviceName) {
+            if (!confirm(`Restart ${serviceName}?`)) return;
+            try {
+                const res = await fetch(API + '/restart/' + encodeURIComponent(serviceName), { method: 'POST' });
+                if (res.ok) {
+                    showToast(`${serviceName} restarted`, 'success');
+                    refreshData(false);
+                } else showToast('Restart failed', 'error');
+            } catch (_) { showToast('Restart failed', 'error'); }
+        }
+
+        async function removeDeployment(serviceName) {
+            if (!confirm(`Remove ${serviceName}? This will stop the service and delete configuration.`)) return;
+            try {
+                const res = await fetch(API + '/deployments/' + encodeURIComponent(serviceName), { method: 'DELETE' });
+                if (res.ok) {
+                    showToast(`${serviceName} removed`, 'success');
+                    refreshData(false);
+                    if (document.getElementById('log-service-select').value === serviceName) {
+                        document.getElementById('log-service-select').value = '';
+                        stopLogStream();
+                        document.getElementById('log-viewer').textContent = 'Select a service to stream logs.';
+                        document.getElementById('log-viewer').classList.add('empty');
+                    }
+                } else showToast('Remove failed', 'error');
+            } catch (_) { showToast('Remove failed', 'error'); }
+        }
+
+        function viewLogs(serviceName) {
+            document.getElementById('log-service-select').value = serviceName;
+            startLogStream();
+            loadServiceLogs();
+        }
+
+        function startLogStream() {
+            stopLogStream();
+            const name = document.getElementById('log-service-select').value;
+            if (!name) return;
+            const viewer = document.getElementById('log-viewer');
+            viewer.textContent = 'Connecting to log stream…';
+            viewer.classList.remove('empty');
+            document.getElementById('log-live-badge').textContent = 'Live';
+            logsEventSource = new EventSource(API + '/sse/logs/' + encodeURIComponent(name));
+            logsEventSource.addEventListener('log', function(e) {
+                const text = typeof e.data === 'string' ? e.data : (e.data || '');
+                viewer.textContent = viewer.textContent === 'Connecting to log stream…' ? text : viewer.textContent + text;
+                viewer.scrollTop = viewer.scrollHeight;
+            });
+            logsEventSource.addEventListener('done', function() {});
+            logsEventSource.addEventListener('error', function() {
+                if (logsEventSource) {
+                    logsEventSource.close();
+                    logsEventSource = null;
+                }
+            });
+        }
+
+        function stopLogStream() {
+            if (logsEventSource) {
+                logsEventSource.close();
+                logsEventSource = null;
+            }
+            document.getElementById('log-live-badge').textContent = '';
+        }
+
+        document.getElementById('log-service-select').addEventListener('change', function() {
+            if (this.value) {
+                startLogStream();
+            } else {
+                stopLogStream();
+                document.getElementById('log-viewer').textContent = 'Select a service to stream logs.';
+                document.getElementById('log-viewer').classList.add('empty');
+            }
+        });
+
+        function showAddDeploymentForm() {
+            showToast('Add deployment via CLI: api-manage-extended deploy add <name> <repo> <branch> <port>', 'info');
+        }
+
+        function showSystemInfo() {
+            showToast('System info: use api-manage-extended status', 'info');
         }
     </script>
 </body>

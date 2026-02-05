@@ -572,6 +572,11 @@ done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        # SSE: disable buffering for real-time streams
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
     }
     
     # Dashboard (Node.js on 8080) - single port access
@@ -943,6 +948,27 @@ install_extended_modules() {
         source /opt/api-gateway/modules/deployment-manager.sh
         init_deployment_manager
     fi
+    
+    # Create deploy-service.sh and remove-service.sh (used by dashboard and webhook)
+    mkdir -p /opt/api-gateway/scripts
+    cat > /opt/api-gateway/scripts/deploy-service.sh << 'DEPLOY_SCRIPT'
+#!/bin/bash
+SERVICE_NAME="$1"
+[ -z "$SERVICE_NAME" ] && echo "Usage: $0 <service_name>" && exit 1
+source /opt/api-gateway/modules/common.sh
+source /opt/api-gateway/modules/deployment-manager.sh
+deploy_service "$SERVICE_NAME"
+DEPLOY_SCRIPT
+    cat > /opt/api-gateway/scripts/remove-service.sh << 'REMOVE_SCRIPT'
+#!/bin/bash
+SERVICE_NAME="$1"
+[ -z "$SERVICE_NAME" ] && echo "Usage: $0 <service_name>" && exit 1
+source /opt/api-gateway/modules/common.sh
+source /opt/api-gateway/modules/deployment-manager.sh
+remove_deployment "$SERVICE_NAME"
+REMOVE_SCRIPT
+    chmod +x /opt/api-gateway/scripts/deploy-service.sh
+    chmod +x /opt/api-gateway/scripts/remove-service.sh
     
     print_success "Extended modules installed successfully"
 }

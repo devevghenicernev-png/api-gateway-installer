@@ -75,11 +75,9 @@ if [ -z "$SERVICE_NAME" ]; then
     exit 1
 fi
 
-# Source the deployment manager
-source /opt/api-gateway/modules/deployment-manager.sh
-
-# Load print functions
+# Load print functions first (deployment-manager uses them)
 source /opt/api-gateway/modules/common.sh
+source /opt/api-gateway/modules/deployment-manager.sh
 
 # Deploy the service
 deploy_service "$SERVICE_NAME"

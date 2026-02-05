@@ -167,15 +167,13 @@ app.get('/api/deployments/:serviceName', async (req, res) => {
     }
 });
 
-// Remove deployment
+// Remove deployment (use script so bash + common.sh are correct)
 app.delete('/api/deployments/:serviceName', async (req, res) => {
     try {
         const { serviceName } = req.params;
-        const command = `source /opt/api-gateway/modules/deployment-manager.sh && remove_deployment ${serviceName}`;
-        
-        await runCommand(command);
+        const removeScript = '/opt/api-gateway/scripts/remove-service.sh';
+        await runCommand(`/bin/bash ${removeScript} ${serviceName}`);
         res.json({ success: true, message: `Deployment ${serviceName} removed` });
-        
     } catch (error) {
         console.error(`Error removing deployment ${req.params.serviceName}:`, error);
         res.status(500).json({ success: false, error: error.message });
@@ -193,9 +191,9 @@ app.post('/api/deploy/:serviceName', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Service not found' });
         }
         
-        // Trigger deployment in background
-        const command = `source /opt/api-gateway/modules/deployment-manager.sh && deploy_service ${serviceName}`;
-        runCommandBackground(command);
+        // Trigger deployment in background (same script as webhook - has correct env)
+        const deployScript = '/opt/api-gateway/scripts/deploy-service.sh';
+        runCommandBackground(`/bin/bash ${deployScript} ${serviceName}`);
         
         res.json({
             success: true,
@@ -230,6 +228,144 @@ app.post('/api/restart/:serviceName', async (req, res) => {
             success: false, 
             error: `Failed to restart: ${error.stderr || error.message}` 
         });
+    }
+});
+
+// ============ Server-Sent Events (SSE) ============
+
+const setupSSE = (res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
+    res.flushHeaders();
+};
+
+const sendSSE = (res, event, data) => {
+    const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    res.write(`event: ${event}\ndata: ${payload.replace(/\n/g, '\ndata: ')}\n\n`);
+    if (typeof res.flush === 'function') res.flush();
+};
+
+// SSE: deployments list (push every 5s)
+app.get('/api/sse/deployments', async (req, res) => {
+    setupSSE(res);
+    const pushDeployments = async () => {
+        try {
+            const statusData = await loadJsonFile(DEPLOY_STATUS_FILE, { deployments: {} });
+            const deployments = {};
+            const configFiles = await fs.readdir(DEPLOY_CONFIG_DIR).catch(() => []);
+            for (const configFile of configFiles) {
+                if (!configFile.endsWith('.json')) continue;
+                const serviceName = configFile.replace('.json', '');
+                const configPath = path.join(DEPLOY_CONFIG_DIR, configFile);
+                const config = await loadJsonFile(configPath);
+                if (!config) continue;
+                const deploymentStatus = statusData.deployments[serviceName] || {};
+                const processManager = config.process_manager || 'systemd';
+                const systemRunning = await checkServiceStatus(serviceName, processManager);
+                deployments[serviceName] = {
+                    config,
+                    status: deploymentStatus.status || 'unknown',
+                    message: deploymentStatus.message || '',
+                    last_updated: deploymentStatus.last_updated,
+                    last_deployment: deploymentStatus.last_deployment,
+                    system_running: systemRunning
+                };
+            }
+            sendSSE(res, 'deployments', { success: true, deployments, timestamp: new Date().toISOString() });
+        } catch (e) {
+            sendSSE(res, 'error', { message: e.message });
+        }
+    };
+    await pushDeployments();
+    const interval = setInterval(pushDeployments, 5000);
+    req.on('close', () => clearInterval(interval));
+});
+
+// SSE: deploy log stream (tail -f)
+app.get('/api/sse/deploy-log/:serviceName', (req, res) => {
+    const { serviceName } = req.params;
+    const deploymentLogDir = path.join(LOG_DIR, 'deployments');
+    setupSSE(res);
+    let closed = false;
+    req.on('close', () => { closed = true; });
+
+    const waitForLog = (retries = 30) => {
+        if (closed) return;
+        fs.readdir(deploymentLogDir).then(files => {
+            if (closed) return;
+            const matches = files
+                .filter(f => f.startsWith(`${serviceName}-`) && f.endsWith('.log'))
+                .map(f => path.join(deploymentLogDir, f));
+            if (matches.length === 0) {
+                if (retries > 0) return setTimeout(() => waitForLog(retries - 1), 1000);
+                sendSSE(res, 'log', 'Waiting for deployment log (start deploy if not started)...\n');
+                return;
+            }
+            return Promise.all(matches.map(f => fs.stat(f).then(s => ({ f, mtime: s.mtime }))))
+                .then(stats => {
+                    if (closed) return;
+                    const latest = stats.sort((a, b) => b.mtime - a.mtime)[0];
+                    const tail = spawn('tail', ['-f', '-n', '100', latest.f], { stdio: ['ignore', 'pipe', 'pipe'] });
+                    tail.stdout.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
+                    tail.stderr.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
+                    tail.on('error', () => !closed && sendSSE(res, 'done', {}));
+                    tail.on('exit', () => !closed && sendSSE(res, 'done', {}));
+                    req.on('close', () => tail.kill('SIGTERM'));
+                });
+        }).catch(() => {
+            if (!closed && retries > 0) setTimeout(() => waitForLog(retries - 1), 1000);
+        });
+    };
+    waitForLog();
+});
+
+// SSE: service logs stream
+app.get('/api/sse/logs/:serviceName', async (req, res) => {
+    const { serviceName } = req.params;
+    setupSSE(res);
+    try {
+        const configPath = path.join(DEPLOY_CONFIG_DIR, `${serviceName}.json`);
+        const config = await loadJsonFile(configPath);
+        const processManager = config?.process_manager || 'systemd';
+        let child;
+        if (processManager === 'pm2') {
+            child = spawn('pm2', ['logs', serviceName, '--raw', '--lines', '50'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        } else {
+            child = spawn('journalctl', ['-u', serviceName, '-f', '-n', '50'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        }
+        const sendChunk = (chunk) => sendSSE(res, 'log', chunk.toString());
+        child.stdout.on('data', sendChunk);
+        child.stderr.on('data', sendChunk);
+        child.on('error', () => sendSSE(res, 'done', {}));
+        child.on('exit', () => sendSSE(res, 'done', {}));
+        req.on('close', () => child.kill('SIGTERM'));
+    } catch (e) {
+        sendSSE(res, 'error', { message: e.message });
+    }
+});
+
+// Get latest deployment log (for live progress during deploy)
+app.get('/api/deployments/:serviceName/deploy-log', async (req, res) => {
+    try {
+        const { serviceName } = req.params;
+        const deploymentLogDir = path.join(LOG_DIR, 'deployments');
+        const files = await fs.readdir(deploymentLogDir).catch(() => []);
+        const serviceLogFiles = files
+            .filter(file => file.startsWith(`${serviceName}-`) && file.endsWith('.log'))
+            .map(file => path.join(deploymentLogDir, file));
+        if (serviceLogFiles.length === 0) {
+            return res.type('text/plain').send('');
+        }
+        const stats = await Promise.all(
+            serviceLogFiles.map(async file => ({ file, mtime: (await fs.stat(file)).mtime }))
+        );
+        const latest = stats.sort((a, b) => b.mtime - a.mtime)[0];
+        const content = await fs.readFile(latest.file, 'utf8');
+        res.type('text/plain').send(content);
+    } catch (error) {
+        res.type('text/plain').send('');
     }
 });
 

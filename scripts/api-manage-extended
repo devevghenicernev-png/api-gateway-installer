@@ -176,9 +176,11 @@ StandardError=append:/var/log/api-gateway/dashboard.log
 WantedBy=multi-user.target
 EOF
 
-    # Copy web UI files
-    mkdir -p /opt/api-gateway/web-ui
-    cp -r "$MODULE_DIR/../web-ui/"* /opt/api-gateway/web-ui/
+    # Web UI files are installed by install.sh; no copy here to avoid same-file errors
+    if [ ! -f /opt/api-gateway/web-ui/server.js ]; then
+        print_error "Dashboard not found. Run the full install first: sudo ./install.sh"
+        return 1
+    fi
     chmod +x /opt/api-gateway/web-ui/server.js
     chmod +x /opt/api-gateway/web-ui/webhook-server.js
     
