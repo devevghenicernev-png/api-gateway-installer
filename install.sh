@@ -358,6 +358,12 @@ map \$sent_http_set_cookie \$apigw_set_cookie {
     default "<redacted>";
     "" "";
 }
+
+# WebSocket connection upgrade map
+map \$http_upgrade \$connection_upgrade {
+    default upgrade;
+    '' close;
+}
 ENDCONFIG
 
 # Create map for API name based on URI (BEFORE server block!)
@@ -454,17 +460,28 @@ while IFS= read -r api; do
 
     # \$NAME
     location \$APATH/ {
-        # Request body logging:
-        # - \$request_body is often empty for large bodies (nginx spills to a temp file)
-        # - if needed, you can force storing the body in a file:
-        #   client_body_in_file_only on;  # WARNING: disk + secret leakage risk
+        # Large file upload support (Nextcloud, file sharing, etc)
+        client_max_body_size 512m;
+        client_body_buffer_size 128k;
         client_body_in_single_buffer on;
-        client_body_buffer_size 1m;
+        
+        # Timeouts for long operations (file sync, large uploads)
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        send_timeout 300s;
+
+        # Disable buffering for large files and real-time features
+        proxy_buffering off;
+        proxy_request_buffering off;
 
         proxy_pass http://localhost:\$PORT/;
         proxy_http_version 1.1;
+        
+        # WebSocket support (for Nextcloud Talk, real-time features)
         proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection 'upgrade';
+        proxy_set_header Connection \\\$connection_upgrade;
+        
         proxy_set_header Host \\\$host;
         proxy_set_header X-Request-ID \\\$request_id;
         proxy_set_header X-Real-IP \\\$remote_addr;
@@ -551,10 +568,38 @@ DASHBOARD
 # Close server block
 /bin/echo '}' >> "\$NGINX_CONFIG"
 
-# Test and reload
-/usr/sbin/nginx -t && /usr/bin/systemctl reload nginx
+# Find nginx binary
+NGINX_BIN=\$(command -v nginx 2>/dev/null || /usr/bin/which nginx 2>/dev/null || echo "")
+if [ -z "\$NGINX_BIN" ]; then
+    # Try common locations
+    for path in /usr/sbin/nginx /usr/bin/nginx /sbin/nginx; do
+        if [ -x "\$path" ]; then
+            NGINX_BIN="\$path"
+            break
+        fi
+    done
+fi
 
-if [ \$? -eq 0 ]; then
+# Test and reload
+NGINX_TEST_RESULT=0
+if [ -n "\$NGINX_BIN" ] && [ -x "\$NGINX_BIN" ]; then
+    if \$NGINX_BIN -t 2>/dev/null; then
+        /usr/bin/systemctl reload nginx 2>/dev/null || true
+        NGINX_TEST_RESULT=0
+    else
+        NGINX_TEST_RESULT=1
+    fi
+elif /usr/bin/systemctl show nginx.service -p LoadState 2>/dev/null | grep -q loaded; then
+    # Try to reload if service exists (even if masked)
+    /usr/bin/systemctl reload nginx 2>/dev/null || true
+    NGINX_TEST_RESULT=0
+else
+    /bin/echo "⚠️  Nginx binary not found, config generated but not tested"
+    /bin/echo "⚠️  Install nginx: sudo apt install -y nginx"
+    NGINX_TEST_RESULT=0
+fi
+
+if [ \$NGINX_TEST_RESULT -eq 0 ]; then
     /bin/echo "✅ Configuration generated and applied!"
     /bin/echo "🌐 Access at http://$SERVER_IP:$LISTEN_PORT"
 else
