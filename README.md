@@ -22,7 +22,9 @@ Automatic installer for Nginx-based API Gateway system running on port 422.
 
 ## Installation
 
-### 1. Copy files to your server
+### Option 1: Full Installation (Recommended)
+
+#### 1. Copy files to your server
 
 ```bash
 # Replace USER and SERVER_IP with your values
@@ -31,7 +33,7 @@ scp install.sh user@SERVER_IP:~/
 # Or upload to server manually
 ```
 
-### 2. Run the installer on server
+#### 2. Run the installer on server
 
 ```bash
 ssh user@SERVER_IP
@@ -45,6 +47,31 @@ That's it! The script will:
 - Install missing components
 - Create all necessary scripts and configs
 - Start the API Gateway
+
+### Option 2: Install via curl (One-liner)
+
+Install everything with a single command:
+
+```bash
+# Full installation via curl (downloads and runs install.sh)
+curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh | sudo bash
+```
+
+This will:
+- Download the full installer from GitHub
+- Run the interactive installation script
+- Install all dependencies, modules, and CLI tools
+- Set up the complete API Gateway system
+
+**Note:** The installer will ask you to confirm server IP and port during installation.
+
+After installation, verify:
+```bash
+api-manage-extended --help
+api-manage-extended list
+```
+
+For more details on CLI installation best practices, see [INSTALL_CLI.md](INSTALL_CLI.md).
 
 ## Usage After Installation
 
