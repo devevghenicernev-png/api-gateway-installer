@@ -69,36 +69,36 @@ main() {
     print_success "Installer downloaded"
     echo ""
     
-    # Check if stdin is a terminal (interactive mode available)
-    if [ -t 0 ]; then
-        # Running interactively - can use stdin directly
-        print_info "Starting interactive installation..."
-        echo ""
-        exec "$install_script"
+    # Save to a file and run from there
+    local saved_script="/tmp/api-gateway-install-$$.sh"
+    cp "$install_script" "$saved_script"
+    chmod +x "$saved_script"
+    
+    print_info "Installer ready. Starting interactive installation..."
+    echo ""
+    
+    # Disable exit on error temporarily
+    set +e
+    
+    # Run with explicit /dev/tty redirection for stdin to ensure interactive input works
+    # This is necessary when running via pipe (curl ... | bash)
+    if [ -c /dev/tty ] && [ -r /dev/tty ]; then
+        # Use /dev/tty for stdin, keep stdout/stderr to terminal
+        bash "$saved_script" < /dev/tty
+        local exit_code=$?
     else
-        # Running from pipe - save to file and run with /dev/tty for interactive input
-        print_info "Detected pipe execution - saving installer for interactive mode..."
-        local saved_script="/tmp/api-gateway-install-$$.sh"
-        cp "$install_script" "$saved_script"
-        chmod +x "$saved_script"
-        
-        print_success "Installer saved to: $saved_script"
-        print_info "Starting interactive installation..."
-        echo ""
-        
-        # Try to run with /dev/tty for interactive input
-        if [ -c /dev/tty ]; then
-            "$saved_script" < /dev/tty
-        else
-            # If /dev/tty not available, try to run directly
-            # This may not work for interactive input, but we try
-            print_warning "Cannot access /dev/tty - trying direct execution..."
-            "$saved_script"
-        fi
-        
-        # Cleanup
-        rm -f "$saved_script"
+        # Fallback: try direct execution
+        bash "$saved_script"
+        local exit_code=$?
     fi
+    
+    # Re-enable exit on error
+    set -e
+    
+    # Cleanup
+    rm -f "$saved_script"
+    
+    exit $exit_code
 }
 
 main "$@"
