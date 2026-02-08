@@ -69,10 +69,36 @@ main() {
     print_success "Installer downloaded"
     echo ""
     
-    # Run the installer
-    print_info "Starting full installation..."
-    echo ""
-    "$install_script"
+    # Check if stdin is a terminal (interactive mode available)
+    if [ -t 0 ]; then
+        # Running interactively - can use stdin directly
+        print_info "Starting interactive installation..."
+        echo ""
+        exec "$install_script"
+    else
+        # Running from pipe - save to file and run with /dev/tty for interactive input
+        print_info "Detected pipe execution - saving installer for interactive mode..."
+        local saved_script="/tmp/api-gateway-install-$$.sh"
+        cp "$install_script" "$saved_script"
+        chmod +x "$saved_script"
+        
+        print_success "Installer saved to: $saved_script"
+        print_info "Starting interactive installation..."
+        echo ""
+        
+        # Try to run with /dev/tty for interactive input
+        if [ -c /dev/tty ]; then
+            "$saved_script" < /dev/tty
+        else
+            # If /dev/tty not available, try to run directly
+            # This may not work for interactive input, but we try
+            print_warning "Cannot access /dev/tty - trying direct execution..."
+            "$saved_script"
+        fi
+        
+        # Cleanup
+        rm -f "$saved_script"
+    fi
 }
 
 main "$@"
