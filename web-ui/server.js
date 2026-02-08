@@ -441,6 +441,30 @@ app.get('/api/logs/:serviceName', async (req, res) => {
     }
 });
 
+// Get AI services from apis.json
+app.get('/api/ai/services', async (req, res) => {
+    try {
+        const data = await loadJsonFile(APIS_CONFIG, { apis: [] });
+        const aiServices = (data.apis || []).filter(a => a.type === 'ai-model');
+        const services = [];
+        for (const svc of aiServices) {
+            let running = false;
+            try {
+                if (svc.name === 'localai') {
+                    const { stdout } = await runCommand('docker ps --format "{{.Names}}" 2>/dev/null');
+                    running = stdout.includes('localai');
+                } else {
+                    running = await checkServiceStatus(svc.name);
+                }
+            } catch {}
+            services.push({ ...svc, running });
+        }
+        res.json({ success: true, services });
+    } catch (e) {
+        res.json({ success: true, services: [] });
+    }
+});
+
 // Add new deployment
 app.post('/api/deployments', async (req, res) => {
     try {
@@ -449,8 +473,8 @@ app.post('/api/deployments', async (req, res) => {
             github_repo,
             branch = 'main',
             port,
-            build_command = 'npm install && npm run build',
-            start_command = 'npm start'
+            build_command = 'auto',
+            start_command = 'auto'
         } = req.body;
         
         if (!service_name || !github_repo || !port) {

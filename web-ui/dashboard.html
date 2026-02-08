@@ -93,6 +93,7 @@
         .badge-running { background: rgba(63, 185, 80, 0.2); color: var(--success); }
         .badge-stopped { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
         .badge-deploying { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+        .badge-runtime { background: rgba(88, 166, 255, 0.15); color: var(--accent); font-size: 0.65rem; margin-left: 6px; }
         .card-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 12px; font-size: 0.85rem; }
         .card-meta dt { color: var(--text-muted); font-weight: 500; }
         .card-meta dd { margin-top: 2px; }
@@ -304,6 +305,17 @@
                         System info
                     </button>
                 </div>
+                <hr style="border-color:var(--border);margin:12px 0;">
+                <div class="panel-title" style="font-size:0.85rem;">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/></svg>
+                    AI Models
+                </div>
+                <div id="ai-services-list" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:8px;">Loading...</div>
+                <div class="form-group">
+                    <button class="btn btn-ghost" style="width:100%;font-size:0.8rem;" onclick="showAiHelp()">
+                        Install AI model via CLI
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -410,10 +422,12 @@
             for (const [name, d] of Object.entries(deployments)) {
                 const cfg = d.config || {};
                 const status = d.status || 'unknown';
+                const runtime = cfg.runtime || 'auto';
+                const runtimeLabel = runtime === 'auto' ? '' : runtime;
                 html += `
                     <div class="card">
                         <div class="card-header">
-                            <span class="card-title">${escapeHtml(name)}</span>
+                            <span class="card-title">${escapeHtml(name)}${runtimeLabel ? `<span class="badge badge-runtime">${escapeHtml(runtimeLabel)}</span>` : ''}</span>
                             <span class="badge badge-${status}">${status}</span>
                         </div>
                         <dl class="card-meta">
@@ -635,6 +649,32 @@
         function showSystemInfo() {
             showToast('System info: use api-manage-extended status', 'info');
         }
+
+        function showAiHelp() {
+            showToast('Install AI: sudo api-manage-extended ai add ollama', 'info');
+        }
+
+        async function loadAiServices() {
+            try {
+                const res = await fetch(API + '/ai/services');
+                const data = await res.json();
+                const el = document.getElementById('ai-services-list');
+                if (!data.services || data.services.length === 0) {
+                    el.textContent = 'No AI models installed';
+                    return;
+                }
+                el.innerHTML = data.services.map(s =>
+                    `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
+                        <span>${escapeHtml(s.name)}</span>
+                        <span class="badge ${s.running ? 'badge-running' : 'badge-stopped'}" style="font-size:0.6rem;">${s.running ? 'running' : 'stopped'}</span>
+                    </div>`
+                ).join('');
+            } catch { document.getElementById('ai-services-list').textContent = 'Error loading'; }
+        }
+
+        // Load AI services on page load
+        document.addEventListener('DOMContentLoaded', loadAiServices);
+        setInterval(loadAiServices, 15000);
     </script>
 </body>
 </html>

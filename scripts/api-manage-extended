@@ -54,6 +54,14 @@ DASHBOARD MANAGEMENT:
     dashboard status                Show dashboard status
     dashboard url                   Get dashboard URL
 
+AI MODEL MANAGEMENT:
+    ai add ollama [path]            Install Ollama and register in gateway
+    ai add localai [path]           Install LocalAI via Docker
+    ai add vllm [path]              Install vLLM (requires GPU)
+    ai list                         List registered AI services
+    ai remove <name>                Remove AI service
+    ai pull <model>                 Pull model (Ollama: ollama pull <model>)
+
 SYSTEM MANAGEMENT:
     status                          Show overall system status
     logs [service]                  Show system logs
@@ -75,6 +83,12 @@ EXAMPLES:
 
     # Show system status
     api-manage-extended status
+
+    # Install Ollama AI and expose at /ai/ollama
+    api-manage-extended ai add ollama
+
+    # Pull a model
+    api-manage-extended ai pull llama3
 
 EOF
 }
@@ -416,6 +430,204 @@ deploy_setup_private() {
     echo ""
 }
 
+# AI Model Management Functions
+ai_register_service() {
+    local name="$1"
+    local port="$2"
+    local ai_path="${3:-/ai/$name}"
+    
+    local config_file="/etc/api-gateway/apis.json"
+    if jq -e ".apis[] | select(.name == \"$name\")" "$config_file" &>/dev/null; then
+        print_info "Route for $name already exists, updating..."
+        jq --arg n "$name" --argjson p "$port" \
+            '.apis |= map(if .name == $n then .port = $p else . end)' \
+            "$config_file" > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
+    else
+        jq --arg n "$name" --arg path "$ai_path" --argjson p "$port" \
+            '.apis += [{"name": $n, "path": $path, "port": $p, "description": "AI Model Service", "enabled": true, "type": "ai-model", "streaming": true, "websocket": false, "timeout": 600, "max_body_size": "1g", "fix_redirects": false}]' \
+            "$config_file" > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
+        print_success "Route added: ${ai_path}/ -> localhost:${port}"
+    fi
+    
+    [ -x /usr/local/bin/generate-nginx-config ] && /usr/local/bin/generate-nginx-config 2>/dev/null && print_info "Nginx config regenerated" || true
+    [ -x /usr/local/bin/generate-fluentbit-config ] && /usr/local/bin/generate-fluentbit-config 2>/dev/null || true
+}
+
+ai_add() {
+    local ai_type="$1"
+    local ai_path="${2:-}"
+    
+    case "$ai_type" in
+        ollama)
+            print_header "Installing Ollama"
+            ai_path="${ai_path:-/ai/ollama}"
+            
+            if command_exists ollama; then
+                print_success "Ollama already installed"
+            else
+                print_info "Downloading Ollama..."
+                curl -fsSL https://ollama.com/install.sh | sh
+                if command_exists ollama; then
+                    print_success "Ollama installed"
+                else
+                    print_error "Failed to install Ollama"
+                    return 1
+                fi
+            fi
+            
+            # Enable and start Ollama service
+            systemctl enable ollama 2>/dev/null || true
+            systemctl start ollama 2>/dev/null || true
+            sleep 2
+            
+            if service_is_running "ollama"; then
+                print_success "Ollama service is running"
+            else
+                print_warning "Ollama service not running, trying to start..."
+                systemctl restart ollama 2>/dev/null || true
+            fi
+            
+            ai_register_service "ollama" 11434 "$ai_path"
+            
+            print_success "Ollama registered at ${ai_path}/"
+            print_info "Pull a model: api-manage-extended ai pull llama3"
+            print_info "API endpoint: http://<server_ip>:<port>${ai_path}/api/generate"
+            ;;
+        
+        localai)
+            print_header "Installing LocalAI (Docker)"
+            ai_path="${ai_path:-/ai/localai}"
+            
+            if ! command_exists docker; then
+                print_error "Docker is required for LocalAI"
+                print_info "Install Docker: curl -fsSL https://get.docker.com | sh"
+                return 1
+            fi
+            
+            # Stop existing if running
+            docker stop localai 2>/dev/null || true
+            docker rm localai 2>/dev/null || true
+            
+            print_info "Starting LocalAI container..."
+            mkdir -p /opt/ai-models/localai
+            docker run -d --restart unless-stopped \
+                --name localai \
+                -p 8181:8080 \
+                -v /opt/ai-models/localai:/models \
+                localai/localai:latest
+            
+            sleep 5
+            if docker ps --format '{{.Names}}' | grep -q "^localai$"; then
+                print_success "LocalAI container is running"
+            else
+                print_error "Failed to start LocalAI"
+                return 1
+            fi
+            
+            ai_register_service "localai" 8181 "$ai_path"
+            
+            print_success "LocalAI registered at ${ai_path}/"
+            print_info "API endpoint: http://<server_ip>:<port>${ai_path}/v1/chat/completions"
+            ;;
+        
+        vllm)
+            print_header "Installing vLLM"
+            ai_path="${ai_path:-/ai/vllm}"
+            
+            if ! command_exists python3; then
+                print_error "Python3 is required for vLLM"
+                return 1
+            fi
+            
+            print_info "Installing vLLM (this may take a while)..."
+            pip3 install vllm 2>/dev/null || {
+                print_error "Failed to install vLLM"
+                print_info "vLLM requires a CUDA-capable GPU"
+                return 1
+            }
+            
+            ai_register_service "vllm" 8000 "$ai_path"
+            
+            print_success "vLLM registered at ${ai_path}/"
+            print_info "Start vLLM: vllm serve <model_name> --port 8000"
+            print_info "API endpoint: http://<server_ip>:<port>${ai_path}/v1/completions"
+            ;;
+        
+        *)
+            print_error "Unknown AI type: $ai_type"
+            echo "Supported: ollama, localai, vllm"
+            return 1
+            ;;
+    esac
+}
+
+ai_list() {
+    print_header "AI Model Services"
+    
+    local config_file="/etc/api-gateway/apis.json"
+    local count=$(jq '[.apis[] | select(.type == "ai-model")] | length' "$config_file" 2>/dev/null)
+    
+    if [ "$count" = "0" ] || [ -z "$count" ]; then
+        print_info "No AI services registered"
+        echo "  Add one: api-manage-extended ai add ollama"
+        return
+    fi
+    
+    jq -r '.apis[] | select(.type == "ai-model") | "  \(.name) -> \(.path) (port \(.port)) [\(if .enabled then "ACTIVE" else "DISABLED" end)]"' "$config_file"
+}
+
+ai_remove() {
+    local name="$1"
+    
+    if [ -z "$name" ]; then
+        print_error "Usage: ai remove <name>"
+        return 1
+    fi
+    
+    print_header "Removing AI service: $name"
+    
+    # Stop services
+    case "$name" in
+        ollama)
+            systemctl stop ollama 2>/dev/null || true
+            systemctl disable ollama 2>/dev/null || true
+            ;;
+        localai)
+            docker stop localai 2>/dev/null || true
+            docker rm localai 2>/dev/null || true
+            ;;
+    esac
+    
+    # Remove from apis.json
+    local config_file="/etc/api-gateway/apis.json"
+    jq --arg n "$name" '.apis |= map(select(.name != $n))' "$config_file" > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
+    
+    [ -x /usr/local/bin/generate-nginx-config ] && /usr/local/bin/generate-nginx-config 2>/dev/null || true
+    [ -x /usr/local/bin/generate-fluentbit-config ] && /usr/local/bin/generate-fluentbit-config 2>/dev/null || true
+    
+    print_success "AI service $name removed"
+}
+
+ai_pull() {
+    local model="$1"
+    
+    if [ -z "$model" ]; then
+        print_error "Usage: ai pull <model>"
+        echo "  Examples: llama3, codellama, mistral, phi3, gemma"
+        return 1
+    fi
+    
+    if command_exists ollama; then
+        print_info "Pulling model: $model (this may take a while)..."
+        ollama pull "$model"
+        print_success "Model $model pulled"
+    else
+        print_error "Ollama is not installed"
+        print_info "Install: api-manage-extended ai add ollama"
+        return 1
+    fi
+}
+
 # Main command dispatcher
 main() {
     if [ $# -eq 0 ]; then
@@ -536,6 +748,31 @@ main() {
                     ;;
                 *)
                     print_error "Unknown webhook command: $webhook_cmd"
+                    show_help
+                    return 1
+                    ;;
+            esac
+            ;;
+        
+        # AI Model Management
+        "ai")
+            local ai_cmd="$1"
+            shift
+            case "$ai_cmd" in
+                "add")
+                    ai_add "$@"
+                    ;;
+                "list")
+                    ai_list
+                    ;;
+                "remove")
+                    ai_remove "$@"
+                    ;;
+                "pull")
+                    ai_pull "$@"
+                    ;;
+                *)
+                    print_error "Unknown ai command: $ai_cmd"
                     show_help
                     return 1
                     ;;

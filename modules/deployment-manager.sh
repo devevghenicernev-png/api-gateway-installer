@@ -25,6 +25,93 @@ init_deployment_manager() {
     print_success "Deployment manager initialized"
 }
 
+# Detect project runtime by files in deploy directory
+detect_runtime() {
+    local deploy_path="${1:-.}"
+    
+    [ -f "$deploy_path/docker-compose.yml" ] || [ -f "$deploy_path/docker-compose.yaml" ] && echo "docker-compose" && return
+    [ -f "$deploy_path/Dockerfile" ] && echo "docker" && return
+    [ -f "$deploy_path/package.json" ] && echo "node" && return
+    [ -f "$deploy_path/requirements.txt" ] || [ -f "$deploy_path/pyproject.toml" ] || [ -f "$deploy_path/Pipfile" ] && echo "python" && return
+    [ -f "$deploy_path/go.mod" ] && echo "go" && return
+    [ -f "$deploy_path/Cargo.toml" ] && echo "rust" && return
+    [ -f "$deploy_path/pom.xml" ] && echo "java-maven" && return
+    [ -f "$deploy_path/build.gradle" ] || [ -f "$deploy_path/build.gradle.kts" ] && echo "java-gradle" && return
+    [ -f "$deploy_path/composer.json" ] && echo "php" && return
+    [ -f "$deploy_path/Gemfile" ] && echo "ruby" && return
+    
+    echo "unknown"
+}
+
+# Get default build command for a runtime
+get_default_build_command() {
+    local runtime="$1"
+    case "$runtime" in
+        node)           echo "npm install && npm run build" ;;
+        python)         echo "python3 -m venv venv && . venv/bin/activate && pip install -r requirements.txt" ;;
+        go)             echo "go build -o server ." ;;
+        rust)           echo "cargo build --release" ;;
+        java-maven)     echo "mvn package -DskipTests" ;;
+        java-gradle)    echo "gradle build -x test" ;;
+        php)            echo "composer install --no-dev --optimize-autoloader" ;;
+        ruby)           echo "bundle install --without development test" ;;
+        docker)         echo "docker build -t \$SERVICE_NAME ." ;;
+        docker-compose) echo "docker compose build" ;;
+        *)              echo "echo 'No build step configured'" ;;
+    esac
+}
+
+# Get default start command for a runtime
+get_default_start_command() {
+    local runtime="$1"
+    local port="${2:-3000}"
+    case "$runtime" in
+        node)           echo "npm start" ;;
+        python)
+            if [ -f "main.py" ] || [ -f "app/main.py" ]; then
+                echo ". venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port $port"
+            else
+                echo ". venv/bin/activate && gunicorn -b 0.0.0.0:$port app:app"
+            fi
+            ;;
+        go)             echo "./server" ;;
+        rust)           echo "./target/release/\$(basename \$(pwd))" ;;
+        java-maven)     echo "java -jar target/*.jar --server.port=$port" ;;
+        java-gradle)    echo "java -jar build/libs/*.jar --server.port=$port" ;;
+        php)            echo "php -S 0.0.0.0:$port -t public" ;;
+        ruby)           echo "bundle exec puma -p $port -e production" ;;
+        docker)         echo "docker run -d --restart unless-stopped -p $port:$port --name \$SERVICE_NAME \$SERVICE_NAME" ;;
+        docker-compose) echo "docker compose up -d" ;;
+        *)              echo "echo 'No start command configured'" ;;
+    esac
+}
+
+# Get runtime-specific environment variables for systemd
+get_runtime_env_vars() {
+    local runtime="$1"
+    local port="$2"
+    case "$runtime" in
+        node)
+            echo "Environment=NODE_ENV=production"
+            echo "Environment=PORT=$port"
+            ;;
+        python)
+            echo "Environment=PORT=$port"
+            echo "Environment=PYTHONUNBUFFERED=1"
+            ;;
+        java-maven|java-gradle)
+            echo "Environment=SERVER_PORT=$port"
+            echo "Environment=JAVA_OPTS=-Xmx512m"
+            ;;
+        go|rust|php|ruby)
+            echo "Environment=PORT=$port"
+            ;;
+        *)
+            echo "Environment=PORT=$port"
+            ;;
+    esac
+}
+
 # Use Node version from .nvmrc or .node-version in project (for build + PM2)
 # Call from deploy path. Exports NODE_BIN for later use in same shell.
 use_project_node_version() {
@@ -86,8 +173,8 @@ add_deployment() {
     local github_repo="$2"
     local branch="${3:-main}"
     local port="$4"
-    local build_command="${5:-npm install && npm run build}"
-    local start_command="${6:-npm start}"
+    local build_command="${5:-auto}"
+    local start_command="${6:-auto}"
     
     if [ -z "$service_name" ] || [ -z "$github_repo" ] || [ -z "$port" ]; then
         print_error "Usage: add_deployment <service_name> <github_repo> [branch] <port> [build_command] [start_command]"
@@ -101,7 +188,7 @@ add_deployment() {
         print_info "Deployments will use PM2"
     fi
     
-    # Create deployment configuration
+    # Create deployment configuration (runtime auto-detected on first deploy)
     cat > "$config_file" << EOF
 {
     "service_name": "$service_name",
@@ -110,6 +197,7 @@ add_deployment() {
     "port": $port,
     "build_command": "$build_command",
     "start_command": "$start_command",
+    "runtime": "auto",
     "deploy_path": "/opt/deployments/$service_name",
     "webhook_secret": "$(openssl rand -hex 32)",
     "auto_deploy": true,
@@ -173,6 +261,7 @@ deploy_service() {
     local start_command=$(jq -r '.start_command' "$config_file")
     local deploy_path=$(jq -r '.deploy_path' "$config_file")
     local process_manager=$(jq -r '.process_manager // "systemd"' "$config_file")
+    local runtime=$(jq -r '.runtime // "auto"' "$config_file")
     
     local log_file="$DEPLOY_LOG_DIR/${service_name}-$(date +%Y%m%d-%H%M%S).log"
     
@@ -202,8 +291,33 @@ deploy_service() {
             git clone -b "$branch" "$github_repo" .
         fi
         
-        # Switch to Node version from .nvmrc/.node-version if present (nvm/fnm/asdf)
-        use_project_node_version "$deploy_path"
+        # Auto-detect runtime if set to "auto"
+        if [ "$runtime" = "auto" ] || [ "$runtime" = "null" ]; then
+            runtime=$(detect_runtime "$deploy_path")
+            echo "Auto-detected runtime: $runtime"
+            # Save detected runtime back to config
+            jq --arg rt "$runtime" '.runtime = $rt' "$config_file" > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
+        else
+            echo "Runtime: $runtime"
+        fi
+        
+        # Resolve auto build/start commands based on runtime
+        if [ "$build_command" = "auto" ] || [ "$build_command" = "null" ]; then
+            build_command=$(get_default_build_command "$runtime")
+            echo "Using default build command for $runtime"
+        fi
+        if [ "$start_command" = "auto" ] || [ "$start_command" = "null" ]; then
+            start_command=$(get_default_start_command "$runtime" "$port")
+            echo "Using default start command for $runtime"
+        fi
+        
+        # Export SERVICE_NAME for docker commands
+        export SERVICE_NAME="$service_name"
+        
+        # Switch to Node version from .nvmrc/.node-version if present
+        if [ "$runtime" = "node" ]; then
+            use_project_node_version "$deploy_path"
+        fi
         
         # Run build command
         echo "Running build command: $build_command"
@@ -212,40 +326,57 @@ deploy_service() {
         if [ $? -eq 0 ]; then
             echo "Build completed successfully"
             
-            if [ "$process_manager" = "pm2" ] && command -v pm2 &>/dev/null; then
-                # Use PM2
+            # Docker-based runtimes: manage via docker directly
+            if [ "$runtime" = "docker" ] || [ "$runtime" = "docker-compose" ]; then
+                echo "Starting service via Docker..."
+                # Stop existing container if running
+                docker stop "$service_name" 2>/dev/null || true
+                docker rm "$service_name" 2>/dev/null || true
+                eval "$start_command"
+                sleep 3
+                if docker ps --format '{{.Names}}' | grep -q "^${service_name}$"; then
+                    echo "Service started successfully (Docker)"
+                    update_deployment_status "$service_name" "running" "Deployment completed (Docker, runtime: $runtime)"
+                    print_success "Deployment of $service_name completed successfully"
+                else
+                    echo "Failed to start service with Docker"
+                    update_deployment_status "$service_name" "failed" "Docker failed to start"
+                    print_error "Failed to start $service_name"
+                    return 1
+                fi
+            elif [ "$runtime" = "node" ] && [ "$process_manager" = "pm2" ] && command -v pm2 &>/dev/null; then
                 echo "Starting service with PM2..."
                 if pm2 describe "$service_name" &>/dev/null; then
                     cd "$deploy_path" && PORT=$port NODE_ENV=production pm2 restart "$service_name" --update-env
                 else
-                    cd "$deploy_path" && PORT=$port NODE_ENV=production pm2 start npm --name "$service_name" -- start
+                    cd "$deploy_path" && PORT=$port NODE_ENV=production pm2 start "$start_command" --name "$service_name"
                 fi
                 pm2 save
                 sleep 2
                 if pm2 list 2>/dev/null | grep -w "$service_name" | grep -q "online"; then
                     echo "Service started successfully (PM2)"
-                    update_deployment_status "$service_name" "running" "Deployment completed successfully (PM2)"
+                    update_deployment_status "$service_name" "running" "Deployment completed (PM2, runtime: $runtime)"
                     print_success "Deployment of $service_name completed successfully"
                 else
                     echo "Failed to start service with PM2"
-                    update_deployment_status "$service_name" "failed" "PM2 failed to start service"
+                    update_deployment_status "$service_name" "failed" "PM2 failed to start"
                     print_error "Failed to start $service_name with PM2"
                     return 1
                 fi
             else
-                # Use systemd
+                # Use systemd for all other runtimes
                 if systemctl is-active --quiet "$service_name" 2>/dev/null; then
                     echo "Stopping existing service..."
                     systemctl stop "$service_name"
                 fi
-                create_systemd_service "$service_name" "$deploy_path" "$start_command" "$port"
+                create_systemd_service "$service_name" "$deploy_path" "$start_command" "$port" "$runtime"
                 echo "Starting service..."
                 systemctl daemon-reload
                 systemctl enable "$service_name"
                 systemctl start "$service_name"
                 if systemctl is-active --quiet "$service_name"; then
-                    echo "Service started successfully"
-                    update_deployment_status "$service_name" "running" "Deployment completed successfully"
+                    echo "Service started successfully (systemd, runtime: $runtime)"
+                    update_deployment_status "$service_name" "running" "Deployment completed (systemd, runtime: $runtime)"
                     print_success "Deployment of $service_name completed successfully"
                 else
                     echo "Failed to start service"
@@ -272,10 +403,15 @@ create_systemd_service() {
     local deploy_path="$2"
     local start_command="$3"
     local port="$4"
+    local runtime="${5:-unknown}"
+    
+    # Generate runtime-specific environment variables
+    local env_vars
+    env_vars=$(get_runtime_env_vars "$runtime" "$port")
     
     cat > "/etc/systemd/system/${service_name}.service" << EOF
 [Unit]
-Description=$service_name API Service
+Description=$service_name Service ($runtime)
 After=network.target
 
 [Service]
@@ -285,14 +421,11 @@ WorkingDirectory=$deploy_path
 ExecStart=/bin/bash -c '$start_command'
 Restart=always
 RestartSec=10
-Environment=NODE_ENV=production
-Environment=PORT=$port
+$env_vars
 
-# Logging
 StandardOutput=append:/var/log/api-gateway/services/${service_name}.log
 StandardError=append:/var/log/api-gateway/services/${service_name}.error.log
 
-# Security
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -302,7 +435,6 @@ ReadWritePaths=$deploy_path /tmp /var/log/api-gateway
 WantedBy=multi-user.target
 EOF
     
-    # Create log directory for service
     mkdir -p "/var/log/api-gateway/services"
     chown www-data:www-data "/var/log/api-gateway/services"
 }

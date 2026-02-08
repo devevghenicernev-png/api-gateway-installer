@@ -455,33 +455,67 @@ while IFS= read -r api; do
     NAME=\$(/bin/echo "\$api" | /usr/bin/jq -r '.name')
     APATH=\$(/bin/echo "\$api" | /usr/bin/jq -r '.path')
     PORT=\$(/bin/echo "\$api" | /usr/bin/jq -r '.port')
+    FIX_REDIRECTS=\$(/bin/echo "\$api" | /usr/bin/jq -r '.fix_redirects // false')
+    STREAMING=\$(/bin/echo "\$api" | /usr/bin/jq -r '.streaming // false')
+    TIMEOUT=\$(/bin/echo "\$api" | /usr/bin/jq -r '.timeout // 300')
+    MAX_BODY=\$(/bin/echo "\$api" | /usr/bin/jq -r '.max_body_size // "512m"')
+    WEBSOCKET=\$(/bin/echo "\$api" | /usr/bin/jq -r '.websocket // true')
     
     /bin/cat >> "\$NGINX_CONFIG" << PROXY
 
     # \$NAME
     location \$APATH/ {
-        # Large file upload support (Nextcloud, file sharing, etc)
-        client_max_body_size 512m;
+        client_max_body_size \$MAX_BODY;
         client_body_buffer_size 128k;
         client_body_in_single_buffer on;
-        
-        # Timeouts for long operations (file sync, large uploads)
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        send_timeout 300s;
 
-        # Disable buffering for large files and real-time features
+        proxy_connect_timeout \${TIMEOUT}s;
+        proxy_send_timeout \${TIMEOUT}s;
+        proxy_read_timeout \${TIMEOUT}s;
+        send_timeout \${TIMEOUT}s;
+
         proxy_buffering off;
         proxy_request_buffering off;
 
         proxy_pass http://localhost:\$PORT/;
         proxy_http_version 1.1;
-        
-        # WebSocket support (for Nextcloud Talk, real-time features)
+
+PROXY
+
+    # WebSocket support
+    if [ "\$WEBSOCKET" = "true" ]; then
+        /bin/cat >> "\$NGINX_CONFIG" << WSPROXY
         proxy_set_header Upgrade \\\$http_upgrade;
         proxy_set_header Connection \\\$connection_upgrade;
-        
+        proxy_cache_bypass \\\$http_upgrade;
+WSPROXY
+    fi
+
+    # Fix redirects for sub-path apps (Nextcloud, etc.)
+    if [ "\$FIX_REDIRECTS" = "true" ]; then
+        /bin/cat >> "\$NGINX_CONFIG" << FIXPROXY
+        proxy_redirect http://localhost:\$PORT/ \$APATH/;
+        proxy_redirect / \$APATH/;
+        sub_filter_once off;
+        sub_filter_types text/html text/css application/javascript application/json;
+        sub_filter 'href="/' 'href="\$APATH/';
+        sub_filter 'src="/' 'src="\$APATH/';
+        sub_filter 'action="/' 'action="\$APATH/';
+        sub_filter 'url(/' 'url(\$APATH/';
+FIXPROXY
+    fi
+
+    # Streaming support for AI models and SSE
+    if [ "\$STREAMING" = "true" ]; then
+        /bin/cat >> "\$NGINX_CONFIG" << STREAMPROXY
+        proxy_cache off;
+        chunked_transfer_encoding on;
+        proxy_set_header Connection "";
+STREAMPROXY
+    fi
+
+    # Standard headers and close block
+    /bin/cat >> "\$NGINX_CONFIG" << STDPROXY
         proxy_set_header Host \\\$host;
         proxy_set_header X-Request-ID \\\$request_id;
         proxy_set_header X-Real-IP \\\$remote_addr;
@@ -490,12 +524,11 @@ while IFS= read -r api; do
         proxy_set_header X-Forwarded-Host \\\$host;
         proxy_set_header X-Forwarded-Port \\\$server_port;
         proxy_set_header X-Forwarded-Prefix \$APATH;
-        proxy_cache_bypass \\\$http_upgrade;
 
         add_header X-Request-ID \\\$request_id always;
         add_header X-Api-Name "\$NAME" always;
     }
-PROXY
+STDPROXY
 done < <(/usr/bin/jq -c '.apis[] | select(.enabled == true)' "\$CONFIG_FILE")
 
 # Add dashboard location
@@ -749,14 +782,49 @@ CONFIG_FILE="/etc/api-gateway/apis.json"
 case "$1" in
     add)
         if [ -z "$2" ] || [ -z "$3" ]; then
-            echo "Usage: api-manage add <name> <port> [path] [description]"
+            echo "Usage: api-manage add <name> <port> [path] [options...]"
+            echo ""
+            echo "Options:"
+            echo "  --fix-redirects    Fix sub-path redirects (for webapps like Nextcloud)"
+            echo "  --streaming        Enable streaming support (for AI models, SSE)"
+            echo "  --timeout <sec>    Set proxy timeout (default: 300)"
+            echo "  --max-body <size>  Set max body size (default: 512m)"
+            echo "  --no-websocket     Disable WebSocket support"
             exit 1
         fi
         
         NAME="$2"
         PORT="$3"
-        PATH="${4:-/$NAME}"
-        DESC="${5:-API service $NAME}"
+        APATH="${4:-/$NAME}"
+        
+        # Check if 4th arg is a flag (starts with --)
+        if [[ "$APATH" == --* ]]; then
+            APATH="/$NAME"
+            set -- "$1" "$2" "$3" "" "${@:4}"
+        fi
+        
+        # Parse optional flags
+        FIX_REDIRECTS="false"
+        STREAMING="false"
+        TIMEOUT="300"
+        MAX_BODY="512m"
+        WEBSOCKET="true"
+        TYPE="service"
+        
+        shift 3
+        [ -n "$1" ] && [[ "$1" != --* ]] && shift  # skip path arg if present
+        
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --fix-redirects) FIX_REDIRECTS="true" ;;
+                --streaming)     STREAMING="true" ;;
+                --timeout)       shift; TIMEOUT="$1" ;;
+                --max-body)      shift; MAX_BODY="$1" ;;
+                --no-websocket)  WEBSOCKET="false" ;;
+                --type)          shift; TYPE="$1" ;;
+            esac
+            shift
+        done
         
         # Check if API already exists
         if /usr/bin/jq -e ".apis[] | select(.name == \"$NAME\")" "$CONFIG_FILE" > /dev/null 2>&1; then
@@ -770,10 +838,25 @@ case "$1" in
             exit 1
         fi
         
-        /usr/bin/jq ".apis += [{\"name\": \"$NAME\", \"path\": \"$PATH\", \"port\": $PORT, \"description\": \"$DESC\", \"enabled\": true}]" "$CONFIG_FILE" > /tmp/apis.json
+        /usr/bin/jq \
+            --arg name "$NAME" \
+            --arg path "$APATH" \
+            --argjson port "$PORT" \
+            --arg type "$TYPE" \
+            --argjson fix "$FIX_REDIRECTS" \
+            --argjson stream "$STREAMING" \
+            --argjson timeout "$TIMEOUT" \
+            --arg maxbody "$MAX_BODY" \
+            --argjson ws "$WEBSOCKET" \
+            '.apis += [{"name": $name, "path": $path, "port": $port, "description": "API service", "enabled": true, "type": $type, "fix_redirects": $fix, "streaming": $stream, "timeout": $timeout, "max_body_size": $maxbody, "websocket": $ws}]' \
+            "$CONFIG_FILE" > /tmp/apis.json
         /bin/mv /tmp/apis.json "$CONFIG_FILE"
         
-        echo "✅ API '$NAME' added on port $PORT"
+        echo "✅ API '$NAME' added on port $PORT (path: $APATH)"
+        [ "$FIX_REDIRECTS" = "true" ] && echo "   ↳ Redirect fixing enabled"
+        [ "$STREAMING" = "true" ] && echo "   ↳ Streaming mode enabled"
+        [ "$TIMEOUT" != "300" ] && echo "   ↳ Timeout: ${TIMEOUT}s"
+        [ "$MAX_BODY" != "512m" ] && echo "   ↳ Max body: $MAX_BODY"
         /usr/local/bin/generate-nginx-config
         /usr/local/bin/generate-fluentbit-config
         ;;
@@ -825,7 +908,7 @@ case "$1" in
     
     list)
         echo "📋 Registered APIs:"
-        /usr/bin/jq -r '.apis[] | "  \(.name) -> \(.path) (port \(.port)) [\(if .enabled then "✓ ACTIVE" else "✗ DISABLED" end)]"' "$CONFIG_FILE"
+        /usr/bin/jq -r '.apis[] | "  \(.name) -> \(.path) (port \(.port)) [\(if .enabled then "✓ ACTIVE" else "✗ DISABLED" end)] \(if .type then "(\(.type))" else "" end) \(if .streaming then "[stream]" else "" end) \(if .fix_redirects then "[fix-redir]" else "" end)"' "$CONFIG_FILE"
         ;;
     
     reload)
@@ -839,21 +922,26 @@ case "$1" in
         echo "Usage: api-manage <command> [parameters]"
         echo ""
         echo "Commands:"
-        echo "  add <name> <port> [path] [desc]  - Add new API (requires sudo)"
-        echo "  remove <name>                     - Remove API (requires sudo)"
-        echo "  enable <name>                     - Enable API (requires sudo)"
-        echo "  disable <name>                    - Disable API (requires sudo)"
-        echo "  list                              - Show all APIs"
-        echo "  reload                            - Regenerate Nginx config (requires sudo)"
+        echo "  add <name> <port> [path] [options]  - Add new API (requires sudo)"
+        echo "  remove <name>                        - Remove API (requires sudo)"
+        echo "  enable <name>                        - Enable API (requires sudo)"
+        echo "  disable <name>                       - Disable API (requires sudo)"
+        echo "  list                                 - Show all APIs"
+        echo "  reload                               - Regenerate Nginx config (requires sudo)"
+        echo ""
+        echo "Add options:"
+        echo "  --fix-redirects    Fix sub-path redirects (for webapps)"
+        echo "  --streaming        Enable streaming (for AI/SSE)"
+        echo "  --timeout <sec>    Proxy timeout (default: 300)"
+        echo "  --max-body <size>  Max body size (default: 512m)"
+        echo "  --no-websocket     Disable WebSocket"
         echo ""
         echo "Examples:"
         echo "  sudo api-manage add my-api 3005"
-        echo "  sudo api-manage add payment 4000 /payments 'Payment API'"
+        echo "  sudo api-manage add cloud 3000 /cloud --fix-redirects"
+        echo "  sudo api-manage add ollama 11434 /ai/ollama --streaming --timeout 600 --max-body 1g"
         echo "  api-manage list"
-        echo "  sudo api-manage disable my-api"
-        echo "  sudo api-manage remove my-api"
         echo ""
-        echo "Note: Configuration changes require root privileges (use sudo)"
         ;;
 esac
 SCRIPT_END
