@@ -3,102 +3,60 @@
 set -e
 
 # API Gateway Full Installer via curl
-# One-liner: curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh | sudo bash
-# This downloads and runs the full install.sh script
+# Usage: sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh)"
 
-VERSION="${VERSION:-latest}"
-REPO_URL="${REPO_URL:-https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer}"
+REPO="https://github.com/devevghenicernev-png/api-gateway-installer.git"
 BRANCH="${BRANCH:-main}"
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-print_info() {
-    echo -e "${BLUE}ℹ${NC} $1"
-}
+info()    { echo -e "${BLUE}ℹ${NC} $1"; }
+success() { echo -e "${GREEN}✓${NC} $1"; }
+error()   { echo -e "${RED}✗${NC} $1"; }
+warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
-check_root() {
-    if [ "$EUID" -ne 0 ]; then 
-        print_error "This script must be run as root (use sudo)"
-        print_info "Run: curl -fsSL $REPO_URL/$BRANCH/install-cli.sh | sudo bash"
-        exit 1
-    fi
-}
-
-main() {
+if [ "$EUID" -ne 0 ]; then
+    error "This script must be run as root"
     echo ""
-    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║   API Gateway Installer              ║${NC}"
-    echo -e "${BLUE}║   (Downloading full installer...)    ║${NC}"
-    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo "  sudo bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh)\""
     echo ""
-    
-    check_root
-    
-    # Create temp directory
-    local tmp_dir=$(mktemp -d)
-    trap "rm -rf $tmp_dir" EXIT
-    
-    # Download install.sh
-    local install_script="$tmp_dir/install.sh"
-    print_info "Downloading installer from GitHub..."
-    
-    if ! curl -fsSL "$REPO_URL/$BRANCH/install.sh" -o "$install_script"; then
-        print_error "Failed to download installer"
-        exit 1
-    fi
-    
-    if [ ! -s "$install_script" ]; then
-        print_error "Downloaded installer is empty"
-        exit 1
-    fi
-    
-    chmod +x "$install_script"
-    print_success "Installer downloaded"
-    echo ""
-    
-    # Save to a file and run from there
-    local saved_script="/tmp/api-gateway-install-$$.sh"
-    cp "$install_script" "$saved_script"
-    chmod +x "$saved_script"
-    
-    print_info "Installer ready. Starting interactive installation..."
-    echo ""
-    
-    # Disable exit on error temporarily
-    set +e
-    
-    # Run with explicit /dev/tty redirection for stdin to ensure interactive input works
-    # This is necessary when running via pipe (curl ... | bash)
-    if [ -c /dev/tty ] && [ -r /dev/tty ]; then
-        # Use /dev/tty for stdin, keep stdout/stderr to terminal
-        bash "$saved_script" < /dev/tty
-        local exit_code=$?
-    else
-        # Fallback: try direct execution
-        bash "$saved_script"
-        local exit_code=$?
-    fi
-    
-    # Re-enable exit on error
-    set -e
-    
-    # Cleanup
-    rm -f "$saved_script"
-    
-    exit $exit_code
-}
+    exit 1
+fi
 
-main "$@"
+echo ""
+echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║       API Gateway Installer            ║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+echo ""
+
+# Create temp directory for the full repo
+TMP_DIR=$(mktemp -d)
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+
+# Clone the full repo (needed for modules, scripts, web-ui)
+if command -v git >/dev/null 2>&1; then
+    info "Cloning repository..."
+    git clone --depth 1 --branch "$BRANCH" "$REPO" "$TMP_DIR/repo" 2>/dev/null
+    success "Repository cloned"
+else
+    # No git — download tarball
+    info "Downloading repository archive..."
+    curl -fsSL "https://github.com/devevghenicernev-png/api-gateway-installer/archive/refs/heads/$BRANCH.tar.gz" \
+        | tar -xz -C "$TMP_DIR"
+    mv "$TMP_DIR/api-gateway-installer-$BRANCH" "$TMP_DIR/repo"
+    success "Repository downloaded"
+fi
+
+echo ""
+info "Starting interactive installation..."
+echo ""
+
+# Run the installer from within the repo directory
+# stdin is free because we used bash -c "$(curl ...)" pattern
+cd "$TMP_DIR/repo"
+bash install.sh

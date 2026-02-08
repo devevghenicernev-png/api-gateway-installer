@@ -70,27 +70,16 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/too
 
 ## Установка вашего CLI
 
-### Вариант 1: Простая установка (только скрипт)
+### Вариант 1: Полная установка (рекомендуется)
 
 ```bash
-# Установить api-manage-extended
-curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh | bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh)"
 ```
 
-### Вариант 2: Прямая установка скрипта
+### Вариант 2: С версионированием
 
 ```bash
-# Скачать и установить напрямую
-sudo curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/scripts/api-manage-extended \
-  -o /usr/local/bin/api-manage-extended
-sudo chmod +x /usr/local/bin/api-manage-extended
-```
-
-### Вариант 3: С версионированием
-
-```bash
-# Установить конкретную версию
-VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh | bash
+sudo BRANCH=v1.0.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/api-gateway-installer/main/install-cli.sh)"
 ```
 
 ## Лучшие практики
