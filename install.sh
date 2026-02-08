@@ -916,18 +916,137 @@ case "$1" in
         /usr/local/bin/generate-fluentbit-config
         ;;
     
+    update)
+        REPO="https://github.com/devevghenicernev-png/api-gateway-installer.git"
+        BRANCH="${2:-main}"
+        echo "🔄 Updating API Gateway..."
+        
+        TMP_DIR=$(mktemp -d)
+        trap "rm -rf $TMP_DIR" EXIT
+        
+        if command -v git >/dev/null 2>&1; then
+            echo "  Cloning latest version..."
+            git clone --depth 1 --branch "$BRANCH" "$REPO" "$TMP_DIR/repo" 2>/dev/null
+        else
+            echo "  Downloading latest version..."
+            curl -fsSL "https://github.com/devevghenicernev-png/api-gateway-installer/archive/refs/heads/$BRANCH.tar.gz" \
+                | tar -xz -C "$TMP_DIR"
+            mv "$TMP_DIR/api-gateway-installer-$BRANCH" "$TMP_DIR/repo"
+        fi
+        
+        cd "$TMP_DIR/repo"
+        
+        # Update modules
+        if [ -d modules ]; then
+            cp -r modules/* /opt/api-gateway/modules/ 2>/dev/null && echo "  ✓ Modules updated"
+            chmod +x /opt/api-gateway/modules/*.sh 2>/dev/null
+        fi
+        
+        # Update scripts
+        if [ -d scripts ]; then
+            cp -r scripts/* /opt/api-gateway/scripts/ 2>/dev/null && echo "  ✓ Scripts updated"
+            chmod +x /opt/api-gateway/scripts/* 2>/dev/null
+            [ -f /opt/api-gateway/scripts/api-manage-extended ] && ln -sf /opt/api-gateway/scripts/api-manage-extended /usr/local/bin/api-manage-extended
+        fi
+        
+        # Update web-ui
+        if [ -d web-ui ]; then
+            cp -r web-ui/* /opt/api-gateway/web-ui/ 2>/dev/null && echo "  ✓ Web UI updated"
+            if [ -f /opt/api-gateway/web-ui/package.json ] && command -v npm >/dev/null 2>&1; then
+                cd /opt/api-gateway/web-ui && npm install --production --silent 2>/dev/null && echo "  ✓ npm dependencies updated"
+            fi
+        fi
+        
+        # Restart services
+        systemctl restart api-gateway-dashboard 2>/dev/null && echo "  ✓ Dashboard restarted" || true
+        systemctl restart api-gateway-webhook 2>/dev/null && echo "  ✓ Webhook restarted" || true
+        
+        # Regenerate configs
+        /usr/local/bin/generate-nginx-config 2>/dev/null && echo "  ✓ Nginx config regenerated" || true
+        /usr/local/bin/generate-fluentbit-config 2>/dev/null || true
+        
+        echo ""
+        echo "✅ API Gateway updated to latest version"
+        ;;
+    
+    uninstall)
+        echo ""
+        echo "⚠️  This will completely remove API Gateway!"
+        echo ""
+        echo "  The following will be removed:"
+        echo "    - Configuration: /etc/api-gateway"
+        echo "    - Modules: /opt/api-gateway"
+        echo "    - Scripts: api-manage, api-manage-extended, generate-*"
+        echo "    - Services: dashboard, webhook, watcher"
+        echo "    - OpenObserve + Fluent Bit"
+        echo "    - Deployment data: /opt/deployments, /var/lib/api-gateway"
+        echo ""
+        echo "  Your backend services will NOT be removed."
+        echo ""
+        read -p "  Type 'yes' to confirm: " CONFIRM
+        
+        if [ "$CONFIRM" != "yes" ]; then
+            echo "  Cancelled."
+            exit 0
+        fi
+        
+        echo ""
+        echo "  Stopping services..."
+        for SVC in api-gateway-watch api-gateway-dashboard api-gateway-webhook openobserve fluent-bit; do
+            systemctl stop "$SVC" 2>/dev/null && echo "    ✓ Stopped $SVC" || true
+            systemctl disable "$SVC" 2>/dev/null || true
+            [ -f "/etc/systemd/system/${SVC}.service" ] && rm "/etc/systemd/system/${SVC}.service"
+        done
+        
+        # Stop PM2 apps from deployments
+        if command -v pm2 >/dev/null 2>&1 && [ -d /etc/api-gateway/deployments ]; then
+            for cfg in /etc/api-gateway/deployments/*.json; do
+                [ -f "$cfg" ] || continue
+                pm2 delete "$(basename "$cfg" .json)" 2>/dev/null || true
+            done
+            pm2 save 2>/dev/null || true
+        fi
+        
+        systemctl daemon-reload
+        
+        echo "  Backing up config..."
+        if [ -f /etc/api-gateway/apis.json ]; then
+            BACKUP="$HOME/api-gateway-backup-$(date +%Y%m%d_%H%M%S)"
+            mkdir -p "$BACKUP"
+            cp /etc/api-gateway/apis.json "$BACKUP/"
+            echo "    ✓ Config backed up to $BACKUP"
+        fi
+        
+        echo "  Removing files..."
+        rm -rf /etc/api-gateway /opt/api-gateway /opt/deployments /var/lib/api-gateway /var/log/api-gateway
+        rm -rf /opt/openobserve /etc/fluent-bit
+        rm -f /usr/local/bin/generate-nginx-config /usr/local/bin/generate-fluentbit-config
+        rm -f /usr/local/bin/api-manage /usr/local/bin/api-manage-extended
+        rm -f /usr/local/bin/api-gateway-watch
+        
+        # Remove nginx config
+        rm -f /etc/nginx/sites-enabled/apis /etc/nginx/sites-available/apis
+        nginx -t 2>/dev/null && systemctl restart nginx 2>/dev/null || true
+        
+        echo ""
+        echo "✅ API Gateway completely removed"
+        echo "   Your backend services are still running."
+        ;;
+    
     *)
         echo "API Gateway Manager"
         echo ""
         echo "Usage: api-manage <command> [parameters]"
         echo ""
         echo "Commands:"
-        echo "  add <name> <port> [path] [options]  - Add new API (requires sudo)"
-        echo "  remove <name>                        - Remove API (requires sudo)"
-        echo "  enable <name>                        - Enable API (requires sudo)"
-        echo "  disable <name>                       - Disable API (requires sudo)"
+        echo "  add <name> <port> [path] [options]  - Add new API"
+        echo "  remove <name>                        - Remove API"
+        echo "  enable <name>                        - Enable API"
+        echo "  disable <name>                       - Disable API"
         echo "  list                                 - Show all APIs"
-        echo "  reload                               - Regenerate Nginx config (requires sudo)"
+        echo "  reload                               - Regenerate configs"
+        echo "  update [branch]                      - Update to latest version"
+        echo "  uninstall                            - Remove API Gateway completely"
         echo ""
         echo "Add options:"
         echo "  --fix-redirects    Fix sub-path redirects (for webapps)"
@@ -940,6 +1059,8 @@ case "$1" in
         echo "  sudo api-manage add my-api 3005"
         echo "  sudo api-manage add cloud 3000 /cloud --fix-redirects"
         echo "  sudo api-manage add ollama 11434 /ai/ollama --streaming --timeout 600 --max-body 1g"
+        echo "  sudo api-manage update"
+        echo "  sudo api-manage uninstall"
         echo "  api-manage list"
         echo ""
         ;;
