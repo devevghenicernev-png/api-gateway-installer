@@ -337,6 +337,13 @@
                 <button class="modal-close" onclick="closeDeployModal()" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
+                <div class="deploy-log-toolbar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                    <label class="form-label" style="margin:0;">Deploy:</label>
+                    <select id="deploy-history-select" class="form-select" style="min-width:180px;" onchange="onDeployHistorySelect()">
+                        <option value="latest">Current (live)</option>
+                    </select>
+                    <span class="badge badge-running" id="deploy-live-badge" style="display:none;">Live</span>
+                </div>
                 <div class="log-viewer" id="deploy-log-viewer">Starting deployment…</div>
             </div>
             <div class="modal-footer">
@@ -398,10 +405,19 @@
                 try {
                     const data = JSON.parse(e.data);
                     if (data.deployments) {
+                        const prev = deployments;
                         deployments = data.deployments;
                         updateDeploymentsList();
                         updateStats();
                         updateServiceSelect();
+                        const logService = document.getElementById('log-service-select').value;
+                        if (logService && logsEventSource) {
+                            const wasDeploying = prev[logService]?.status === 'deploying';
+                            const nowNotDeploying = (deployments[logService]?.status || '') !== 'deploying';
+                            if (wasDeploying && nowNotDeploying) {
+                                startLogStream();
+                            }
+                        }
                     }
                 } catch (_) {}
             });
@@ -457,6 +473,10 @@
                             <button class="btn btn-success" onclick="deployService('${escapeHtml(name)}')">
                                 <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M15 3v4a2 2 0 0 0 2 2h4"/><path d="M10 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 12h4"/><path d="M10 16h4"/></svg>
                                 Deploy
+                            </button>
+                            <button class="btn btn-primary" onclick="viewDeployLogs('${escapeHtml(name)}')" title="Deploy history and live log">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                                Deploy logs
                             </button>
                             <button class="btn btn-primary" onclick="viewLogs('${escapeHtml(name)}')">
                                 <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
@@ -521,10 +541,60 @@
             if (cur && deployments[cur]) sel.value = cur;
         }
 
+        let deployModalServiceName = '';
+
         function openDeployModal(serviceName) {
-            document.getElementById('deploy-modal-title').textContent = `Deploying ${serviceName}`;
+            deployModalServiceName = serviceName;
+            document.getElementById('deploy-modal-title').textContent = `Deploy logs: ${serviceName}`;
             document.getElementById('deploy-log-viewer').textContent = 'Connecting to log stream…';
             document.getElementById('deploy-modal').classList.remove('hidden');
+            document.getElementById('deploy-live-badge').style.display = 'inline';
+            loadDeployHistorySelect(serviceName).then(() => {
+                document.getElementById('deploy-history-select').value = 'latest';
+            });
+        }
+
+        async function loadDeployHistorySelect(serviceName) {
+            const sel = document.getElementById('deploy-history-select');
+            sel.innerHTML = '<option value="latest">Current (live)</option>';
+            try {
+                const res = await fetch(API + '/deployments/' + encodeURIComponent(serviceName) + '/deploy-log-files');
+                const list = await res.json();
+                list.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.filename;
+                    opt.textContent = item.label;
+                    sel.appendChild(opt);
+                });
+            } catch (_) {}
+        }
+
+        async function onDeployHistorySelect() {
+            const sel = document.getElementById('deploy-history-select');
+            const value = sel.value;
+            const viewer = document.getElementById('deploy-log-viewer');
+            const badge = document.getElementById('deploy-live-badge');
+            if (value === 'latest') {
+                if (deployLogEventSource) deployLogEventSource.close();
+                deployLogEventSource = null;
+                viewer.textContent = 'Connecting to log stream…';
+                badge.style.display = 'inline';
+                startDeployLogSSE(deployModalServiceName);
+            } else {
+                if (deployLogEventSource) {
+                    deployLogEventSource.close();
+                    deployLogEventSource = null;
+                }
+                badge.style.display = 'none';
+                viewer.textContent = 'Loading…';
+                try {
+                    const res = await fetch(API + '/deployments/' + encodeURIComponent(deployModalServiceName) + '/deploy-log-content/' + encodeURIComponent(value));
+                    viewer.textContent = await res.text() || '(empty)';
+                } catch (e) {
+                    viewer.textContent = 'Failed to load log.';
+                }
+                viewer.scrollTop = viewer.scrollHeight;
+            }
         }
 
         function closeDeployModal() {
@@ -637,6 +707,11 @@
                     }
                 } else showToast('Remove failed', 'error');
             } catch (_) { showToast('Remove failed', 'error'); }
+        }
+
+        function viewDeployLogs(serviceName) {
+            openDeployModal(serviceName);
+            startDeployLogSSE(serviceName);
         }
 
         function viewLogs(serviceName) {

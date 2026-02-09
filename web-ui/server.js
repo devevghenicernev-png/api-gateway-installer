@@ -304,37 +304,66 @@ app.get('/api/sse/deployments', async (req, res) => {
     req.on('close', () => clearInterval(interval));
 });
 
-// SSE: deploy log stream (tail -f)
+// SSE: deploy log stream (tail -f); switches to newest log file on redeploy/webhook
 app.get('/api/sse/deploy-log/:serviceName', (req, res) => {
     const { serviceName } = req.params;
     const deploymentLogDir = path.join(LOG_DIR, 'deployments');
     setupSSE(res);
     let closed = false;
-    req.on('close', () => { closed = true; });
+    let tailProcess = null;
+    let currentLogPath = null;
+    let checkInterval = null;
 
-    const waitForLog = (retries = 30) => {
-        if (closed) return;
+    const getLatestLogFile = () =>
         fs.readdir(deploymentLogDir).then(files => {
-            if (closed) return;
             const matches = files
                 .filter(f => f.startsWith(`${serviceName}-`) && f.endsWith('.log'))
                 .map(f => path.join(deploymentLogDir, f));
-            if (matches.length === 0) {
+            if (matches.length === 0) return null;
+            return Promise.all(matches.map(f => fs.stat(f).then(s => ({ f, mtime: s.mtime }))))
+                .then(stats => stats.sort((a, b) => b.mtime - a.mtime)[0]);
+        });
+
+    const startTailing = (target) => {
+        if (tailProcess) {
+            tailProcess.kill('SIGTERM');
+            tailProcess = null;
+        }
+        currentLogPath = target.f;
+        const tail = spawn('tail', ['-f', '-n', '200', target.f], { stdio: ['ignore', 'pipe', 'pipe'] });
+        tailProcess = tail;
+        tail.stdout.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
+        tail.stderr.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
+        tail.on('error', () => { if (!closed && tailProcess === tail) { tailProcess = null; sendSSE(res, 'done', {}); } });
+        tail.on('exit', () => { if (tailProcess === tail) tailProcess = null; });
+    };
+
+    const checkForNewerLog = () => {
+        if (closed || !currentLogPath) return;
+        getLatestLogFile().then(latest => {
+            if (closed || !latest || latest.f === currentLogPath) return;
+            sendSSE(res, 'log', '\n--- New deployment log (redeploy/webhook) ---\n');
+            startTailing(latest);
+        }).catch(() => {});
+    };
+
+    req.on('close', () => {
+        closed = true;
+        if (checkInterval) clearInterval(checkInterval);
+        if (tailProcess) tailProcess.kill('SIGTERM');
+    });
+
+    const waitForLog = (retries = 30) => {
+        if (closed) return;
+        getLatestLogFile().then(latest => {
+            if (closed) return;
+            if (!latest) {
                 if (retries > 0) return setTimeout(() => waitForLog(retries - 1), 1000);
                 sendSSE(res, 'log', 'Waiting for deployment log (start deploy if not started)...\n');
                 return;
             }
-            return Promise.all(matches.map(f => fs.stat(f).then(s => ({ f, mtime: s.mtime }))))
-                .then(stats => {
-                    if (closed) return;
-                    const latest = stats.sort((a, b) => b.mtime - a.mtime)[0];
-                    const tail = spawn('tail', ['-f', '-n', '200', latest.f], { stdio: ['ignore', 'pipe', 'pipe'] });
-                    tail.stdout.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
-                    tail.stderr.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
-                    tail.on('error', () => !closed && sendSSE(res, 'done', {}));
-                    tail.on('exit', () => !closed && sendSSE(res, 'done', {}));
-                    req.on('close', () => tail.kill('SIGTERM'));
-                });
+            startTailing(latest);
+            checkInterval = setInterval(checkForNewerLog, 2000);
         }).catch(() => {
             if (!closed && retries > 0) setTimeout(() => waitForLog(retries - 1), 1000);
         });
@@ -450,6 +479,48 @@ app.get('/api/deployments/:serviceName/webhook-instructions', async (req, res) =
         res.type('text/plain').send(instructions);
     } catch (e) {
         res.status(500).type('text/plain').send('Error loading webhook instructions');
+    }
+});
+
+// List deploy log files for a service (newest first)
+app.get('/api/deployments/:serviceName/deploy-log-files', async (req, res) => {
+    try {
+        const { serviceName } = req.params;
+        const deploymentLogDir = path.join(LOG_DIR, 'deployments');
+        const files = await fs.readdir(deploymentLogDir).catch(() => []);
+        const matches = files
+            .filter(f => f.startsWith(`${serviceName}-`) && f.endsWith('.log'))
+            .map(f => path.join(deploymentLogDir, f));
+        if (matches.length === 0) {
+            return res.json([]);
+        }
+        const stats = await Promise.all(
+            matches.map(async f => ({ filename: path.basename(f), mtime: (await fs.stat(f)).mtime }))
+        );
+        const sorted = stats.sort((a, b) => b.mtime - a.mtime);
+        const list = sorted.map(s => ({
+            filename: s.filename,
+            mtime: s.mtime.toISOString(),
+            label: s.mtime.toLocaleString()
+        }));
+        res.json(list);
+    } catch (e) {
+        res.json([]);
+    }
+});
+
+// Get content of a specific deploy log file (for history)
+app.get('/api/deployments/:serviceName/deploy-log-content/:logFilename', async (req, res) => {
+    try {
+        const { serviceName, logFilename } = req.params;
+        if (!logFilename.startsWith(serviceName + '-') || !logFilename.endsWith('.log')) {
+            return res.status(400).type('text/plain').send('Invalid log file');
+        }
+        const filePath = path.join(LOG_DIR, 'deployments', logFilename);
+        const content = await fs.readFile(filePath, 'utf8');
+        res.type('text/plain').send(content);
+    } catch (e) {
+        res.status(404).type('text/plain').send('');
     }
 });
 
