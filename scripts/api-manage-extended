@@ -379,42 +379,69 @@ restore_config() {
 deploy_setup_private() {
     print_header "Setup for private GitHub repositories"
     
-    # Use root's .ssh so deploy (run as root) finds the key
+    echo -e "${CYAN}Server or service name (e.g. bar-connect-prod, orange-pi):${NC}"
+    read -r -p "Name: " key_name
+    key_name=$(echo "$key_name" | tr ' ' '_' | tr -cd '[:alnum:]_-' | head -c 64)
+    if [ -z "$key_name" ]; then
+        print_error "Name cannot be empty"
+        return 1
+    fi
+    
     local ssh_dir="/root/.ssh"
-    local key_file="$ssh_dir/id_ed25519"
-    local key_pub="$ssh_dir/id_ed25519.pub"
+    local key_file="$ssh_dir/id_ed25519_${key_name}"
+    local key_pub="${key_file}.pub"
     
     mkdir -p "$ssh_dir"
     chmod 700 "$ssh_dir"
     
-    if [ -f "$key_file" ]; then
-        print_success "SSH key already exists: $key_file"
-        echo ""
-        print_info "Your public key (add this to GitHub if you haven't yet):"
-        echo ""
-        echo -e "${CYAN}----------------------------------------${NC}"
-        cat "$key_pub"
-        echo -e "${CYAN}----------------------------------------${NC}"
-    else
-        print_info "Generating new SSH key (no passphrase, for non-interactive deploy)..."
-        ssh-keygen -t ed25519 -C "api-gateway-deploy" -f "$key_file" -N ""
-        chmod 600 "$key_file"
-        chmod 644 "$key_pub"
-        print_success "SSH key created: $key_file"
-        echo ""
-        print_info "Your public key (copy and add to GitHub):"
-        echo ""
-        echo -e "${CYAN}----------------------------------------${NC}"
-        cat "$key_pub"
-        echo -e "${CYAN}----------------------------------------${NC}"
+    rm -f "$key_file" "$key_pub"
+    print_info "Generating new SSH key (no passphrase, for non-interactive deploy)..."
+    ssh-keygen -t ed25519 -C "api-gateway-deploy-${key_name}" -f "$key_file" -N ""
+    if [ ! -f "$key_file" ]; then
+        print_error "Failed to create SSH key"
+        return 1
     fi
+    chmod 600 "$key_file"
+    chmod 644 "$key_pub"
+    print_success "SSH key created: $key_file"
+    echo ""
+    print_info "Your public key (copy and add to GitHub):"
+    echo ""
+    echo -e "${CYAN}----------------------------------------${NC}"
+    cat "$key_pub"
+    echo -e "${CYAN}----------------------------------------${NC}"
+    
+    local config_file="$ssh_dir/config"
+    local config_tmp="${config_file}.tmp.$$"
+    if [ -f "$config_file" ]; then
+        awk '
+            /^Host[ \t]/ {
+                if (in_github) in_github = 0;
+                if ($2 == "github.com") in_github = 1;
+                if (!in_github) print;
+                next;
+            }
+            !in_github { print }
+        ' "$config_file" > "$config_tmp"
+    else
+        true > "$config_tmp"
+    fi
+    cat >> "$config_tmp" << EOF
+
+Host github.com
+    IdentityFile $key_file
+    StrictHostKeyChecking accept-new
+EOF
+    mv "$config_tmp" "$config_file"
+    chmod 600 "$config_file"
+    print_success "SSH config updated for github.com"
     
     echo ""
     echo -e "${YELLOW}What to do in GitHub:${NC}"
     echo "  1. Open your repository on GitHub"
     echo "  2. Go to: Settings → Deploy keys"
     echo "  3. Click \"Add deploy key\""
-    echo "  4. Title: e.g. Orange Pi or this server name"
+    echo "  4. Title: $key_name (or use this name so you know which server)"
     echo "  5. Key: paste the line above (the whole line from ssh-ed25519 to the end)"
     echo "  6. Leave \"Allow write access\" unchecked (read is enough for deploy)"
     echo "  7. Click \"Add key\""

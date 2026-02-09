@@ -283,24 +283,28 @@ deploy_service() {
         # Clone or update repository
         if [ -d ".git" ] && [ "$force_deploy" != "true" ]; then
             echo "Updating existing repository..."
-            git fetch origin
-            git reset --hard "origin/$branch"
+            git fetch origin || { update_deployment_status "$service_name" "failed" "Git fetch failed"; exit 1; }
+            git reset --hard "origin/$branch" || { update_deployment_status "$service_name" "failed" "Git reset failed"; exit 1; }
         else
             echo "Cloning repository..."
             rm -rf ./*
-            git clone -b "$branch" "$github_repo" .
+            git clone -b "$branch" "$github_repo" . || { update_deployment_status "$service_name" "failed" "Git clone failed (check repo URL and SSH key or access)"; exit 1; }
         fi
-        
+
         # Auto-detect runtime if set to "auto"
         if [ "$runtime" = "auto" ] || [ "$runtime" = "null" ]; then
             runtime=$(detect_runtime "$deploy_path")
             echo "Auto-detected runtime: $runtime"
-            # Save detected runtime back to config
+            if [ "$runtime" = "unknown" ]; then
+                update_deployment_status "$service_name" "failed" "No supported project found (need package.json, Dockerfile, or docker-compose.yml)"
+                print_error "Clone failed or repository has no package.json/Dockerfile/docker-compose.yml"
+                exit 1
+            fi
             jq --arg rt "$runtime" '.runtime = $rt' "$config_file" > "${config_file}.tmp" && mv "${config_file}.tmp" "$config_file"
         else
             echo "Runtime: $runtime"
         fi
-        
+
         # Resolve auto build/start commands based on runtime
         if [ "$build_command" = "auto" ] || [ "$build_command" = "null" ]; then
             build_command=$(get_default_build_command "$runtime")
@@ -393,8 +397,9 @@ deploy_service() {
         fi
         
         echo "=== Deployment completed at $(date) ==="
-        
+
     } 2>&1 | tee "$log_file"
+    [ "${PIPESTATUS[0]}" -ne 0 ] && return 1
 }
 
 # Create systemd service file

@@ -328,7 +328,7 @@ app.get('/api/sse/deploy-log/:serviceName', (req, res) => {
                 .then(stats => {
                     if (closed) return;
                     const latest = stats.sort((a, b) => b.mtime - a.mtime)[0];
-                    const tail = spawn('tail', ['-f', '-n', '100', latest.f], { stdio: ['ignore', 'pipe', 'pipe'] });
+                    const tail = spawn('tail', ['-f', '-n', '200', latest.f], { stdio: ['ignore', 'pipe', 'pipe'] });
                     tail.stdout.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
                     tail.stderr.on('data', chunk => !closed && sendSSE(res, 'log', chunk.toString()));
                     tail.on('error', () => !closed && sendSSE(res, 'done', {}));
@@ -342,19 +342,35 @@ app.get('/api/sse/deploy-log/:serviceName', (req, res) => {
     waitForLog();
 });
 
-// SSE: service logs stream
+// SSE: service logs stream (live tail; lines = initial history, then -f stream)
 app.get('/api/sse/logs/:serviceName', async (req, res) => {
     const { serviceName } = req.params;
+    const lines = Math.min(Math.max(parseInt(req.query.lines, 10) || 200, 50), 2000);
     setupSSE(res);
     try {
         const configPath = path.join(DEPLOY_CONFIG_DIR, `${serviceName}.json`);
         const config = await loadJsonFile(configPath);
-        const processManager = config?.process_manager || 'systemd';
+        const runtime = config?.runtime || '';
+        const deployPath = config?.deploy_path || '';
         let child;
-        if (processManager === 'pm2') {
-            child = spawn('pm2', ['logs', serviceName, '--raw', '--lines', '50'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        if (runtime === 'docker-compose' && deployPath) {
+            const composeFile = path.join(deployPath, 'docker-compose.yml');
+            const composeYml = path.join(deployPath, 'docker-compose.yaml');
+            const fsSync = require('fs');
+            const file = fsSync.existsSync(composeFile) ? composeFile : composeYml;
+            child = spawn('docker', ['compose', '-f', file, 'logs', '-f', '--tail', String(lines)], {
+                cwd: deployPath,
+                stdio: ['ignore', 'pipe', 'pipe']
+            });
+        } else if (runtime === 'docker') {
+            child = spawn('docker', ['logs', '-f', '--tail', String(lines), serviceName], { stdio: ['ignore', 'pipe', 'pipe'] });
         } else {
-            child = spawn('journalctl', ['-u', serviceName, '-f', '-n', '50'], { stdio: ['ignore', 'pipe', 'pipe'] });
+            const processManager = config?.process_manager || 'systemd';
+            if (processManager === 'pm2') {
+                child = spawn('pm2', ['logs', serviceName, '--raw', '--lines', String(lines)], { stdio: ['ignore', 'pipe', 'pipe'] });
+            } else {
+                child = spawn('journalctl', ['-u', serviceName, '-f', '-n', String(lines)], { stdio: ['ignore', 'pipe', 'pipe'] });
+            }
         }
         const sendChunk = (chunk) => sendSSE(res, 'log', chunk.toString());
         child.stdout.on('data', sendChunk);
@@ -364,6 +380,76 @@ app.get('/api/sse/logs/:serviceName', async (req, res) => {
         req.on('close', () => child.kill('SIGTERM'));
     } catch (e) {
         sendSSE(res, 'error', { message: e.message });
+    }
+});
+
+// Get webhook setup instructions (plain text, no ANSI — for dashboard display)
+app.get('/api/deployments/:serviceName/webhook-instructions', async (req, res) => {
+    try {
+        const { serviceName } = req.params;
+        const configPath = path.join(DEPLOY_CONFIG_DIR, `${serviceName}.json`);
+        const config = await loadJsonFile(configPath);
+        if (!config || !config.webhook_secret) {
+            return res.status(404).type('text/plain').send('Deployment not found or has no webhook secret');
+        }
+        const baseUrl = `${req.protocol}://${req.get('host')}`.replace(/\/$/, '');
+        const webhookUrl = `${baseUrl}/webhook/${serviceName}`;
+        const secret = config.webhook_secret;
+        const branch = config.branch || 'main';
+        const repoPath = (config.github_repo || '')
+            .replace(/^https?:\/\/github\.com\//, '')
+            .replace(/^git@github\.com:/, '')
+            .replace(/\.git$/, '');
+        const instructions = [
+            '══════════════════════════════════════════════════════════════',
+            '  Step-by-step: add webhook in GitHub',
+            '══════════════════════════════════════════════════════════════',
+            '',
+            '  1. Open your repository on GitHub:',
+            `     https://github.com/${repoPath || 'YOUR_ORG/YOUR_REPO'}`,
+            '',
+            '  2. Go to Settings → Webhooks:',
+            '     Repository → Settings → Webhooks (left sidebar)',
+            '',
+            "  3. Click 'Add webhook'",
+            '',
+            '  4. Fill the form:',
+            '',
+            '     Payload URL:',
+            `     ${webhookUrl}`,
+            '',
+            '     Content type: application/json',
+            '',
+            '     Secret:',
+            `     ${secret}`,
+            '',
+            '     Which events? Just the push event',
+            '',
+            '     Active: ✓ (checked)',
+            '',
+            '     SSL verification: Enable SSL verification (leave default)',
+            '',
+            "  5. Click 'Add webhook' (green button at bottom)",
+            '',
+            '══════════════════════════════════════════════════════════════',
+            '',
+            '  Copy-paste values:',
+            '',
+            `  Payload URL:  ${webhookUrl}`,
+            `  Secret:       ${secret}`,
+            '',
+            `  What happens: When you push to branch '${branch}', GitHub will send`,
+            '  a POST request to your server. The webhook will trigger a deploy.',
+            '',
+            "  Test: After adding, push a commit and check 'Recent Deliveries'",
+            '  in the webhook settings — green ✓ means success.',
+            '',
+            '  Logs: tail -f /var/log/api-gateway/webhook.log',
+            ''
+        ].join('\n');
+        res.type('text/plain').send(instructions);
+    } catch (e) {
+        res.status(500).type('text/plain').send('Error loading webhook instructions');
     }
 });
 

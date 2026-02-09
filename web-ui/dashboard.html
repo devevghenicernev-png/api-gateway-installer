@@ -345,6 +345,23 @@
         </div>
     </div>
 
+    <!-- Webhook instructions modal -->
+    <div class="modal-overlay hidden" id="webhook-modal">
+        <div class="modal" style="max-width: 640px;">
+            <div class="modal-header">
+                <span class="modal-title" id="webhook-modal-title">GitHub Webhook Setup</span>
+                <button class="modal-close" onclick="closeWebhookModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="log-viewer" style="height: 420px; overflow: auto; white-space: pre-wrap; font-size: 0.85rem;" id="webhook-instructions">Loading…</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="copyWebhookInstructions()">Copy all</button>
+                <button class="btn btn-ghost" onclick="closeWebhookModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const API = '/gateway-api';
         let deployments = {};
@@ -445,6 +462,10 @@
                                 <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
                                 Logs
                             </button>
+                            <button class="btn btn-warning" onclick="showWebhookInstructions('${escapeHtml(name)}')" title="Webhook setup">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                Webhook
+                            </button>
                             <button class="btn btn-warning" onclick="restartService('${escapeHtml(name)}')">
                                 <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                                 Restart
@@ -512,6 +533,29 @@
                 deployLogEventSource.close();
                 deployLogEventSource = null;
             }
+        }
+
+        let webhookInstructionsText = '';
+        async function showWebhookInstructions(serviceName) {
+            document.getElementById('webhook-modal-title').textContent = `Webhook: ${serviceName}`;
+            document.getElementById('webhook-instructions').textContent = 'Loading…';
+            document.getElementById('webhook-modal').classList.remove('hidden');
+            try {
+                const res = await fetch(API + '/deployments/' + encodeURIComponent(serviceName) + '/webhook-instructions');
+                const text = await res.text();
+                webhookInstructionsText = text;
+                document.getElementById('webhook-instructions').textContent = res.ok ? text : 'Error: ' + text;
+            } catch (e) {
+                webhookInstructionsText = '';
+                document.getElementById('webhook-instructions').textContent = 'Failed to load instructions.';
+            }
+        }
+        function closeWebhookModal() {
+            document.getElementById('webhook-modal').classList.add('hidden');
+        }
+        function copyWebhookInstructions() {
+            if (!webhookInstructionsText) return;
+            navigator.clipboard.writeText(webhookInstructionsText).then(() => showToast('Copied to clipboard', 'success')).catch(() => showToast('Copy failed', 'error'));
         }
 
         function startDeployLogSSE(serviceName) {
