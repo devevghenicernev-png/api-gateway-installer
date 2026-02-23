@@ -116,11 +116,11 @@ api_remove() {
         return 1
     fi
     
-    /usr/local/bin/api-manage remove "$name"
+    /opt/api-gateway/scripts/api-manage remove "$name"
 }
 
 api_list() {
-    /usr/local/bin/api-manage list
+    /opt/api-gateway/scripts/api-manage list
 }
 
 api_enable() {
@@ -131,7 +131,7 @@ api_enable() {
         return 1
     fi
     
-    /usr/local/bin/api-manage enable "$name"
+    /opt/api-gateway/scripts/api-manage enable "$name"
 }
 
 api_disable() {
@@ -142,7 +142,7 @@ api_disable() {
         return 1
     fi
     
-    /usr/local/bin/api-manage disable "$name"
+    /opt/api-gateway/scripts/api-manage disable "$name"
 }
 
 api_reload() {
