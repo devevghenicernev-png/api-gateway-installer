@@ -2,6 +2,12 @@ module github.com/devevghenicernev-png/apigw
 
 go 1.25.0
 
+// Use a toolchain at or above 1.25.11 so the stdlib CVE-fixes
+// (net/textproto GO-2026-5039, crypto/x509 GO-2026-5037, html/template
+// GO-2026-4980/4982, etc.) are picked up automatically. Anyone building
+// with an older toolchain will be prompted to download a newer one.
+toolchain go1.25.11
+
 require (
 	github.com/charmbracelet/huh v0.6.0
 	github.com/charmbracelet/lipgloss v0.13.0

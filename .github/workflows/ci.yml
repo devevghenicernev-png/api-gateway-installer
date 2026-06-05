@@ -46,9 +46,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.62.0
+          # v2.x — config schema matches .golangci.yml `version: "2"`.
+          version: v2.5.0
           args: --timeout=5m
 
   vuln:
