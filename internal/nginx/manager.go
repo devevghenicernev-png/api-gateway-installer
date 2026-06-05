@@ -10,9 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/afero"
+
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/paths"
-	"github.com/spf13/afero"
 )
 
 // SitePath is where apigw writes its generated nginx server block.

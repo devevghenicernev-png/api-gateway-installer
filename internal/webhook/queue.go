@@ -21,10 +21,10 @@ import (
 const QueueDBPath = "/var/lib/apigw/jobs.db"
 
 var (
-	bucketJobs = []byte("jobs")  // key=monotonic, value=Job JSON
+	bucketJobs  = []byte("jobs")  // key=monotonic, value=Job JSON
 	bucketLease = []byte("lease") // key=jobkey, value=lease expiry (8 bytes BE unix nanos)
-	bucketDead = []byte("dead")  // permanently-failed jobs (>5 retries)
-	bucketMeta = []byte("meta")  // misc state: "next" → monotonic counter
+	bucketDead  = []byte("dead")  // permanently-failed jobs (>5 retries)
+	bucketMeta  = []byte("meta")  // misc state: "next" → monotonic counter
 )
 
 // Job is one persisted unit of work. The webhook server enqueues these from
@@ -34,13 +34,13 @@ var (
 // auditability — `apigw webhook list --deliveries` and dashboard's webhook
 // feed both read these.
 type Job struct {
-	Key        string    `json:"key"`        // hex-encoded monotonic counter
+	Key        string    `json:"key"` // hex-encoded monotonic counter
 	Deploy     string    `json:"deploy"`
-	Event      string    `json:"event"`      // X-GitHub-Event
-	Delivery   string    `json:"delivery"`   // X-GitHub-Delivery
-	Repo       string    `json:"repo"`       // pulled from payload
-	Branch     string    `json:"branch"`     // pulled from payload (ref → branch)
-	SHA        string    `json:"sha"`        // commit SHA, if known
+	Event      string    `json:"event"`    // X-GitHub-Event
+	Delivery   string    `json:"delivery"` // X-GitHub-Delivery
+	Repo       string    `json:"repo"`     // pulled from payload
+	Branch     string    `json:"branch"`   // pulled from payload (ref → branch)
+	SHA        string    `json:"sha"`      // commit SHA, if known
 	EnqueuedAt time.Time `json:"enqueued_at"`
 	Retries    int       `json:"retries"`
 	LastError  string    `json:"last_error,omitempty"`

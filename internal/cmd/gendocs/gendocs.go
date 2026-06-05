@@ -11,10 +11,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/devevghenicernev-png/apigw/internal/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
+
+	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
+	"github.com/devevghenicernev-png/apigw/internal/tui"
 )
 
 func NewCmdGenDocs(f *cmdutil.Factory) *cobra.Command {

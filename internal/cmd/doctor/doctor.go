@@ -11,11 +11,12 @@ import (
 	"os"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/diag"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdDoctor(f *cmdutil.Factory) *cobra.Command {

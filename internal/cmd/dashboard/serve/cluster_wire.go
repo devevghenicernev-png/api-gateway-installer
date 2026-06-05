@@ -3,9 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -120,12 +118,4 @@ func watchLeadership(ctx context.Context, node *cluster.Node, logger *slog.Logge
 			}
 		}
 	}
-}
-
-// ensureClusterDirs creates the raft data directory with restrictive perms.
-func ensureClusterDirs(dir string) error {
-	if dir == "" {
-		return errors.New("cluster: data dir required")
-	}
-	return os.MkdirAll(dir, 0o700)
 }

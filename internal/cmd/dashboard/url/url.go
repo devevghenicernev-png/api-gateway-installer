@@ -4,9 +4,10 @@ package url
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdURL(f *cmdutil.Factory) *cobra.Command {

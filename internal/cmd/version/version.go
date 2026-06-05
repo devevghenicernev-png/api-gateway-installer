@@ -9,8 +9,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/spf13/cobra"
+
+	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 )
 
 type info struct {

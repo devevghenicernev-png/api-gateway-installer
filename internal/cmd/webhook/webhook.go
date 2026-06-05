@@ -2,6 +2,8 @@
 package webhook
 
 import (
+	"github.com/spf13/cobra"
+
 	whList "github.com/devevghenicernev-png/apigw/internal/cmd/webhook/list"
 	whRotate "github.com/devevghenicernev-png/apigw/internal/cmd/webhook/rotate"
 	whServe "github.com/devevghenicernev-png/apigw/internal/cmd/webhook/serve"
@@ -11,7 +13,6 @@ import (
 	whStop "github.com/devevghenicernev-png/apigw/internal/cmd/webhook/stop"
 	whURL "github.com/devevghenicernev-png/apigw/internal/cmd/webhook/url"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdWebhook(f *cmdutil.Factory) *cobra.Command {

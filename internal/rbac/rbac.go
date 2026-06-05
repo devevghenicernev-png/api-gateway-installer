@@ -12,9 +12,9 @@
 //	owner     — everything: *
 //
 // Users are mapped to roles via:
-//   1. Config-level static assignments (single-host installs)
-//   2. LDAP group → role mapping (E6)
-//   3. SAML attribute → role mapping (E7)
+//  1. Config-level static assignments (single-host installs)
+//  2. LDAP group → role mapping (E6)
+//  3. SAML attribute → role mapping (E7)
 //
 // Every Check() that denies an action is logged to the audit package so
 // SIEM sees the attempt.
@@ -41,7 +41,7 @@ type Role struct {
 // Assignment maps a user (or group, when LDAP/SAML is wired) to one or
 // more roles. Multiple roles are additive: union of all permissions.
 type Assignment struct {
-	User  string   `koanf:"user" yaml:"user"`            // exact match
+	User  string   `koanf:"user" yaml:"user"`             // exact match
 	Group string   `koanf:"group" yaml:"group,omitempty"` // LDAP/SAML group match
 	Roles []string `koanf:"roles" yaml:"roles"`
 }

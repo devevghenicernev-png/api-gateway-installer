@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	apibackup "github.com/devevghenicernev-png/apigw/internal/backup"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
@@ -21,18 +23,17 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
 	"github.com/devevghenicernev-png/apigw/internal/shim"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 type options struct {
 	f *cmdutil.Factory
 
-	DryRun        bool
-	Force         bool
-	SkipBackup    bool
-	SkipShim      bool
-	BackupOut     string
-	Yes           bool
+	DryRun     bool
+	Force      bool
+	SkipBackup bool
+	SkipShim   bool
+	BackupOut  string
+	Yes        bool
 }
 
 func NewCmdMigrate(f *cmdutil.Factory) *cobra.Command {

@@ -22,9 +22,9 @@ type JobQueue struct {
 }
 
 type deployLock struct {
-	mu         sync.Mutex
-	inFlight   atomic.Bool
-	lastSHA    atomic.Pointer[string] // SHA of the latest queued job, for debounce
+	mu       sync.Mutex
+	inFlight atomic.Bool
+	lastSHA  atomic.Pointer[string] // SHA of the latest queued job, for debounce
 }
 
 // NewJobQueue returns an empty queue. Cheap; safe to construct per request.

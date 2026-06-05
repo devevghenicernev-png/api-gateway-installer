@@ -13,6 +13,8 @@ import (
 	"syscall"
 
 	charmlog "github.com/charmbracelet/log"
+	"github.com/spf13/afero"
+
 	"github.com/devevghenicernev-png/apigw/internal/build"
 	"github.com/devevghenicernev-png/apigw/internal/cmd/root"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
@@ -21,7 +23,6 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/selfupdate"
 	"github.com/devevghenicernev-png/apigw/internal/shim"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/afero"
 )
 
 // ExitCode is the integer apigw returns to the shell. Documented and stable.
@@ -172,7 +173,7 @@ func newLoggerAt(ios *iostreams.IOStreams, level slog.Level) *slog.Logger {
 	if !ios.IsStderrTTY() {
 		return slog.New(slog.NewJSONHandler(ios.ErrOut, &slog.HandlerOptions{Level: level}))
 	}
-	clevel := charmlog.InfoLevel
+	var clevel charmlog.Level
 	switch {
 	case level <= slog.LevelDebug:
 		clevel = charmlog.DebugLevel

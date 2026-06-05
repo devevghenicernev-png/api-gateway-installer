@@ -86,7 +86,9 @@ func pullLocalAI(ctx context.Context, model string, out io.Writer) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(out, resp.Body)
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return fmt.Errorf("stream localai response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("localai apply returned %s", resp.Status)
 	}

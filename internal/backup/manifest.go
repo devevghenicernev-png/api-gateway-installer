@@ -24,11 +24,11 @@ const SchemaVersion = 1
 // Manifest is the sidecar JSON written as `manifest.json` at the root of
 // the tar. Stable shape — operators may script against it.
 type Manifest struct {
-	SchemaVersion int       `json:"schema_version"`
-	APIGWVersion  string    `json:"apigw_version"`
-	APIGWCommit   string    `json:"apigw_commit"`
-	CreatedAt     time.Time `json:"created_at"`
-	Host          string    `json:"host"`
+	SchemaVersion int        `json:"schema_version"`
+	APIGWVersion  string     `json:"apigw_version"`
+	APIGWCommit   string     `json:"apigw_commit"`
+	CreatedAt     time.Time  `json:"created_at"`
+	Host          string     `json:"host"`
 	Files         []FileSpec `json:"files"`
 
 	// IncludesQueue records whether bbolt jobs.db was packed — restore
@@ -39,8 +39,8 @@ type Manifest struct {
 // FileSpec describes one packed file. Mode is the original 0o400-style
 // permission; restore preserves it. SHA256 lets us detect corruption.
 type FileSpec struct {
-	Path   string `json:"path"`    // logical path inside the archive
-	Origin string `json:"origin"`  // absolute path on the source host
+	Path   string `json:"path"`   // logical path inside the archive
+	Origin string `json:"origin"` // absolute path on the source host
 	Size   int64  `json:"size"`
 	Mode   uint32 `json:"mode"`
 	SHA256 string `json:"sha256"`

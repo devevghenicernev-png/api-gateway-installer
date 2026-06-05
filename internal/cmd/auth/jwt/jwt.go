@@ -5,10 +5,11 @@ package jwt
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdJWT(f *cmdutil.Factory) *cobra.Command {

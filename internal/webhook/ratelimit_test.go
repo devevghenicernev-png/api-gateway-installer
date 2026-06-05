@@ -37,15 +37,19 @@ func TestAllowRateBucketFill(t *testing.T) {
 func TestAllowRatePerDeployIsolation(t *testing.T) {
 	s := &Server{RateLimitPerMin: 2}
 	// fill bucket for "a"
-	if !s.allowRate("a") || !s.allowRate("a") {
-		t.Fatal("budget for a")
+	for i := 0; i < 2; i++ {
+		if !s.allowRate("a") {
+			t.Fatalf("a call %d should fit budget", i)
+		}
 	}
 	if s.allowRate("a") {
-		t.Fatal("a should be throttled")
+		t.Fatal("a should be throttled after budget")
 	}
-	// "b" still has full budget
-	if !s.allowRate("b") || !s.allowRate("b") {
-		t.Fatal("b should have its own budget")
+	// "b" still has full budget — per-deploy isolation
+	for i := 0; i < 2; i++ {
+		if !s.allowRate("b") {
+			t.Fatalf("b call %d should fit budget", i)
+		}
 	}
 }
 

@@ -50,7 +50,7 @@ func (s *publishingSink) Write(p []byte) (int, error) {
 		}
 		line := make([]byte, idx)
 		_, _ = s.buf.Read(line)
-		s.buf.ReadByte() // consume the newline
+		_, _ = s.buf.ReadByte() // consume the newline
 		s.emit(line)
 	}
 	return len(p), nil

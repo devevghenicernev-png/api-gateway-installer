@@ -19,9 +19,9 @@ type pushEvent struct {
 	Before     string `json:"before"`  // previous SHA (zero on first push)
 	Deleted    bool   `json:"deleted"` // branch was deleted
 	Repository struct {
-		FullName string `json:"full_name"`
-		CloneURL string `json:"clone_url"` // https
-		SSHURL   string `json:"ssh_url"`   // ssh
+		FullName      string `json:"full_name"`
+		CloneURL      string `json:"clone_url"` // https
+		SSHURL        string `json:"ssh_url"`   // ssh
 		DefaultBranch string `json:"default_branch"`
 	} `json:"repository"`
 }

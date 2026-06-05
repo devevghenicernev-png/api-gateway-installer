@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/dashboard"
@@ -20,7 +22,6 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/system"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
-	"github.com/spf13/cobra"
 )
 
 type opts struct {
@@ -174,9 +175,6 @@ func runTLSTicker(ctx context.Context, publish func(topic, evType string, data [
 	defer tick.Stop()
 	firedRecently := map[string]time.Time{}
 	warnDays := 30
-	if sec != nil && sec.Alerts != nil {
-		// AlertsCfg lives on the config we reload anyway; nothing to wire here.
-	}
 	emit := func() {
 		certs, err := apitls.ListCerts()
 		if err != nil {
@@ -334,4 +332,3 @@ func reloadConfig() (*config.Config, error) {
 	}
 	return cfg, nil
 }
-

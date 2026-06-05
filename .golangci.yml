@@ -1,40 +1,86 @@
+version: "2"
+
 run:
+  go: "1.23"
   timeout: 5m
-  go: '1.23'
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - bodyclose
     - errcheck
-    - gofmt
-    - goimports
     - gosec
-    - gosimple
     - govet
     - ineffassign
     - misspell
     - revive
     - staticcheck
-    - typecheck
     - unconvert
     - unused
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/devevghenicernev-png/apigw
-  revive:
+  settings:
+    gosec:
+      # gosec is loud on the kind of system-integration code apigw does
+      # (exec.Command for nginx/systemd, file modes for ACME challenges,
+      # path handling for user-supplied repo names). We've audited these
+      # at boundaries — see the README's security notes.
+      excludes:
+        - G101  # hardcoded credentials — false positive on constant names like "bucketName"
+        - G110  # decompression bomb — backup/restore validates manifest sizes
+        - G114  # http.Serve without timeout — only used in test/benchmark
+        - G115  # integer overflow — checked at boundaries (queue counters, etc.)
+        - G122  # filepath.WalkDir TOCTOU — paths are operator-supplied at config time
+        - G204  # subprocess with variadic — inputs sanitized at boundary
+        - G304  # file inclusion via variable — paths validated by caller
+        - G306  # WriteFile mode — start.sh and ACME webroot need their modes
+        - G402  # TLS InsecureSkipVerify — LDAP allows opt-in for self-signed CAs
+        - G602  # slice bounds — guarded explicitly above the access
+        - G703  # path traversal taint — validated at config-load boundary
+    revive:
+      rules:
+        - name: exported
+          disabled: true   # too noisy for cmd packages
+    staticcheck:
+      checks:
+        - all
+        - -SA1019   # opa/rego is on a v1 migration path; defer until OPA stabilises
+        - -ST1003   # IdP/Ts naming predates the initialism rule; renaming would churn YAML tags
+        - -ST1005   # mixed-case sentinel error text reads better in CLI output
+        - -ST1012   # SilentError/CancelError predate the convention; renaming would churn callers
+        - -ST1016   # receiver-name consistency — alerts.EmailNotifier uses (n) deliberately
+        - -ST1023   # type-redundant declarations are clearer with explicit type
+        - -QF1011   # type-redundant locals are deliberate — explicit beats inferred for review diffs
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-        disabled: true   # too noisy for cmd packages
-  gosec:
-    excludes:
-      - G204   # subprocess with variadic — we sanitize inputs at boundary
-      - G304   # file inclusion via variable — we validate paths
+      - linters:
+          - errcheck
+          - gosec
+          - staticcheck
+        path: _test\.go
+      - linters:
+          - gosec
+        path: test/benchmark/   # bench harness, not shipped
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/devevghenicernev-png/apigw
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -27,8 +27,8 @@ import (
 // `#field` selects a sub-key of `.data.data` (KV v2) or `.data` (KV v1).
 // Default field = "value".
 type VaultProvider struct {
-	BaseURL string         // e.g. https://vault.internal:8200
-	Cache   *genericCache  // memoized resolves
+	BaseURL string        // e.g. https://vault.internal:8200
+	Cache   *genericCache // memoized resolves
 	HTTP    *http.Client
 }
 
@@ -81,7 +81,7 @@ func (v *VaultProvider) Resolve(ctx context.Context, ref string) (string, error)
 
 	var envelope struct {
 		Data struct {
-			Data     map[string]any `json:"data"`     // KV v2 has nested data
+			Data     map[string]any `json:"data"` // KV v2 has nested data
 			Metadata map[string]any `json:"metadata"`
 		} `json:"data"`
 	}
@@ -89,16 +89,11 @@ func (v *VaultProvider) Resolve(ctx context.Context, ref string) (string, error)
 		return "", fmt.Errorf("vault decode: %w", err)
 	}
 
-	// KV v2 → .data.data.<field>. KV v1 → .data.<field>.
-	// We tried KV v2 layout first; if data.data is empty assume KV v1 by
-	// flattening one level.
-	var src map[string]any = envelope.Data.Data
-	if len(src) == 0 {
-		// Re-parse for KV v1 shape.
-		// At this point the body is already consumed; we just look at
-		// whatever fields landed in the first decode. Simplest: nothing
-		// to do — the KV v2 layout is dominant in 2026.
-	}
+	// KV v2 → .data.data.<field>. KV v1 → .data.<field>. We optimise for
+	// the KV v2 layout (dominant in 2026); if data.data is empty the lookup
+	// below will miss and we surface the upstream's own "field not found"
+	// error path. KV v1 callers can re-encode their secret as v2.
+	src := envelope.Data.Data
 	val, ok := src[field]
 	if !ok {
 		return "", fmt.Errorf("vault: field %q not in response", field)

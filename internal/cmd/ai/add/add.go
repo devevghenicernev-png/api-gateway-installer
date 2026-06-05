@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/ai"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 type options struct {

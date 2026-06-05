@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/devevghenicernev-png/apigw/internal/build"
@@ -59,7 +58,6 @@ type Check struct {
 	url     string
 	err     error
 	stopped bool
-	once    sync.Once
 }
 
 // NewBackgroundCheck starts the check goroutine. Cheap; callers should

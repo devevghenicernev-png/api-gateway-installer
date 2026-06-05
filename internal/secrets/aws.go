@@ -24,10 +24,10 @@ import (
 // True direct API (SigV4 manually) is a v0.6 stretch when there's
 // customer demand justifying the ~400 LoC SigV4 implementation.
 type AWSSecretsManagerProvider struct {
-	Region    string
-	CacheDir  string // /var/run/secrets-cache by default
-	Cache     *genericCache
-	HTTP      *http.Client
+	Region   string
+	CacheDir string // /var/run/secrets-cache by default
+	Cache    *genericCache
+	HTTP     *http.Client
 }
 
 func NewAWSSMProvider(region string, ttl time.Duration) *AWSSecretsManagerProvider {

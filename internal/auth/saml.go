@@ -143,7 +143,7 @@ func loadIdPMetadata(cfg SAMLConfig) (*saml.EntityDescriptor, error) {
 // no session is present (handler not protected, or unauth'd request).
 func SubjectFromSession(r *http.Request, groupAttr string) (string, []string) {
 	sa, err := samlsp.SessionFromContext(r.Context()).(samlsp.SessionWithAttributes)
-	if err == false {
+	if !err {
 		// SessionFromContext returns nil interface when no session; assertion
 		// fails. Just return zero values.
 		_ = sa

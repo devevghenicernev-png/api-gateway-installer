@@ -2,6 +2,8 @@
 package dashboard
 
 import (
+	"github.com/spf13/cobra"
+
 	dashOpen "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/open"
 	dashServe "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/serve"
 	dashStart "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/start"
@@ -9,7 +11,6 @@ import (
 	dashStop "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/stop"
 	dashURL "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/url"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdDashboard(f *cmdutil.Factory) *cobra.Command {

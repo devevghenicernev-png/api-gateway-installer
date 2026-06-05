@@ -31,13 +31,13 @@ import (
 
 // Tenant is the workspace record.
 type Tenant struct {
-	ID          string    `koanf:"id" yaml:"id"`                     // url-safe slug
-	Name        string    `koanf:"name" yaml:"name"`                 // display name
-	Description string    `koanf:"description" yaml:"description,omitempty"`
-	PathPrefix  string    `koanf:"path_prefix" yaml:"path_prefix"`   // e.g. /t/acme — every API path nests here
-	Quotas      Quotas    `koanf:"quotas" yaml:"quotas,omitempty"`
-	Admins      []string  `koanf:"admins" yaml:"admins,omitempty"`   // user IDs with admin role inside this tenant
-	Enabled     bool      `koanf:"enabled" yaml:"enabled"`
+	ID          string   `koanf:"id" yaml:"id"`     // url-safe slug
+	Name        string   `koanf:"name" yaml:"name"` // display name
+	Description string   `koanf:"description" yaml:"description,omitempty"`
+	PathPrefix  string   `koanf:"path_prefix" yaml:"path_prefix"` // e.g. /t/acme — every API path nests here
+	Quotas      Quotas   `koanf:"quotas" yaml:"quotas,omitempty"`
+	Admins      []string `koanf:"admins" yaml:"admins,omitempty"` // user IDs with admin role inside this tenant
+	Enabled     bool     `koanf:"enabled" yaml:"enabled"`
 }
 
 // Quotas caps tenant resource usage. Zero = no limit.

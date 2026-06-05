@@ -5,13 +5,13 @@
 // process by NewSecurity() and held on Server.Sec. Every admin handler
 // routes its writes through Sec.Guard() which:
 //
-//   1. Authenticates the request (bearer token → Identity, or anonymous).
-//   2. Performs an RBAC check for the requested permission.
-//   3. Runs OPA policies against the before/after payload.
-//   4. (Optionally) parks the change as an approval request if the action
-//      is in DangerousActions and the threshold > 0.
-//   5. Calls onCommit() to perform the real mutation.
-//   6. Writes an audit entry capturing actor / action / resource / result.
+//  1. Authenticates the request (bearer token → Identity, or anonymous).
+//  2. Performs an RBAC check for the requested permission.
+//  3. Runs OPA policies against the before/after payload.
+//  4. (Optionally) parks the change as an approval request if the action
+//     is in DangerousActions and the threshold > 0.
+//  5. Calls onCommit() to perform the real mutation.
+//  6. Writes an audit entry capturing actor / action / resource / result.
 //
 // When no Security config is provided in config.yaml the engine runs in
 // legacy mode: requests are anonymous, every action is allowed, audit is
@@ -19,6 +19,7 @@
 package dashboard
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -34,7 +35,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/devevghenicernev-png/apigw/internal/alerts"
@@ -62,12 +62,12 @@ type Security struct {
 	tokensMu sync.RWMutex
 	tokens   map[string]rbac.Identity // sha256(token-bytes) → identity
 
-	csrfKey []byte // signing key for CSRF tokens issued to the dashboard
-	maxBody int64
+	csrfKey   []byte // signing key for CSRF tokens issued to the dashboard
+	maxBody   int64
 	threshold int
-	stateDir string
-	enforce  bool
-	logger   *slog.Logger
+	stateDir  string
+	enforce   bool
+	logger    *slog.Logger
 }
 
 // NewSecurity constructs the integrated security layer from a Config block.
@@ -354,7 +354,7 @@ func (s *Security) IssueCSRFToken(user string) string {
 	mac := hmac.New(sha256.New, s.csrfKey)
 	mac.Write([]byte(payload))
 	sig := hex.EncodeToString(mac.Sum(nil))
-	return base64.URLEncoding.EncodeToString([]byte(payload+"|"+sig))
+	return base64.URLEncoding.EncodeToString([]byte(payload + "|" + sig))
 }
 
 // VerifyCSRFToken returns nil if the token is valid for the given user and
@@ -396,7 +396,7 @@ func (s *Security) FireAlert(category, severity, title, detail, resource string)
 	if s == nil || s.Alerts == nil {
 		return
 	}
-	go s.Alerts.Fire(nil, alerts.Event{
+	go s.Alerts.Fire(context.Background(), alerts.Event{
 		Category: category,
 		Severity: severity,
 		Title:    title,
@@ -490,9 +490,3 @@ type slogAlertsAdapter struct{ l *slog.Logger }
 func (a slogAlertsAdapter) Info(msg string, fields ...any)  { a.l.Info(msg, fields...) }
 func (a slogAlertsAdapter) Warn(msg string, fields ...any)  { a.l.Warn(msg, fields...) }
 func (a slogAlertsAdapter) Error(msg string, fields ...any) { a.l.Error(msg, fields...) }
-
-// counter is used by rate limiter; kept here to avoid spreading sync types.
-type counter struct{ n atomic.Int64 }
-
-func (c *counter) inc() int64 { return c.n.Add(1) }
-func (c *counter) reset()     { c.n.Store(0) }

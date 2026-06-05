@@ -66,11 +66,11 @@ func TestUnknownSchemeErrors(t *testing.T) {
 
 func TestSchemeOf(t *testing.T) {
 	cases := map[string]string{
-		"vault://kv/data/x":  "vault",
-		"file:///etc/foo":    "file",
-		"aws-sm://billing":   "aws-sm",
-		"plain":              "",
-		"":                   "",
+		"vault://kv/data/x": "vault",
+		"file:///etc/foo":   "file",
+		"aws-sm://billing":  "aws-sm",
+		"plain":             "",
+		"":                  "",
 	}
 	for in, want := range cases {
 		if got := schemeOf(in); got != want {

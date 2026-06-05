@@ -7,16 +7,16 @@ import (
 
 func TestValidateID(t *testing.T) {
 	cases := map[string]bool{
-		"acme":         true,
-		"big-corp":     true,
-		"a":            false, // too short
-		"-leading":     false,
-		"trailing-":    false,
-		"UPPER":        false,
-		"foo_bar":      false, // underscore not allowed
-		"42":           true,  // 2 chars min is fine
-		"42a":          true,
-		"x":            false, // 1 char too short
+		"acme":      true,
+		"big-corp":  true,
+		"a":         false, // too short
+		"-leading":  false,
+		"trailing-": false,
+		"UPPER":     false,
+		"foo_bar":   false, // underscore not allowed
+		"42":        true,  // 2 chars min is fine
+		"42a":       true,
+		"x":         false, // 1 char too short
 	}
 	for in, ok := range cases {
 		err := ValidateID(in)

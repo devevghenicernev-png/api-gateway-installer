@@ -21,7 +21,7 @@ import (
 // stub_status doesn't expose them and we don't want to fork the request
 // path). For per-route latency, install nginx-vts-exporter or similar.
 type Metrics struct {
-	WebhooksAccepted    *prometheus.CounterVec   // labels: deploy
+	WebhooksAccepted    *prometheus.CounterVec // labels: deploy
 	WebhooksReplayed    prometheus.Counter
 	WebhookHMACFails    prometheus.Counter
 	WebhookUnsigned     prometheus.Counter
@@ -29,7 +29,7 @@ type Metrics struct {
 	DeployApplyTotal    *prometheus.CounterVec   // labels: deploy, status
 	DeployApplyDuration *prometheus.HistogramVec // labels: deploy
 	SSEClients          prometheus.Gauge
-	NginxReloadTotal    *prometheus.CounterVec   // labels: result
+	NginxReloadTotal    *prometheus.CounterVec // labels: result
 	registry            *prometheus.Registry
 }
 

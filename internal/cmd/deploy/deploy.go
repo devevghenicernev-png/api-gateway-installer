@@ -2,6 +2,8 @@
 package deploy
 
 import (
+	"github.com/spf13/cobra"
+
 	deployAdd "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/add"
 	deployList "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/list"
 	deployLogs "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/logs"
@@ -10,7 +12,6 @@ import (
 	deploySSHKey "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/sshkey"
 	deployStatus "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/status"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdDeploy(f *cmdutil.Factory) *cobra.Command {

@@ -31,15 +31,15 @@ var Palette = struct {
 // Styles are precomputed for the common cases. Build once at package init —
 // lipgloss.NewStyle() allocates, so don't rebuild per render in hot paths.
 var Styles = struct {
-	Heading   lipgloss.Style
+	Heading    lipgloss.Style
 	Identifier lipgloss.Style
-	Success   lipgloss.Style
-	Warn      lipgloss.Style
-	Danger    lipgloss.Style
-	Muted     lipgloss.Style
-	Accent    lipgloss.Style
-	URL       lipgloss.Style
-	Box       lipgloss.Style
+	Success    lipgloss.Style
+	Warn       lipgloss.Style
+	Danger     lipgloss.Style
+	Muted      lipgloss.Style
+	Accent     lipgloss.Style
+	URL        lipgloss.Style
+	Box        lipgloss.Style
 }{
 	Heading:    lipgloss.NewStyle().Foreground(Palette.Primary).Bold(true),
 	Identifier: lipgloss.NewStyle().Bold(true),
@@ -57,10 +57,10 @@ var Styles = struct {
 
 // Glyphs are the only non-ASCII characters allowed in default output.
 const (
-	GlyphCheck    = "✓"
-	GlyphCross    = "×"
-	GlyphSpinner  = "⠋"
-	GlyphArrow    = "→"
-	GlyphBullet   = "•"
-	GlyphPipe     = "│"
+	GlyphCheck   = "✓"
+	GlyphCross   = "×"
+	GlyphSpinner = "⠋"
+	GlyphArrow   = "→"
+	GlyphBullet  = "•"
+	GlyphPipe    = "│"
 )

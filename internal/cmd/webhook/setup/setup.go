@@ -8,11 +8,12 @@ package setup
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdSetup(f *cmdutil.Factory) *cobra.Command {
@@ -56,7 +57,7 @@ func run(f *cmdutil.Factory, name string, rotate bool) error {
 	contentType := "application/json"
 
 	ios := f.IOStreams
-	plan := tui.NewPlan("Webhook setup — " + name).
+	plan := tui.NewPlan("Webhook setup — "+name).
 		Add("Payload URL", url).
 		Add("Content type", contentType).
 		Add("Events", "push (default)").

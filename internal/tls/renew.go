@@ -9,9 +9,9 @@ import (
 type RenewResult struct {
 	Domain    string
 	Strategy  Strategy
-	Renewed   bool   // false means "still valid, skipped"
-	Error     error  // non-nil if obtain failed
-	DaysLeft  int    // days until expiry AFTER the pass
+	Renewed   bool  // false means "still valid, skipped"
+	Error     error // non-nil if obtain failed
+	DaysLeft  int   // days until expiry AFTER the pass
 	OldExpiry time.Time
 	NewExpiry time.Time
 }

@@ -52,10 +52,10 @@ type MTLSConfig struct {
 type MTLSResult int
 
 const (
-	MTLSOK MTLSResult = iota
-	MTLSNoVerify     // ssl_verify_client returned NONE (cert missing) and !Optional
-	MTLSNotAllowed   // cert OK but not in allow-list
-	MTLSBackendError // CA file read failed, etc.
+	MTLSOK           MTLSResult = iota
+	MTLSNoVerify                // ssl_verify_client returned NONE (cert missing) and !Optional
+	MTLSNotAllowed              // cert OK but not in allow-list
+	MTLSBackendError            // CA file read failed, etc.
 )
 
 func (r MTLSResult) HTTPStatus() int {

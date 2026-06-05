@@ -65,8 +65,8 @@ type JWTConfig struct {
 type Verifier struct {
 	cfg JWTConfig
 
-	mu       sync.RWMutex
-	jwks     *jose.JSONWebKeySet
+	mu          sync.RWMutex
+	jwks        *jose.JSONWebKeySet
 	jwksFetched time.Time
 
 	// http is overridable in tests.

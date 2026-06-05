@@ -28,11 +28,11 @@ type ErrorSuggestion struct {
 // Implements `error` so it can be returned from RunE. The renderer detects it
 // via errors.As and pretty-prints; otherwise falls back to .Error().
 type RichError struct {
-	Summary     string             // lowercase, no exclamation
-	Cause       string             // why — one line, indented
-	Suggestions []ErrorSuggestion  // 0..N "try one of" entries
-	DocsCode    string             // e.g. "E_PORT_BUSY" — turned into URL
-	Underlying  error              // wrapped error for errors.Is/As
+	Summary     string            // lowercase, no exclamation
+	Cause       string            // why — one line, indented
+	Suggestions []ErrorSuggestion // 0..N "try one of" entries
+	DocsCode    string            // e.g. "E_PORT_BUSY" — turned into URL
+	Underlying  error             // wrapped error for errors.Is/As
 }
 
 func (e *RichError) Error() string {

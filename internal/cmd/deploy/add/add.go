@@ -11,12 +11,13 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/deploy"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 type options struct {
@@ -32,9 +33,9 @@ type options struct {
 	Start       string
 	Description string
 
-	yes      bool
-	dryRun   bool
-	noStart  bool // register only, don't run the first deploy
+	yes     bool
+	dryRun  bool
+	noStart bool // register only, don't run the first deploy
 }
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$`)

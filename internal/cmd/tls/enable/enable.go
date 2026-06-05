@@ -10,13 +10,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
 	"github.com/devevghenicernev-png/apigw/internal/system"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 type options struct {
@@ -25,10 +26,10 @@ type options struct {
 	Strategy string
 
 	// Let's Encrypt / DuckDNS
-	Domain    string
-	Domains   []string
-	Email     string
-	Staging   bool
+	Domain  string
+	Domains []string
+	Email   string
+	Staging bool
 
 	// DuckDNS
 	Subdomain string
@@ -38,9 +39,9 @@ type options struct {
 	CommonName string
 
 	// Flags
-	yes      bool
-	dryRun   bool
-	noTimer  bool // skip systemd timer install — useful in containers
+	yes     bool
+	dryRun  bool
+	noTimer bool // skip systemd timer install — useful in containers
 }
 
 func NewCmdEnable(f *cmdutil.Factory) *cobra.Command {

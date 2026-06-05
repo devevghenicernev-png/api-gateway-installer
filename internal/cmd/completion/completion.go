@@ -11,8 +11,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/spf13/cobra"
+
+	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 )
 
 func NewCmdCompletion(f *cmdutil.Factory) *cobra.Command {

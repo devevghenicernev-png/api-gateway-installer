@@ -33,9 +33,9 @@ import (
 
 // Server bundles the hub + HTTP mux + dependencies. One per process.
 type Server struct {
-	Addr    string
-	Hub     *events.Hub
-	Logger  *slog.Logger
+	Addr     string
+	Hub      *events.Hub
+	Logger   *slog.Logger
 	ConfigFn func() (*config.Config, error) // fresh read each call (long-running)
 
 	srv *http.Server
@@ -308,14 +308,14 @@ func (s *Server) staticHandler(uiFS fs.FS) http.HandlerFunc {
 // StatusSnapshot is what /api/status returns. JSON-shaped so the dashboard
 // can render the initial state before the SSE stream catches it up.
 type StatusSnapshot struct {
-	Version     string                  `json:"version"`
-	Commit      string                  `json:"commit"`
-	UptimeSec   int64                   `json:"uptime_sec"`
-	Clients     int                     `json:"sse_clients"`
-	Deploys     []DeploySummary         `json:"deploys"`
-	TLS         []apitls.CertInfo       `json:"tls"`
-	Webhook     WebhookSummary          `json:"webhook"`
-	NowUnix     int64                   `json:"now_unix"`
+	Version   string            `json:"version"`
+	Commit    string            `json:"commit"`
+	UptimeSec int64             `json:"uptime_sec"`
+	Clients   int               `json:"sse_clients"`
+	Deploys   []DeploySummary   `json:"deploys"`
+	TLS       []apitls.CertInfo `json:"tls"`
+	Webhook   WebhookSummary    `json:"webhook"`
+	NowUnix   int64             `json:"now_unix"`
 }
 
 type DeploySummary struct {
@@ -330,10 +330,10 @@ type DeploySummary struct {
 }
 
 type WebhookSummary struct {
-	Enabled    bool   `json:"enabled"`
-	Port       int    `json:"port"`
-	QueueDepth int    `json:"queue_depth"`
-	DeadLetter int    `json:"dead_letter"`
+	Enabled    bool `json:"enabled"`
+	Port       int  `json:"port"`
+	QueueDepth int  `json:"queue_depth"`
+	DeadLetter int  `json:"dead_letter"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

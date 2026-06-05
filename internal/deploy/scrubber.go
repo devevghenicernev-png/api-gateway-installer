@@ -14,10 +14,10 @@ import (
 // It is deliberately heuristic — full secret detection is a lost cause in
 // arbitrary build output. The rules are:
 //
-//   1. KEY=VALUE pairs where KEY matches an obvious secret name
-//      (PASS, PASSWORD, SECRET, TOKEN, KEY, CRED*).
-//   2. Authorization-header lines: "Authorization: <anything>" → masked.
-//   3. URLs with embedded user:pass — "://user:pass@" → "://user:***@".
+//  1. KEY=VALUE pairs where KEY matches an obvious secret name
+//     (PASS, PASSWORD, SECRET, TOKEN, KEY, CRED*).
+//  2. Authorization-header lines: "Authorization: <anything>" → masked.
+//  3. URLs with embedded user:pass — "://user:pass@" → "://user:***@".
 //
 // Replacement always renders "***" — fixed length so layout-based attacks
 // can't infer secret length from output. Detection is line-oriented; bytes

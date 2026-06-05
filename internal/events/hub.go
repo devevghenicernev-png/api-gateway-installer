@@ -53,8 +53,8 @@ type Hub struct {
 	Metrics PublishCounter
 
 	// Tunables — exported for tests, defaulted in New().
-	RingCap                int
-	SubChanCap             int
+	RingCap                 int
+	SubChanCap              int
 	DropDisconnectThreshold uint64
 }
 

@@ -9,10 +9,11 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {

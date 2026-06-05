@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 )
 
@@ -38,7 +39,7 @@ func runWizard(f *cmdutil.Factory, def Answers) (Answers, error) {
 		huh.NewGroup(
 			huh.NewNote().
 				Title("apigw install — step 2 of 5").
-				Description("HTTPS protects requests in transit and is required by browsers\n" +
+				Description("HTTPS protects requests in transit and is required by browsers\n"+
 					"and mobile app stores. Pick one — switch later with `apigw tls enable`."),
 			huh.NewSelect[string]().
 				Title("TLS strategy").

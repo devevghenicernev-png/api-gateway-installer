@@ -8,6 +8,10 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+	"github.com/spf13/cobra"
+
 	aicmd "github.com/devevghenicernev-png/apigw/internal/cmd/ai"
 	apicmd "github.com/devevghenicernev-png/apigw/internal/cmd/api"
 	auditcmd "github.com/devevghenicernev-png/apigw/internal/cmd/audit"
@@ -21,18 +25,15 @@ import (
 	installcmd "github.com/devevghenicernev-png/apigw/internal/cmd/install"
 	logscmd "github.com/devevghenicernev-png/apigw/internal/cmd/logs"
 	migratecmd "github.com/devevghenicernev-png/apigw/internal/cmd/migrate"
-	uninstallcmd "github.com/devevghenicernev-png/apigw/internal/cmd/uninstall"
 	restorecmd "github.com/devevghenicernev-png/apigw/internal/cmd/restore"
 	statuscmd "github.com/devevghenicernev-png/apigw/internal/cmd/status"
 	tlscmd "github.com/devevghenicernev-png/apigw/internal/cmd/tls"
+	uninstallcmd "github.com/devevghenicernev-png/apigw/internal/cmd/uninstall"
 	upgradecmd "github.com/devevghenicernev-png/apigw/internal/cmd/upgrade"
 	versioncmd "github.com/devevghenicernev-png/apigw/internal/cmd/version"
 	webhookcmd "github.com/devevghenicernev-png/apigw/internal/cmd/webhook"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-	"github.com/spf13/cobra"
 )
 
 // NewCmdRoot returns the root command, ready to ExecuteContext.
@@ -97,7 +98,7 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 		// Map verbose count → slog level and REPLACE the logger handler
 		// so every command sees the new level. Previously the handler was
 		// frozen at LevelInfo regardless of -v / -vv.
-		level := slog.LevelInfo
+		var level slog.Level
 		switch v {
 		case 0:
 			level = slog.LevelWarn

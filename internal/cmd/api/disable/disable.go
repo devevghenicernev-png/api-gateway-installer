@@ -3,9 +3,10 @@
 package disable
 
 import (
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmd/api/enable"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdDisable(f *cmdutil.Factory) *cobra.Command {

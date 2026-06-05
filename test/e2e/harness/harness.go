@@ -98,7 +98,7 @@ func Launch(t *testing.T, image, hostBinary string) *Container {
 		"-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw",
 		"-v", fmt.Sprintf("%s:/usr/local/bin/apigw:ro", abs),
 		"--stop-signal", "SIGRTMIN+3",
-		"-p", "0:80",   // host-random
+		"-p", "0:80", // host-random
 		"-p", "0:9080",
 		image,
 	}
@@ -107,7 +107,7 @@ func Launch(t *testing.T, image, hostBinary string) *Container {
 	if err != nil {
 		t.Fatalf("docker run: %v\n%s", err, out)
 	}
-	id := strings.TrimSpace(string(out))
+	id := strings.TrimSpace(out)
 	c := &Container{t: t, ID: id, Tag: image}
 	t.Cleanup(func() { c.Stop() })
 

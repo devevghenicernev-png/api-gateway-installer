@@ -31,9 +31,9 @@ type User struct {
 
 // GetEmail / GetRegistration / GetPrivateKey implement registration.User.
 // lego's lego.NewConfig(u) requires the interface.
-func (u *User) GetEmail() string                          { return u.Email }
-func (u *User) GetRegistration() *registration.Resource   { return u.Registration }
-func (u *User) GetPrivateKey() crypto.PrivateKey          { return u.key }
+func (u *User) GetEmail() string                        { return u.Email }
+func (u *User) GetRegistration() *registration.Resource { return u.Registration }
+func (u *User) GetPrivateKey() crypto.PrivateKey        { return u.key }
 
 // LoadOrCreateAccount returns the existing ACME account from `dir`, or
 // generates and persists a fresh ECDSA P-256 key if one does not exist.

@@ -162,12 +162,24 @@ func (s *systemdManager) WriteDeployOverride(name string, _ int, _ string) error
 
 // ---------- lifecycle ----------
 
-func (s *systemdManager) Start(name string) error   { return runCmd("systemctl", "start", systemdUnit(name)) }
-func (s *systemdManager) Stop(name string) error    { return runCmd("systemctl", "stop", systemdUnit(name)) }
-func (s *systemdManager) Restart(name string) error { return runCmd("systemctl", "restart", systemdUnit(name)) }
-func (s *systemdManager) Reload(name string) error  { return runCmd("systemctl", "reload", systemdUnit(name)) }
-func (s *systemdManager) Enable(name string) error  { return runCmd("systemctl", "enable", systemdUnit(name)) }
-func (s *systemdManager) Disable(name string) error { return runCmd("systemctl", "disable", systemdUnit(name)) }
+func (s *systemdManager) Start(name string) error {
+	return runCmd("systemctl", "start", systemdUnit(name))
+}
+func (s *systemdManager) Stop(name string) error {
+	return runCmd("systemctl", "stop", systemdUnit(name))
+}
+func (s *systemdManager) Restart(name string) error {
+	return runCmd("systemctl", "restart", systemdUnit(name))
+}
+func (s *systemdManager) Reload(name string) error {
+	return runCmd("systemctl", "reload", systemdUnit(name))
+}
+func (s *systemdManager) Enable(name string) error {
+	return runCmd("systemctl", "enable", systemdUnit(name))
+}
+func (s *systemdManager) Disable(name string) error {
+	return runCmd("systemctl", "disable", systemdUnit(name))
+}
 
 func (s *systemdManager) IsActive(name string) bool {
 	return runCmd("systemctl", "is-active", "--quiet", systemdUnit(name)) == nil

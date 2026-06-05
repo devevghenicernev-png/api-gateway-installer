@@ -65,7 +65,7 @@ type httpData struct {
 	Gzip           gzipEntry
 	Upstreams      []upstreamEntry
 	RateLimitZones []rateLimitZone
-	CORSOriginMap  []string // exact-match regex tokens (already escaped)
+	CORSOriginMap  []string            // exact-match regex tokens (already escaped)
 	SplitClients   []splitClientsEntry // E13 — % traffic distribution
 }
 
@@ -113,35 +113,35 @@ type rateLimitZone struct {
 }
 
 type apiEntry struct {
-	Name             string
-	Port             int
-	Path             string
-	Description      string
-	Enabled          bool
-	UpstreamName     string // "" = no upstream block; we fall back to proxy_pass http://127.0.0.1:port
+	Name         string
+	Port         int
+	Path         string
+	Description  string
+	Enabled      bool
+	UpstreamName string // "" = no upstream block; we fall back to proxy_pass http://127.0.0.1:port
 
 	// Per-API middleware (F2-F6 fields). Empty values render no extra directives.
-	MaxBodySize      string             // F2
-	RequestHeaders   map[string]string  // F2
-	ResponseHeaders  map[string]string  // F2
-	ResponseHide     []string           // F2
-	Allow            []string           // F2 (IP rules)
-	Deny             []string           // F2
-	CORS             *corsEntry         // F2
-	BasicAuthRealm   string             // F2 (empty = no basic auth)
-	BasicAuthFile    string             // F2 — path to htpasswd file
-	RateLimitZone    string             // F4 — zone name
-	RateLimitBurst   int                // F4
-	ForwardAuth      *forwardAuthEntry  // F6
-	NextUpstream     string             // F5 — proxy_next_upstream conditions
-	GRPC             bool               // F9 — emit grpc_pass instead of proxy_pass
-	JWT              bool               // F12 — emit auth_request /_apigw_jwt/<api>
-	JWTDashboardPort int                // F12 — port the dashboard daemon listens on
-	CustomLocation   string             // F14 — raw nginx directives, location-scoped
-	CustomServer     string             // F14 — raw nginx directives, server-scoped (rendered server.tmpl)
-	MTLS             bool               // E1 — emit ssl_verify_client + auth_request /_apigw_mtls/<api>
-	MTLSCAFile       string             // E1 — path to the CA bundle nginx loads
-	MTLSOptional     bool               // E1 — ssl_verify_client optional vs on
+	MaxBodySize      string            // F2
+	RequestHeaders   map[string]string // F2
+	ResponseHeaders  map[string]string // F2
+	ResponseHide     []string          // F2
+	Allow            []string          // F2 (IP rules)
+	Deny             []string          // F2
+	CORS             *corsEntry        // F2
+	BasicAuthRealm   string            // F2 (empty = no basic auth)
+	BasicAuthFile    string            // F2 — path to htpasswd file
+	RateLimitZone    string            // F4 — zone name
+	RateLimitBurst   int               // F4
+	ForwardAuth      *forwardAuthEntry // F6
+	NextUpstream     string            // F5 — proxy_next_upstream conditions
+	GRPC             bool              // F9 — emit grpc_pass instead of proxy_pass
+	JWT              bool              // F12 — emit auth_request /_apigw_jwt/<api>
+	JWTDashboardPort int               // F12 — port the dashboard daemon listens on
+	CustomLocation   string            // F14 — raw nginx directives, location-scoped
+	CustomServer     string            // F14 — raw nginx directives, server-scoped (rendered server.tmpl)
+	MTLS             bool              // E1 — emit ssl_verify_client + auth_request /_apigw_mtls/<api>
+	MTLSCAFile       string            // E1 — path to the CA bundle nginx loads
+	MTLSOptional     bool              // E1 — ssl_verify_client optional vs on
 }
 
 type corsEntry struct {
@@ -348,13 +348,13 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 	}
 
 	data := templateData{
-		HTTPPort:    nonZero(cfg.Listen.HTTPPort, 80),
-		HTTPSPort:   nonZero(cfg.Listen.HTTPSPort, 443),
-		ServerName:  serverName,
-		APIs:        apis,
-		Deploys:     deploys,
-		Webhook:     cfg.Webhook,
-		Dashboard:   cfg.Dashboard,
+		HTTPPort:       nonZero(cfg.Listen.HTTPPort, 80),
+		HTTPSPort:      nonZero(cfg.Listen.HTTPSPort, 443),
+		ServerName:     serverName,
+		APIs:           apis,
+		Deploys:        deploys,
+		Webhook:        cfg.Webhook,
+		Dashboard:      cfg.Dashboard,
 		AcmeWebroot:    apitls.AcmeWebrootDir,
 		Banner:         "PLACEHOLDER", // substituted post-render
 		MTLSAnyEnabled: mtlsAny,

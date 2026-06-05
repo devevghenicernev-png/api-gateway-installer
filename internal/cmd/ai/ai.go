@@ -2,13 +2,14 @@
 package ai
 
 import (
+	"github.com/spf13/cobra"
+
 	aiAdd "github.com/devevghenicernev-png/apigw/internal/cmd/ai/add"
 	aiList "github.com/devevghenicernev-png/apigw/internal/cmd/ai/list"
 	aiPull "github.com/devevghenicernev-png/apigw/internal/cmd/ai/pull"
 	aiRemove "github.com/devevghenicernev-png/apigw/internal/cmd/ai/remove"
 	aiStatus "github.com/devevghenicernev-png/apigw/internal/cmd/ai/status"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdAI(f *cmdutil.Factory) *cobra.Command {

@@ -14,13 +14,14 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/deploy"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
@@ -45,12 +46,12 @@ func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
 // Snapshot is what we emit for --json. Stable schema — never change a field
 // without bumping the binary's --version major.
 type Snapshot struct {
-	Generated  time.Time          `json:"generated"`
-	System     SystemSummary      `json:"system"`
-	Services   []ServiceStatus    `json:"services"`
-	TLS        []apitls.CertInfo  `json:"tls"`
-	Deploys    []DeployStatus     `json:"deploys"`
-	Webhook    WebhookSummary     `json:"webhook"`
+	Generated time.Time         `json:"generated"`
+	System    SystemSummary     `json:"system"`
+	Services  []ServiceStatus   `json:"services"`
+	TLS       []apitls.CertInfo `json:"tls"`
+	Deploys   []DeployStatus    `json:"deploys"`
+	Webhook   WebhookSummary    `json:"webhook"`
 }
 
 type SystemSummary struct {

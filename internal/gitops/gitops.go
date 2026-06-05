@@ -37,21 +37,21 @@ type Config struct {
 	Interval time.Duration // poll cadence; default 30s
 
 	// Auth.
-	HTTPToken    string // GitHub/GitLab PAT (overrides ssh)
-	SSHKeyFile   string // path to private SSH key
-	SSHKeyPass   string // passphrase (optional)
-	KnownHosts   string // path to known_hosts (defaults to apigw managed file)
+	HTTPToken  string // GitHub/GitLab PAT (overrides ssh)
+	SSHKeyFile string // path to private SSH key
+	SSHKeyPass string // passphrase (optional)
+	KnownHosts string // path to known_hosts (defaults to apigw managed file)
 }
 
 // Reconciler is the long-running poller. One per apigw process.
 type Reconciler struct {
-	cfg     Config
-	apply   func(workDir string) error // called with the checkout root after each fetch
-	logger  Logger
+	cfg    Config
+	apply  func(workDir string) error // called with the checkout root after each fetch
+	logger Logger
 
-	mu       sync.Mutex
-	lastSHA  string
-	stopCh   chan struct{}
+	mu      sync.Mutex
+	lastSHA string
+	stopCh  chan struct{}
 }
 
 // Logger is the minimal logging surface; satisfied by slog.Logger via
@@ -64,10 +64,10 @@ type Logger interface {
 
 // New constructs a Reconciler. `apply` is invoked after each successful
 // fetch with the checkout root; the caller is expected to:
-//   1. Parse YAML files under <root>/<cfg.Path>
-//   2. Diff against current apigw config
-//   3. Apply changes via the same paths CLI mutations use
-//   4. Audit-log the reconcile
+//  1. Parse YAML files under <root>/<cfg.Path>
+//  2. Diff against current apigw config
+//  3. Apply changes via the same paths CLI mutations use
+//  4. Audit-log the reconcile
 func New(cfg Config, apply func(string) error, logger Logger) *Reconciler {
 	if cfg.Branch == "" {
 		cfg.Branch = "main"

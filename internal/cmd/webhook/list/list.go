@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
@@ -27,9 +28,9 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 }
 
 type record struct {
-	Deploy   string `json:"deploy"`
-	URL      string `json:"url"`
-	HasSecret bool  `json:"has_secret"`
+	Deploy    string `json:"deploy"`
+	URL       string `json:"url"`
+	HasSecret bool   `json:"has_secret"`
 }
 
 func run(f *cmdutil.Factory, asJSON bool) error {

@@ -3,8 +3,9 @@ package cmdutil
 import (
 	"log/slog"
 
-	"github.com/devevghenicernev-png/apigw/internal/iostreams"
 	"github.com/spf13/afero"
+
+	"github.com/devevghenicernev-png/apigw/internal/iostreams"
 )
 
 // Factory is the dependency-injection container threaded through every
@@ -59,14 +60,14 @@ type Config interface {
 }
 
 type Nginx interface {
-	Validate() error          // nginx -t
-	Reload() error            // systemctl reload nginx
-	Render() ([]byte, error)  // generate config bytes, no side effects
-	WriteAndReload() error    // atomic: write + validate + reload + rollback
+	Validate() error         // nginx -t
+	Reload() error           // systemctl reload nginx
+	Render() ([]byte, error) // generate config bytes, no side effects
+	WriteAndReload() error   // atomic: write + validate + reload + rollback
 }
 
 type Systemd interface {
-	Reload() error                                     // daemon-reload
+	Reload() error // daemon-reload
 	Start(unit string) error
 	Stop(unit string) error
 	Restart(unit string) error

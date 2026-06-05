@@ -147,10 +147,18 @@ func (o *openrcManager) WriteDeployOverride(name string, _ int, _ string) error 
 
 // ---------- lifecycle ----------
 
-func (o *openrcManager) Start(name string) error   { return runCmd("rc-service", openrcName(name), "start") }
-func (o *openrcManager) Stop(name string) error    { return runCmd("rc-service", openrcName(name), "stop") }
-func (o *openrcManager) Restart(name string) error { return runCmd("rc-service", openrcName(name), "restart") }
-func (o *openrcManager) Reload(name string) error  { return runCmd("rc-service", openrcName(name), "reload") }
+func (o *openrcManager) Start(name string) error {
+	return runCmd("rc-service", openrcName(name), "start")
+}
+func (o *openrcManager) Stop(name string) error {
+	return runCmd("rc-service", openrcName(name), "stop")
+}
+func (o *openrcManager) Restart(name string) error {
+	return runCmd("rc-service", openrcName(name), "restart")
+}
+func (o *openrcManager) Reload(name string) error {
+	return runCmd("rc-service", openrcName(name), "reload")
+}
 
 func (o *openrcManager) Enable(name string) error {
 	return runCmd("rc-update", "add", openrcName(name), "default")

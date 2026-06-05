@@ -13,11 +13,12 @@
 package auth
 
 import (
+	"github.com/spf13/cobra"
+
 	jwtcmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/jwt"
 	mtlscmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/mtls"
 	oidccmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/oidc"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdAuth(f *cmdutil.Factory) *cobra.Command {

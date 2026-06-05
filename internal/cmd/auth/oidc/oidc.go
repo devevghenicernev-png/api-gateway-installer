@@ -26,11 +26,12 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 func NewCmdOIDC(f *cmdutil.Factory) *cobra.Command {
@@ -50,8 +51,8 @@ type answers struct {
 	ClientID       string
 	ClientSecret   string
 	OIDCIssuerURL  string
-	EmailDomain    string // optional restriction
-	OAuth2ProxyURL string // where oauth2-proxy listens
+	EmailDomain    string   // optional restriction
+	OAuth2ProxyURL string   // where oauth2-proxy listens
 	APIs           []string // names of APIs to protect
 }
 

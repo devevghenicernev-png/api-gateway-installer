@@ -12,9 +12,9 @@ import (
 // Plan is the diff a Transform produces — what would be added, what was
 // already present. Empty plan == no-op.
 type Plan struct {
-	APIsAdded         []config.API
-	APIsAlreadyKnown  []string
-	DeploysAdded      []config.Deploy
+	APIsAdded           []config.API
+	APIsAlreadyKnown    []string
+	DeploysAdded        []config.Deploy
 	DeploysAlreadyKnown []string
 
 	// SecretsWritten lists deploy names whose HMAC secret we'll write

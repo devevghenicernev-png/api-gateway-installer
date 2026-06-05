@@ -32,27 +32,27 @@ import (
 // Entry is one audit record. JSON-tagged because we emit JSON-lines for
 // SIEM ingestion. Fields are deliberately flat for query simplicity.
 type Entry struct {
-	ID         uint64            `json:"id"`
-	Timestamp  time.Time         `json:"timestamp"`
-	Actor      string            `json:"actor"`              // username or system origin
-	ActorIP    string            `json:"actor_ip,omitempty"` // when known
-	Action     string            `json:"action"`             // dot-namespaced: deploy.apply, api.add, secret.rotate
-	Resource   string            `json:"resource"`           // affected entity ID
-	Result     string            `json:"result"`             // ok | failed | denied
-	Reason     string            `json:"reason,omitempty"`   // when Result != ok
-	Before     map[string]any    `json:"before,omitempty"`   // pre-change snapshot
-	After      map[string]any    `json:"after,omitempty"`    // post-change snapshot
-	Metadata   map[string]string `json:"metadata,omitempty"` // freeform tags
-	PrevHash   string            `json:"prev_hash"`          // hash of preceding Entry; zero-string for first
-	Hash       string            `json:"hash"`               // sha256 over the canonical Entry minus this field
+	ID        uint64            `json:"id"`
+	Timestamp time.Time         `json:"timestamp"`
+	Actor     string            `json:"actor"`              // username or system origin
+	ActorIP   string            `json:"actor_ip,omitempty"` // when known
+	Action    string            `json:"action"`             // dot-namespaced: deploy.apply, api.add, secret.rotate
+	Resource  string            `json:"resource"`           // affected entity ID
+	Result    string            `json:"result"`             // ok | failed | denied
+	Reason    string            `json:"reason,omitempty"`   // when Result != ok
+	Before    map[string]any    `json:"before,omitempty"`   // pre-change snapshot
+	After     map[string]any    `json:"after,omitempty"`    // post-change snapshot
+	Metadata  map[string]string `json:"metadata,omitempty"` // freeform tags
+	PrevHash  string            `json:"prev_hash"`          // hash of preceding Entry; zero-string for first
+	Hash      string            `json:"hash"`               // sha256 over the canonical Entry minus this field
 }
 
 // Logger is the package's public surface. One Logger per process is fine —
 // all writes go through a single bbolt tx which serializes naturally.
 type Logger struct {
-	db     *bolt.DB
-	mu     sync.Mutex
-	nextID uint64
+	db       *bolt.DB
+	mu       sync.Mutex
+	nextID   uint64
 	lastHash string
 }
 

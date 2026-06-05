@@ -6,6 +6,8 @@
 package api
 
 import (
+	"github.com/spf13/cobra"
+
 	apiAdd "github.com/devevghenicernev-png/apigw/internal/cmd/api/add"
 	apiDisable "github.com/devevghenicernev-png/apigw/internal/cmd/api/disable"
 	apiEnable "github.com/devevghenicernev-png/apigw/internal/cmd/api/enable"
@@ -13,7 +15,6 @@ import (
 	apiReload "github.com/devevghenicernev-png/apigw/internal/cmd/api/reload"
 	apiRemove "github.com/devevghenicernev-png/apigw/internal/cmd/api/remove"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 // NewCmdAPI returns the `apigw api` parent command with all verb subcommands

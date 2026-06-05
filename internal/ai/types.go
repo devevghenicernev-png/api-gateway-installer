@@ -103,7 +103,7 @@ var Catalog = map[Provider]ProviderInfo{
 		Binary:      "vllm",
 		InstallURL:  "https://docs.vllm.ai/en/latest/getting_started/installation.html",
 		InstallHint: "pip install vllm",
-		ServiceName: "", // typically run as a subprocess, not a unit
+		ServiceName: "",  // typically run as a subprocess, not a unit
 		PullArgs:    nil, // vLLM downloads on first inference; no pull step
 	},
 }

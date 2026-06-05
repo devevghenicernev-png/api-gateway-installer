@@ -1,8 +1,11 @@
 name: e2e
 
+# e2e drives systemd inside privileged docker containers — heavy and
+# distro-image-dependent. Don't gate every push on it. We run on:
+#   - pull_request that touches e2e-relevant paths,
+#   - workflow_dispatch (operator hits "Run workflow" before tagging a release),
+#   - nightly cron (catches upstream distro/package drift even when nothing lands).
 on:
-  push:
-    branches: [main]
   pull_request:
     paths:
       - 'cmd/**'
@@ -10,8 +13,8 @@ on:
       - 'test/e2e/**'
       - 'go.mod'
       - '.github/workflows/e2e.yml'
+  workflow_dispatch:
   schedule:
-    # Nightly so we catch upstream distro drift even when no PRs land.
     - cron: '17 3 * * *'
 
 permissions:

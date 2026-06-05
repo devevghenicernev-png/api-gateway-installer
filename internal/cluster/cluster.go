@@ -20,7 +20,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/hashicorp/raft"
@@ -29,11 +28,11 @@ import (
 
 // Config controls the cluster wiring.
 type Config struct {
-	NodeID    string        // unique among peers
-	BindAddr  string        // host:port the Raft transport listens on
-	DataDir   string        // <StateDir>/raft/
-	Peers     []Peer        // bootstrap peers; first run only
-	Bootstrap bool          // first node in a fresh cluster
+	NodeID           string // unique among peers
+	BindAddr         string // host:port the Raft transport listens on
+	DataDir          string // <StateDir>/raft/
+	Peers            []Peer // bootstrap peers; first run only
+	Bootstrap        bool   // first node in a fresh cluster
 	HeartbeatTimeout time.Duration
 }
 
@@ -49,9 +48,6 @@ type Node struct {
 	cfg  Config
 	raft *raft.Raft
 	fsm  *fsm
-
-	mu     sync.RWMutex
-	closer []func() error
 }
 
 // FSMApplier is what the caller plugs in — receives every committed config

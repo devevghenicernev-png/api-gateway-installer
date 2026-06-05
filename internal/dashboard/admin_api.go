@@ -434,7 +434,9 @@ func (s *Server) handleApprovalOne(w http.ResponseWriter, r *http.Request) {
 	}
 	switch verb {
 	case "approve":
-		var body struct{ Comment string `json:"comment"` }
+		var body struct {
+			Comment string `json:"comment"`
+		}
 		_ = s.Sec.ReadBody(r, &body)
 		if _, err := s.Sec.Guard(r, Action{Permission: "approvals.approve", Resource: "approval/" + id}, nil); err != nil {
 			adminWriteJSONError(w, Status(err), err.Error())
@@ -447,7 +449,9 @@ func (s *Server) handleApprovalOne(w http.ResponseWriter, r *http.Request) {
 		}
 		adminWriteJSON(w, http.StatusOK, cr)
 	case "reject":
-		var body struct{ Reason string `json:"reason"` }
+		var body struct {
+			Reason string `json:"reason"`
+		}
 		_ = s.Sec.ReadBody(r, &body)
 		if _, err := s.Sec.Guard(r, Action{Permission: "approvals.reject", Resource: "approval/" + id}, nil); err != nil {
 			adminWriteJSONError(w, Status(err), err.Error())

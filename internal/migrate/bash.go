@@ -27,10 +27,10 @@ const OldRoot = "/etc/api-gateway"
 
 // OldAPIsFile and OldDeployDir hang off OldRoot.
 var (
-	OldAPIsFile    = filepath.Join(OldRoot, "apis.json")
-	OldDeployDir   = filepath.Join(OldRoot, "deployments")
-	OldStatusFile  = "/var/lib/api-gateway/deployment-status.json"
-	OldAPIManage   = "/usr/local/bin/api-manage"
+	OldAPIsFile   = filepath.Join(OldRoot, "apis.json")
+	OldDeployDir  = filepath.Join(OldRoot, "deployments")
+	OldStatusFile = "/var/lib/api-gateway/deployment-status.json"
+	OldAPIManage  = "/usr/local/bin/api-manage"
 )
 
 // BashAPIsFile is the shape of apis.json. We accept extra fields silently;
@@ -75,16 +75,16 @@ type BashDeploy struct {
 
 // Detected is what Detect() returns. Empty Reasons → no old install.
 type Detected struct {
-	Root           string
-	APIsFile       string
-	DeployDir      string
-	APIManageExe   string
-	HasAPIsFile    bool
-	HasDeployDir   bool
-	HasAPIManage   bool
-	APICount       int
-	DeployCount    int
-	Reasons        []string
+	Root         string
+	APIsFile     string
+	DeployDir    string
+	APIManageExe string
+	HasAPIsFile  bool
+	HasDeployDir bool
+	HasAPIManage bool
+	APICount     int
+	DeployCount  int
+	Reasons      []string
 }
 
 // Detect probes the filesystem and reports what apigw migrate would act on.

@@ -61,7 +61,7 @@ type VerifyMode string
 
 const (
 	VerifyCosign VerifyMode = "cosign+sha256"
-	VerifySHA   VerifyMode  = "sha256"
+	VerifySHA    VerifyMode = "sha256"
 )
 
 // SwapOptions controls verification strictness.

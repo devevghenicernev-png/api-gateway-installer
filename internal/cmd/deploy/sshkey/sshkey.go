@@ -15,11 +15,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/deploy"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
-	"golang.org/x/crypto/ssh"
 )
 
 func NewCmdSSHKey(f *cmdutil.Factory) *cobra.Command {

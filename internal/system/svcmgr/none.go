@@ -8,14 +8,14 @@ type noneManager struct{}
 
 func (noneManager) Kind() Kind { return None }
 
-func (noneManager) InstallWebhookService(_, _ string) error    { return ErrUnsupported }
-func (noneManager) UninstallWebhookService() error             { return ErrUnsupported }
-func (noneManager) InstallDashboardService(_, _, _ string) error { return ErrUnsupported }
-func (noneManager) UninstallDashboardService() error           { return ErrUnsupported }
-func (noneManager) InstallTLSRenewTimer(_ string) error        { return ErrUnsupported }
-func (noneManager) UninstallTLSRenewTimer() error              { return ErrUnsupported }
-func (noneManager) InstallDeployService(DeploySpec) error      { return ErrUnsupported }
-func (noneManager) UninstallDeployService(string) error        { return ErrUnsupported }
+func (noneManager) InstallWebhookService(_, _ string) error       { return ErrUnsupported }
+func (noneManager) UninstallWebhookService() error                { return ErrUnsupported }
+func (noneManager) InstallDashboardService(_, _, _ string) error  { return ErrUnsupported }
+func (noneManager) UninstallDashboardService() error              { return ErrUnsupported }
+func (noneManager) InstallTLSRenewTimer(_ string) error           { return ErrUnsupported }
+func (noneManager) UninstallTLSRenewTimer() error                 { return ErrUnsupported }
+func (noneManager) InstallDeployService(DeploySpec) error         { return ErrUnsupported }
+func (noneManager) UninstallDeployService(string) error           { return ErrUnsupported }
 func (noneManager) WriteDeployOverride(string, int, string) error { return ErrUnsupported }
 
 func (noneManager) Start(string) error   { return ErrUnsupported }

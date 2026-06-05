@@ -2,13 +2,14 @@
 package tls
 
 import (
+	"github.com/spf13/cobra"
+
 	tlsAddDomain "github.com/devevghenicernev-png/apigw/internal/cmd/tls/adddomain"
 	tlsDisable "github.com/devevghenicernev-png/apigw/internal/cmd/tls/disable"
 	tlsEnable "github.com/devevghenicernev-png/apigw/internal/cmd/tls/enable"
 	tlsRenew "github.com/devevghenicernev-png/apigw/internal/cmd/tls/renew"
 	tlsStatus "github.com/devevghenicernev-png/apigw/internal/cmd/tls/status"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
-	"github.com/spf13/cobra"
 )
 
 // NewCmdTLS returns the `apigw tls` parent command.

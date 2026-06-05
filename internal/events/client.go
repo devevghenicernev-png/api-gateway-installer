@@ -92,9 +92,9 @@ func (c *Client) parse(r io.Reader) error {
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
 	var (
-		curID    string
-		curType  string
-		curData  strings.Builder
+		curID   string
+		curType string
+		curData strings.Builder
 	)
 	flush := func() {
 		if curType == "__reconnect" {
@@ -103,8 +103,8 @@ func (c *Client) parse(r io.Reader) error {
 		}
 		if c.OnEvent != nil && (curData.Len() > 0 || curType != "") {
 			c.OnEvent(Event{
-				Type:  curType,
-				Data:  []byte(curData.String()),
+				Type: curType,
+				Data: []byte(curData.String()),
 			})
 		}
 		if curID != "" {
@@ -148,10 +148,7 @@ func splitColon(s string) (string, string, bool) {
 	if idx < 0 {
 		return s, "", true
 	}
-	v := s[idx+1:]
-	if strings.HasPrefix(v, " ") {
-		v = v[1:]
-	}
+	v := strings.TrimPrefix(s[idx+1:], " ")
 	return s[:idx], v, true
 }
 

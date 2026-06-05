@@ -49,9 +49,9 @@ type Notifier interface {
 // Dispatcher fans out events to every configured Notifier. Failures are
 // logged but don't propagate — alert delivery is best-effort.
 type Dispatcher struct {
-	mu       sync.RWMutex
+	mu        sync.RWMutex
 	notifiers []Notifier
-	log      Logger
+	log       Logger
 }
 
 type Logger interface {

@@ -15,10 +15,10 @@ import (
 // detected the request was redundant (same commit as current); in that case
 // Skipped=true and no other fields are populated.
 type ApplyResult struct {
-	Name      string
-	SHA       string
-	Skipped   bool
-	Duration  time.Duration
+	Name     string
+	SHA      string
+	Skipped  bool
+	Duration time.Duration
 }
 
 // Apply runs the full deploy sequence for a single deployment.

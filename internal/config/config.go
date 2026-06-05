@@ -15,13 +15,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/gofrs/flock"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/structs"
 	"github.com/knadh/koanf/v2"
+
+	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 )
 
 // SchemaVersion is bumped on every breaking change to the on-disk format.
@@ -31,13 +32,13 @@ const SchemaVersion = 1
 // Config is the canonical in-memory representation of apigw's state.
 // Each field maps 1:1 to a top-level key in config.yaml.
 type Config struct {
-	Version   int        `koanf:"version" yaml:"version"`
-	Listen    Listen     `koanf:"listen" yaml:"listen"`
-	APIs      []API      `koanf:"apis" yaml:"apis"`
-	Deploys   []Deploy   `koanf:"deployments" yaml:"deployments"`
-	Webhook   Webhook    `koanf:"webhook" yaml:"webhook"`
-	Dashboard Dashboard  `koanf:"dashboard" yaml:"dashboard"`
-	TLS       TLS        `koanf:"tls" yaml:"tls"`
+	Version   int       `koanf:"version" yaml:"version"`
+	Listen    Listen    `koanf:"listen" yaml:"listen"`
+	APIs      []API     `koanf:"apis" yaml:"apis"`
+	Deploys   []Deploy  `koanf:"deployments" yaml:"deployments"`
+	Webhook   Webhook   `koanf:"webhook" yaml:"webhook"`
+	Dashboard Dashboard `koanf:"dashboard" yaml:"dashboard"`
+	TLS       TLS       `koanf:"tls" yaml:"tls"`
 
 	// E1+ enterprise features. All optional; zero-value = feature off.
 	Security Security `koanf:"security" yaml:"security,omitempty"`
@@ -66,8 +67,8 @@ type Security struct {
 	// RBAC enforcement. enforce=false (default for soft-rollout) means every
 	// denied permission is still logged via audit but the request goes
 	// through. Flip to true once you've watched the audit log for a week.
-	RBACEnforce bool   `koanf:"rbac_enforce" yaml:"rbac_enforce,omitempty"`
-	Roles       []Role `koanf:"roles" yaml:"roles,omitempty"`
+	RBACEnforce bool         `koanf:"rbac_enforce" yaml:"rbac_enforce,omitempty"`
+	Roles       []Role       `koanf:"roles" yaml:"roles,omitempty"`
 	Assignments []Assignment `koanf:"assignments" yaml:"assignments,omitempty"`
 
 	// OPA policy directory. Each *.rego file is loaded and evaluated on every
@@ -97,9 +98,9 @@ type Security struct {
 // Tokens are stored verbatim — file mode 0o600 on /etc/apigw/config.yaml
 // is the protection. Rotate via `apigw auth rotate-token`.
 type AdminToken struct {
-	Name   string   `koanf:"name" yaml:"name"`     // human label, e.g. "ops-deploy-bot"
-	User   string   `koanf:"user" yaml:"user"`     // RBAC subject identity
-	Token  string   `koanf:"token" yaml:"token"`   // bearer secret; min 32 chars
+	Name   string   `koanf:"name" yaml:"name"`   // human label, e.g. "ops-deploy-bot"
+	User   string   `koanf:"user" yaml:"user"`   // RBAC subject identity
+	Token  string   `koanf:"token" yaml:"token"` // bearer secret; min 32 chars
 	Groups []string `koanf:"groups" yaml:"groups,omitempty"`
 }
 
@@ -133,11 +134,11 @@ type Tenant struct {
 // Alerts wires Slack/Teams/PagerDuty/Webhook/SMTP notifiers. Every notifier
 // is optional; missing = silently disabled.
 type Alerts struct {
-	Slack     string             `koanf:"slack_webhook" yaml:"slack_webhook,omitempty"`
-	Teams     string             `koanf:"teams_webhook" yaml:"teams_webhook,omitempty"`
-	PagerDuty string             `koanf:"pagerduty_key" yaml:"pagerduty_key,omitempty"`
-	Webhook   AlertsWebhook      `koanf:"webhook" yaml:"webhook,omitempty"`
-	Email     AlertsEmail        `koanf:"email" yaml:"email,omitempty"`
+	Slack     string        `koanf:"slack_webhook" yaml:"slack_webhook,omitempty"`
+	Teams     string        `koanf:"teams_webhook" yaml:"teams_webhook,omitempty"`
+	PagerDuty string        `koanf:"pagerduty_key" yaml:"pagerduty_key,omitempty"`
+	Webhook   AlertsWebhook `koanf:"webhook" yaml:"webhook,omitempty"`
+	Email     AlertsEmail   `koanf:"email" yaml:"email,omitempty"`
 
 	// TLSExpiryWarnDays — fires cert.expiring N days before NotAfter (default 30).
 	TLSExpiryWarnDays int `koanf:"tls_expiry_warn_days" yaml:"tls_expiry_warn_days,omitempty"`
@@ -159,23 +160,23 @@ type AlertsEmail struct {
 
 // GitOps configures the pull-mode reconciler. Empty RepoURL = disabled.
 type GitOps struct {
-	RepoURL      string `koanf:"repo_url" yaml:"repo_url,omitempty"`
-	Branch       string `koanf:"branch" yaml:"branch,omitempty"`
-	Path         string `koanf:"path" yaml:"path,omitempty"`
-	IntervalSec  int    `koanf:"interval_sec" yaml:"interval_sec,omitempty"`
-	HTTPToken    string `koanf:"http_token" yaml:"http_token,omitempty"`
-	SSHKeyFile   string `koanf:"ssh_key_file" yaml:"ssh_key_file,omitempty"`
-	SSHKeyPass   string `koanf:"ssh_key_pass" yaml:"ssh_key_pass,omitempty"`
+	RepoURL     string `koanf:"repo_url" yaml:"repo_url,omitempty"`
+	Branch      string `koanf:"branch" yaml:"branch,omitempty"`
+	Path        string `koanf:"path" yaml:"path,omitempty"`
+	IntervalSec int    `koanf:"interval_sec" yaml:"interval_sec,omitempty"`
+	HTTPToken   string `koanf:"http_token" yaml:"http_token,omitempty"`
+	SSHKeyFile  string `koanf:"ssh_key_file" yaml:"ssh_key_file,omitempty"`
+	SSHKeyPass  string `koanf:"ssh_key_pass" yaml:"ssh_key_pass,omitempty"`
 }
 
 // Cluster turns on Raft-replicated config. Empty NodeID = disabled.
 type Cluster struct {
-	NodeID        string   `koanf:"node_id" yaml:"node_id,omitempty"`
-	BindAddr      string   `koanf:"bind_addr" yaml:"bind_addr,omitempty"`
-	DataDir       string   `koanf:"data_dir" yaml:"data_dir,omitempty"`
-	Bootstrap     bool     `koanf:"bootstrap" yaml:"bootstrap,omitempty"`
-	Peers         []Peer   `koanf:"peers" yaml:"peers,omitempty"`
-	HeartbeatMS   int      `koanf:"heartbeat_ms" yaml:"heartbeat_ms,omitempty"`
+	NodeID      string `koanf:"node_id" yaml:"node_id,omitempty"`
+	BindAddr    string `koanf:"bind_addr" yaml:"bind_addr,omitempty"`
+	DataDir     string `koanf:"data_dir" yaml:"data_dir,omitempty"`
+	Bootstrap   bool   `koanf:"bootstrap" yaml:"bootstrap,omitempty"`
+	Peers       []Peer `koanf:"peers" yaml:"peers,omitempty"`
+	HeartbeatMS int    `koanf:"heartbeat_ms" yaml:"heartbeat_ms,omitempty"`
 }
 
 type Peer struct {
@@ -202,9 +203,9 @@ type Listen struct {
 // Enabled=false to suppress the block entirely.
 type Gzip struct {
 	Enabled   bool     `koanf:"enabled" yaml:"enabled"`
-	Level     int      `koanf:"level" yaml:"level,omitempty"`             // 1-9; default 5
-	MinLength int      `koanf:"min_length" yaml:"min_length,omitempty"`   // bytes; default 1024
-	Types     []string `koanf:"types" yaml:"types,omitempty"`             // MIME list; default text/* + json + xml + svg
+	Level     int      `koanf:"level" yaml:"level,omitempty"`           // 1-9; default 5
+	MinLength int      `koanf:"min_length" yaml:"min_length,omitempty"` // bytes; default 1024
+	Types     []string `koanf:"types" yaml:"types,omitempty"`           // MIME list; default text/* + json + xml + svg
 }
 
 // API is an upstream service registered with apigw.
@@ -228,20 +229,20 @@ type API struct {
 	GRPC bool `koanf:"grpc" yaml:"grpc,omitempty"`
 
 	// Middleware — all optional.
-	MaxBodySize string            `koanf:"max_body_size" yaml:"max_body_size,omitempty"` // "10m", "1g"; default = global
-	Headers     *Headers          `koanf:"headers" yaml:"headers,omitempty"`
-	IPRules     *IPRules          `koanf:"ip_rules" yaml:"ip_rules,omitempty"`
-	CORS        *CORS             `koanf:"cors" yaml:"cors,omitempty"`
-	BasicAuth   *BasicAuth        `koanf:"basic_auth" yaml:"basic_auth,omitempty"`
-	RateLimit   *RateLimit        `koanf:"rate_limit" yaml:"rate_limit,omitempty"`
-	ForwardAuth *ForwardAuth      `koanf:"forward_auth" yaml:"forward_auth,omitempty"`
-	HealthCheck *HealthCheck      `koanf:"health_check" yaml:"health_check,omitempty"`
-	Retry       *Retry            `koanf:"retry" yaml:"retry,omitempty"`
-	JWT         *JWT              `koanf:"jwt" yaml:"jwt,omitempty"`
-	MTLS        *MTLS             `koanf:"mtls" yaml:"mtls,omitempty"`
-	Canary      *Canary           `koanf:"canary" yaml:"canary,omitempty"`
-	Transform   *Transform        `koanf:"transform" yaml:"transform,omitempty"`
-	Versioning  *Versioning       `koanf:"versioning" yaml:"versioning,omitempty"`
+	MaxBodySize string       `koanf:"max_body_size" yaml:"max_body_size,omitempty"` // "10m", "1g"; default = global
+	Headers     *Headers     `koanf:"headers" yaml:"headers,omitempty"`
+	IPRules     *IPRules     `koanf:"ip_rules" yaml:"ip_rules,omitempty"`
+	CORS        *CORS        `koanf:"cors" yaml:"cors,omitempty"`
+	BasicAuth   *BasicAuth   `koanf:"basic_auth" yaml:"basic_auth,omitempty"`
+	RateLimit   *RateLimit   `koanf:"rate_limit" yaml:"rate_limit,omitempty"`
+	ForwardAuth *ForwardAuth `koanf:"forward_auth" yaml:"forward_auth,omitempty"`
+	HealthCheck *HealthCheck `koanf:"health_check" yaml:"health_check,omitempty"`
+	Retry       *Retry       `koanf:"retry" yaml:"retry,omitempty"`
+	JWT         *JWT         `koanf:"jwt" yaml:"jwt,omitempty"`
+	MTLS        *MTLS        `koanf:"mtls" yaml:"mtls,omitempty"`
+	Canary      *Canary      `koanf:"canary" yaml:"canary,omitempty"`
+	Transform   *Transform   `koanf:"transform" yaml:"transform,omitempty"`
+	Versioning  *Versioning  `koanf:"versioning" yaml:"versioning,omitempty"`
 
 	// CustomLocation / CustomServer (F14) inject raw nginx directives into
 	// the generated config. CustomLocation lands inside the `location {…}`
@@ -259,12 +260,12 @@ type API struct {
 // Upstream is one server in the API/Deploy upstream pool. Weight, Backup,
 // MaxFails, FailTimeout map onto nginx `server` directive parameters.
 type Upstream struct {
-	Address     string `koanf:"address" yaml:"address"`                     // host:port — required
-	Weight      int    `koanf:"weight" yaml:"weight,omitempty"`             // weighted round-robin; default 1
-	Backup      bool   `koanf:"backup" yaml:"backup,omitempty"`             // only used when others are down
+	Address     string `koanf:"address" yaml:"address"`         // host:port — required
+	Weight      int    `koanf:"weight" yaml:"weight,omitempty"` // weighted round-robin; default 1
+	Backup      bool   `koanf:"backup" yaml:"backup,omitempty"` // only used when others are down
 	MaxFails    int    `koanf:"max_fails" yaml:"max_fails,omitempty"`
 	FailTimeout string `koanf:"fail_timeout" yaml:"fail_timeout,omitempty"`
-	Down        bool   `koanf:"down" yaml:"down,omitempty"`                 // marks server permanently down
+	Down        bool   `koanf:"down" yaml:"down,omitempty"` // marks server permanently down
 }
 
 // Headers describes per-route header manipulation. Empty maps render no
@@ -294,11 +295,11 @@ type IPRules struct {
 // http{} scope to echo back the exact request origin (nginx can't send a
 // list in Access-Control-Allow-Origin).
 type CORS struct {
-	Origins     []string `koanf:"origins" yaml:"origins"`                 // exact match; "*" allowed for non-credentialed
-	Methods     []string `koanf:"methods" yaml:"methods,omitempty"`       // default GET, POST, OPTIONS
-	Headers     []string `koanf:"headers" yaml:"headers,omitempty"`       // default Content-Type, Authorization
-	Credentials bool     `koanf:"credentials" yaml:"credentials"`         // incompatible with Origins=["*"]
-	MaxAge      int      `koanf:"max_age" yaml:"max_age,omitempty"`       // preflight cache seconds; default 86400
+	Origins     []string `koanf:"origins" yaml:"origins"`           // exact match; "*" allowed for non-credentialed
+	Methods     []string `koanf:"methods" yaml:"methods,omitempty"` // default GET, POST, OPTIONS
+	Headers     []string `koanf:"headers" yaml:"headers,omitempty"` // default Content-Type, Authorization
+	Credentials bool     `koanf:"credentials" yaml:"credentials"`   // incompatible with Origins=["*"]
+	MaxAge      int      `koanf:"max_age" yaml:"max_age,omitempty"` // preflight cache seconds; default 86400
 }
 
 // BasicAuth configures HTTP Basic auth via nginx `auth_basic_user_file`.
@@ -311,27 +312,27 @@ type BasicAuth struct {
 
 // RateLimit applies nginx `limit_req` with a per-API zone.
 type RateLimit struct {
-	RPS   int    `koanf:"rps" yaml:"rps"`                  // sustained rate
-	Burst int    `koanf:"burst" yaml:"burst,omitempty"`    // default 2*RPS
-	Key   string `koanf:"key" yaml:"key,omitempty"`        // "ip" (default) | "header:<name>"
+	RPS   int    `koanf:"rps" yaml:"rps"`               // sustained rate
+	Burst int    `koanf:"burst" yaml:"burst,omitempty"` // default 2*RPS
+	Key   string `koanf:"key" yaml:"key,omitempty"`     // "ip" (default) | "header:<name>"
 }
 
 // ForwardAuth proxies the inbound request through an external auth service
 // (Authelia, oauth2-proxy, Pomerium) before forwarding to the upstream.
 type ForwardAuth struct {
-	Address     string   `koanf:"address" yaml:"address"`           // full URL of the auth check endpoint
-	SignInURL   string   `koanf:"sign_in_url" yaml:"sign_in_url,omitempty"` // 401 → redirect here
-	SetHeaders  []string `koanf:"set_headers" yaml:"set_headers,omitempty"`  // upstream response headers to copy forward (X-Remote-User, …)
+	Address    string   `koanf:"address" yaml:"address"`                   // full URL of the auth check endpoint
+	SignInURL  string   `koanf:"sign_in_url" yaml:"sign_in_url,omitempty"` // 401 → redirect here
+	SetHeaders []string `koanf:"set_headers" yaml:"set_headers,omitempty"` // upstream response headers to copy forward (X-Remote-User, …)
 }
 
 // HealthCheck is currently passive (nginx OSS): MaxFails + FailTimeout on
 // the upstream block. Active probing (HTTP GET every Interval) is added by
 // the dashboard daemon.
 type HealthCheck struct {
-	Path        string `koanf:"path" yaml:"path,omitempty"`                  // active probe path; "" disables active probing
-	Interval    string `koanf:"interval" yaml:"interval,omitempty"`          // active probe period; "10s"
-	MaxFails    int    `koanf:"max_fails" yaml:"max_fails,omitempty"`        // nginx default 1; we default 3
-	FailTimeout string `koanf:"fail_timeout" yaml:"fail_timeout,omitempty"`  // nginx default 10s
+	Path        string `koanf:"path" yaml:"path,omitempty"`                 // active probe path; "" disables active probing
+	Interval    string `koanf:"interval" yaml:"interval,omitempty"`         // active probe period; "10s"
+	MaxFails    int    `koanf:"max_fails" yaml:"max_fails,omitempty"`       // nginx default 1; we default 3
+	FailTimeout string `koanf:"fail_timeout" yaml:"fail_timeout,omitempty"` // nginx default 10s
 }
 
 // Retry maps to nginx `proxy_next_upstream`. The default set retries on
@@ -350,7 +351,7 @@ type Retry struct {
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
 type Canary struct {
-	Weight    int        `koanf:"weight" yaml:"weight"`             // 0-100, percent to canary
+	Weight    int        `koanf:"weight" yaml:"weight"`                   // 0-100, percent to canary
 	PinHeader string     `koanf:"pin_header" yaml:"pin_header,omitempty"` // e.g. "X-Canary"
 	Upstreams []Upstream `koanf:"upstreams" yaml:"upstreams"`
 }
@@ -373,14 +374,15 @@ type Transform struct {
 }
 
 // Versioning sets how a /v1/x vs /v2/x split is routed. Strategy:
-//   path    — /v1/api → upstream-v1, /v2/api → upstream-v2 (default)
-//   header  — Accept-Version: v2 → upstream-v2
-//   query   — ?version=v2 → upstream-v2
+//
+//	path    — /v1/api → upstream-v1, /v2/api → upstream-v2 (default)
+//	header  — Accept-Version: v2 → upstream-v2
+//	query   — ?version=v2 → upstream-v2
 //
 // SunsetDate, when set, emits an RFC 8594 Sunset header on every
 // response so clients see deprecation.
 type Versioning struct {
-	Strategy   string `koanf:"strategy" yaml:"strategy"`               // path | header | query
+	Strategy   string `koanf:"strategy" yaml:"strategy"`                 // path | header | query
 	SunsetDate string `koanf:"sunset_date" yaml:"sunset_date,omitempty"` // RFC 3339
 }
 
@@ -407,11 +409,11 @@ type MTLS struct {
 // is mirrored as internal/auth.JWTConfig — they're kept in sync deliberately
 // (config = serialized form, auth = in-process form).
 type JWT struct {
-	Algorithm     string            `koanf:"algorithm" yaml:"algorithm"`                  // HS256/RS256/ES256/EdDSA/...
-	HMACSecret    string            `koanf:"hmac_secret" yaml:"hmac_secret,omitempty"`    // required for HS*
-	JWKSURL       string            `koanf:"jwks_url" yaml:"jwks_url,omitempty"`          // required for RS*/ES*/EdDSA
-	Issuer        string            `koanf:"issuer" yaml:"issuer,omitempty"`              // optional iss check
-	Audience      string            `koanf:"audience" yaml:"audience,omitempty"`          // optional aud check
+	Algorithm     string            `koanf:"algorithm" yaml:"algorithm"`               // HS256/RS256/ES256/EdDSA/...
+	HMACSecret    string            `koanf:"hmac_secret" yaml:"hmac_secret,omitempty"` // required for HS*
+	JWKSURL       string            `koanf:"jwks_url" yaml:"jwks_url,omitempty"`       // required for RS*/ES*/EdDSA
+	Issuer        string            `koanf:"issuer" yaml:"issuer,omitempty"`           // optional iss check
+	Audience      string            `koanf:"audience" yaml:"audience,omitempty"`       // optional aud check
 	RequireClaims map[string]string `koanf:"require_claims" yaml:"require_claims,omitempty"`
 }
 
@@ -429,18 +431,18 @@ type Deploy struct {
 	Name        string `koanf:"name" yaml:"name"`
 	Repo        string `koanf:"repo" yaml:"repo"`
 	Branch      string `koanf:"branch" yaml:"branch"`
-	Port        int    `koanf:"port" yaml:"port"`              // upstream port nginx proxies to
-	Path        string `koanf:"path" yaml:"path"`              // nginx mount, default /apps/<name>
-	Runtime     string `koanf:"runtime" yaml:"runtime"`        // auto|node|python|go|docker|static
-	Build       string `koanf:"build" yaml:"build"`            // override build cmd (empty = runtime default)
-	Start       string `koanf:"start" yaml:"start"`            // override start cmd
+	Port        int    `koanf:"port" yaml:"port"`       // upstream port nginx proxies to
+	Path        string `koanf:"path" yaml:"path"`       // nginx mount, default /apps/<name>
+	Runtime     string `koanf:"runtime" yaml:"runtime"` // auto|node|python|go|docker|static
+	Build       string `koanf:"build" yaml:"build"`     // override build cmd (empty = runtime default)
+	Start       string `koanf:"start" yaml:"start"`     // override start cmd
 	Description string `koanf:"description" yaml:"description"`
 	Enabled     bool   `koanf:"enabled" yaml:"enabled"`
 
 	// Recorded after each pass.
 	LastSHA    string `koanf:"last_sha" yaml:"last_sha"`
-	LastDeploy string `koanf:"last_deploy" yaml:"last_deploy"`     // RFC3339
-	LastStatus string `koanf:"last_status" yaml:"last_status"`     // ok|failed|building|stopped
+	LastDeploy string `koanf:"last_deploy" yaml:"last_deploy"` // RFC3339
+	LastStatus string `koanf:"last_status" yaml:"last_status"` // ok|failed|building|stopped
 	LastError  string `koanf:"last_error" yaml:"last_error,omitempty"`
 
 	// Multi-upstream + LB mirror of API.
@@ -620,7 +622,7 @@ func (c *Config) Save() error {
 	if err := lock.Lock(); err != nil {
 		return fmt.Errorf("acquire lock: %w", err)
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 
 	tmp, err := os.CreateTemp(dir, "config.yaml.*.tmp")
 	if err != nil {

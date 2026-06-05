@@ -27,25 +27,25 @@ import (
 // ChangeRequest is the persisted record. Payload carries the mutation
 // (action verb + before/after snapshots) the original Submit() supplied.
 type ChangeRequest struct {
-	ID          string                 `json:"id"`
-	SubmittedBy string                 `json:"submitted_by"`
-	SubmittedAt time.Time              `json:"submitted_at"`
-	Action      string                 `json:"action"`
-	Resource    string                 `json:"resource"`
-	Payload     map[string]any         `json:"payload"`
-	Threshold   int                    `json:"threshold"`
-	Approvals   []Approval             `json:"approvals,omitempty"`
-	Status      string                 `json:"status"` // pending | approved | rejected | applied | cancelled
-	AppliedAt   *time.Time             `json:"applied_at,omitempty"`
-	ExpiresAt   time.Time              `json:"expires_at"`
+	ID          string         `json:"id"`
+	SubmittedBy string         `json:"submitted_by"`
+	SubmittedAt time.Time      `json:"submitted_at"`
+	Action      string         `json:"action"`
+	Resource    string         `json:"resource"`
+	Payload     map[string]any `json:"payload"`
+	Threshold   int            `json:"threshold"`
+	Approvals   []Approval     `json:"approvals,omitempty"`
+	Status      string         `json:"status"` // pending | approved | rejected | applied | cancelled
+	AppliedAt   *time.Time     `json:"applied_at,omitempty"`
+	ExpiresAt   time.Time      `json:"expires_at"`
 }
 
 // Approval records one approver's stamp. Threshold is the # of these
 // required before Apply() can run.
 type Approval struct {
-	By        string    `json:"by"`
-	At        time.Time `json:"at"`
-	Comment   string    `json:"comment,omitempty"`
+	By      string    `json:"by"`
+	At      time.Time `json:"at"`
+	Comment string    `json:"comment,omitempty"`
 }
 
 // Store wraps the bbolt-backed change-request log.

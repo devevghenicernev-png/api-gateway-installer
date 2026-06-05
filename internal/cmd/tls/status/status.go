@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 type options struct {
@@ -46,10 +47,10 @@ func run(opts *options) error {
 
 	if opts.asJSON {
 		payload := struct {
-			Strategy string             `json:"strategy"`
-			Domains  []string           `json:"domains"`
-			Staging  bool               `json:"staging"`
-			Certs    []apitls.CertInfo  `json:"certs"`
+			Strategy string            `json:"strategy"`
+			Domains  []string          `json:"domains"`
+			Staging  bool              `json:"staging"`
+			Certs    []apitls.CertInfo `json:"certs"`
 		}{
 			Strategy: cfg.TLS.Strategy,
 			Domains:  cfg.TLS.Domains,

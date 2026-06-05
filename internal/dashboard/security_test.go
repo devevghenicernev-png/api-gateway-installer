@@ -195,7 +195,7 @@ func TestCSRFTampered(t *testing.T) {
 func TestAuditWrittenOnSuccess(t *testing.T) {
 	dir := t.TempDir()
 	sec := newTestSecurity(t, config.Security{
-		StateDir: dir,
+		StateDir:    dir,
 		RBACEnforce: true,
 		AdminTokens: []config.AdminToken{{Name: "root", User: "root", Token: "t"}},
 		Assignments: []config.Assignment{{User: "root", Roles: []string{"owner"}}},

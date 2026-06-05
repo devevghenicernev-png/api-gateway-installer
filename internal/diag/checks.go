@@ -460,7 +460,7 @@ func diskFreeCheck(_ context.Context) Result {
 		return Result{Level: LevelInfo, Name: "disk-free", Message: "df parse failed"}
 	}
 	var freeKB int64
-	fmt.Sscanf(fields[3], "%d", &freeKB)
+	_, _ = fmt.Sscanf(fields[3], "%d", &freeKB)
 	freeMiB := freeKB / 1024
 	switch {
 	case freeMiB < 256:
