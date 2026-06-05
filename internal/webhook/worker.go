@@ -61,6 +61,13 @@ type Worker struct {
 	// so on-call sees a failed prod deploy without watching journald.
 	AlertHook func(category, severity, title, detail, resource string)
 
+	// PruneApprovals, when non-nil, runs daily as part of the
+	// maintenance ticker. Wired by the dashboard to drop expired
+	// pending change requests and old applied/rejected records so
+	// approvals.db doesn't grow without bound. Returns the count of
+	// rows removed.
+	PruneApprovals func() (int, error)
+
 	// inProcessJobs serialises Apply() calls per deploy name. Created ONCE
 	// (lazily on first job) so the single-flight guarantee holds across
 	// every job the worker pulls. Previously a fresh JobQueue per
@@ -115,6 +122,16 @@ func (w *Worker) Run(ctx context.Context) error {
 					slog.Int("pruned", pruned),
 					slog.Int64("compacted_bytes_saved", saved))
 			}
+			// Approvals: prune expired pending requests + apply/reject
+			// records older than 30d. Avoids unbounded bbolt growth in
+			// long-running installs.
+			if w.PruneApprovals != nil {
+				if n, aerr := w.PruneApprovals(); aerr != nil {
+					logger.Warn("prune approvals", slog.String("err", aerr.Error()))
+				} else if n > 0 {
+					logger.Info("approvals pruned", slog.Int("count", n))
+				}
+			}
 		case <-tick.C:
 			w.processOne(ctx, logger)
 		}
@@ -138,7 +155,7 @@ func (w *Worker) processOne(ctx context.Context, logger *slog.Logger) {
 	cfg, err := w.ConfigFn()
 	if err != nil {
 		// Could not load config — release the claim, try again next tick.
-		if ferr := w.Queue.Fail(job.Key, "config load: "+err.Error()); ferr != nil {
+		if _, ferr := w.Queue.Fail(job.Key, "config load: "+err.Error()); ferr != nil {
 			logger.Warn("queue fail on config load",
 				slog.String("err", ferr.Error()),
 				slog.String("key", job.Key))
@@ -193,17 +210,31 @@ func (w *Worker) processOne(ctx context.Context, logger *slog.Logger) {
 				slog.String("deploy", d.Name),
 				slog.String("err", cerr.Error()))
 		}
-		if ferr := w.Queue.Fail(job.Key, derr.Error()); ferr != nil {
+		deadLettered, ferr := w.Queue.Fail(job.Key, derr.Error())
+		if ferr != nil {
 			logger.Warn("queue fail",
 				slog.String("err", ferr.Error()),
 				slog.String("key", job.Key))
 		}
 		w.emitState(d.Name, "failed", job.SHA, derr.Error())
 		if w.AlertHook != nil {
-			w.AlertHook("deploy.failed", "critical",
-				"Deploy failed: "+d.Name,
-				"sha "+job.SHA+" — "+derr.Error(),
-				"deploy/"+d.Name)
+			// Transient failures → warning (retry will run). DLQ →
+			// critical (permanent, requires operator). We split the
+			// channel so on-call routing can suppress retries while
+			// still paging on the permanent failure.
+			if deadLettered {
+				w.AlertHook("webhook.dead_letter", "critical",
+					"Deploy permanently failed (dead-letter): "+d.Name,
+					"sha "+job.SHA+" exhausted retries — "+derr.Error()+
+						"\nInspect with `apigw webhook status` and either "+
+						"`apigw deploy run "+d.Name+" --force` or delete the dead job.",
+					"deploy/"+d.Name)
+			} else {
+				w.AlertHook("deploy.failed", "warning",
+					"Deploy failed (will retry): "+d.Name,
+					"sha "+job.SHA+" — "+derr.Error(),
+					"deploy/"+d.Name)
+			}
 		}
 		logger.Error("apply failed",
 			slog.String("deploy", d.Name),

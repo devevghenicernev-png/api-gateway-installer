@@ -4,6 +4,8 @@ package remove
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -75,11 +77,28 @@ func run(opts *options) error {
 		}
 	}
 
+	// Capture BasicAuth path before removal so the cleanup loop below
+	// has somewhere to look.
+	var basicAuthFile string
+	if api := cfg.FindAPI(opts.name); api != nil && api.BasicAuth != nil {
+		basicAuthFile = api.BasicAuth.File
+		if basicAuthFile == "" {
+			basicAuthFile = filepath.Join("/etc/apigw", "htpasswd."+opts.name)
+		}
+	}
+
 	if err := cfg.RemoveAPI(opts.name); err != nil {
 		return err
 	}
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
+	}
+
+	// Orphan-prune sidecar files that nginx no longer references. We
+	// only touch files we KNOW we created — never anything operator
+	// supplied via custom File: in the BasicAuth config.
+	if basicAuthFile != "" {
+		_ = os.Remove(basicAuthFile)
 	}
 
 	mgr := nginx.NewManager()

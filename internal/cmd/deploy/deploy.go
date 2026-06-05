@@ -8,6 +8,7 @@ import (
 	deployList "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/list"
 	deployLogs "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/logs"
 	deployRemove "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/remove"
+	deployRollback "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/rollback"
 	deployRun "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/run"
 	deploySSHKey "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/sshkey"
 	deployStatus "github.com/devevghenicernev-png/apigw/internal/cmd/deploy/status"
@@ -28,6 +29,7 @@ func NewCmdDeploy(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(deployAdd.NewCmdAdd(f))
 	cmd.AddCommand(deployList.NewCmdList(f))
 	cmd.AddCommand(deployRemove.NewCmdRemove(f))
+	cmd.AddCommand(deployRollback.NewCmdRollback(f))
 	cmd.AddCommand(deployRun.NewCmdRun(f))
 	cmd.AddCommand(deployStatus.NewCmdStatus(f))
 	cmd.AddCommand(deployLogs.NewCmdLogs(f))

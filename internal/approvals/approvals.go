@@ -88,6 +88,14 @@ func (s *Store) Close() error { return s.db.Close() }
 //
 // `threshold` is the number of approvals required. The submitter does NOT
 // count toward their own request.
+//
+// If a non-expired pending request for the same (action, resource) tuple
+// already exists, Submit returns it instead of creating a duplicate —
+// otherwise spamming the DELETE button would queue N identical change
+// requests for reviewers to wade through (and approve N times,
+// triggering N applies). ErrDuplicate is wrapped in the returned error
+// so callers can decide whether to surface "already pending" to the
+// operator or quietly return the existing record.
 func (s *Store) Submit(submitter, action, resource string, payload map[string]any, threshold int, ttl time.Duration) (ChangeRequest, error) {
 	if threshold < 1 {
 		threshold = 1
@@ -95,6 +103,17 @@ func (s *Store) Submit(submitter, action, resource string, payload map[string]an
 	if ttl == 0 {
 		ttl = 24 * time.Hour
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Reject if a non-expired pending request for the same (action,
+	// resource) already exists. Different submitters racing on the same
+	// dangerous action also coalesce — only one pending review per target.
+	if existing, ok := s.findOpenPending(action, resource); ok {
+		return existing, fmt.Errorf("%w: action %q on %q already has pending change %s",
+			ErrDuplicate, action, resource, existing.ID)
+	}
+
 	cr := ChangeRequest{
 		ID:          newID(),
 		SubmittedBy: submitter,
@@ -107,6 +126,44 @@ func (s *Store) Submit(submitter, action, resource string, payload map[string]an
 		ExpiresAt:   time.Now().UTC().Add(ttl),
 	}
 	return cr, s.save(cr)
+}
+
+// ErrDuplicate signals that Submit refused to create a second pending
+// request for the same (action, resource). The first existing pending
+// record is returned alongside the error so callers can show its ID.
+var ErrDuplicate = errors.New("approvals: duplicate pending request")
+
+// findOpenPending scans the bucket for an unexpired pending request that
+// matches (action, resource). bbolt iterates inside a read tx; we do the
+// filter in Go because the keys are random IDs (can't range by index).
+func (s *Store) findOpenPending(action, resource string) (ChangeRequest, bool) {
+	var match ChangeRequest
+	found := false
+	now := time.Now().UTC()
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketName))
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var cr ChangeRequest
+			if err := json.Unmarshal(v, &cr); err != nil {
+				continue
+			}
+			if cr.Status != "pending" {
+				continue
+			}
+			if cr.ExpiresAt.Before(now) {
+				continue
+			}
+			if cr.Action != action || cr.Resource != resource {
+				continue
+			}
+			match = cr
+			found = true
+			return nil
+		}
+		return nil
+	})
+	return match, found
 }
 
 // Approve adds an approval. Returns the updated record. If the request
@@ -198,6 +255,52 @@ func (s *Store) List(status string, limit int) ([]ChangeRequest, error) {
 		return nil
 	})
 	return out, err
+}
+
+// PruneExpired deletes pending requests that are past ExpiresAt and
+// applied/rejected requests older than retention. Returns the number of
+// entries removed. Called from the dashboard maintenance ticker so the
+// bbolt file doesn't grow without bound — daily retention defaults are
+// fine for typical SOX/PCI ops volume (≤ thousands of entries per year).
+func (s *Store) PruneExpired(retainTerminal time.Duration) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if retainTerminal <= 0 {
+		retainTerminal = 30 * 24 * time.Hour
+	}
+	now := time.Now().UTC()
+	cutoff := now.Add(-retainTerminal)
+	pruned := 0
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketName))
+		c := b.Cursor()
+		var toDelete [][]byte
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var cr ChangeRequest
+			if err := json.Unmarshal(v, &cr); err != nil {
+				// Corrupt entry — best-effort skip; verify-chain catches
+				// these in a more deliberate audit run.
+				continue
+			}
+			switch cr.Status {
+			case "pending":
+				if cr.ExpiresAt.Before(now) {
+					toDelete = append(toDelete, append([]byte(nil), k...))
+				}
+			case "applied", "rejected":
+				if cr.SubmittedAt.Before(cutoff) {
+					toDelete = append(toDelete, append([]byte(nil), k...))
+				}
+			}
+		}
+		for _, k := range toDelete {
+			if derr := b.Delete(k); derr == nil {
+				pruned++
+			}
+		}
+		return nil
+	})
+	return pruned, err
 }
 
 // ---------- internals ----------

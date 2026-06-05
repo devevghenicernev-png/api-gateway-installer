@@ -39,6 +39,27 @@ type RenewOptions struct {
 	DuckDNSToken string
 }
 
+// RenewDomain forces a renewal of a single named domain and reloads
+// nginx atomically. Used by the dashboard's "Renew" button — the
+// operator already knows which cert is expiring.
+//
+// Returns an error if the cert isn't tracked locally or the ACME
+// handshake fails. Nginx is reloaded on success via StoreCert's atomic
+// swap; partial failures roll back to the live pair, so the old cert
+// stays in service.
+func RenewDomain(domain string) error {
+	ci, err := LoadCertInfo(domain)
+	if err != nil {
+		return fmt.Errorf("load cert %s: %w", domain, err)
+	}
+	req := ObtainRequest{
+		Strategy:   ci.Strategy,
+		Domains:    []string{ci.Domain},
+		CommonName: ci.Domain,
+	}
+	return Obtain(req, true)
+}
+
 // RenewAll iterates every stored cert and renews those near expiry.
 //
 // The atomic swap in StoreCert is what keeps nginx safe: it never sees a

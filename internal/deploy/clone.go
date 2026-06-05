@@ -49,6 +49,16 @@ func Clone(ctx context.Context, req CloneRequest) (CloneResult, error) {
 	if err := os.MkdirAll(releases, 0o755); err != nil {
 		return CloneResult{}, fmt.Errorf("mkdir %s: %w", releases, err)
 	}
+	// Best-effort GC of older _staging dirs left by previous crashed
+	// clones. defer-based cleanup misses SIGKILL/OOM; this hook
+	// catches them on the next Clone for the same deploy.
+	if oldEntries, _ := os.ReadDir(releases); oldEntries != nil {
+		for _, e := range oldEntries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), "_staging-") {
+				_ = os.RemoveAll(filepath.Join(releases, e.Name()))
+			}
+		}
+	}
 	staging, err := os.MkdirTemp(releases, "_staging-")
 	if err != nil {
 		return CloneResult{}, fmt.Errorf("staging dir: %w", err)
@@ -198,7 +208,15 @@ func EnsureReleaseDir(name, sha string) error {
 }
 
 // PruneOldReleases keeps the most recent `keep` directories under
-// releases/ and removes the rest. Symlinked release (current) is never pruned.
+// releases/ and removes the rest. The release pointed at by `current`
+// is never pruned.
+//
+// Safety: if the `current` symlink is broken or missing we REFUSE to
+// prune anything — otherwise an empty currentBase would match no
+// existing directory and the loop below would happily delete every
+// release for that deploy (we hit this when ops manually removed the
+// target of the symlink, expecting "best-effort cleanup" to skip it).
+// Operators see a clear error instead of silent data loss.
 func PruneOldReleases(name string, keep int) error {
 	dir := ReleasesDir(name)
 	entries, err := os.ReadDir(dir)
@@ -207,6 +225,12 @@ func PruneOldReleases(name string, keep int) error {
 	}
 	current, _ := os.Readlink(CurrentSymlink(name))
 	currentBase := filepath.Base(current)
+	if currentBase == "" || currentBase == "." || currentBase == "/" {
+		return fmt.Errorf("prune %s: current symlink missing or empty — refusing to prune to avoid wiping every release", name)
+	}
+	if _, err := os.Stat(filepath.Join(dir, currentBase)); err != nil {
+		return fmt.Errorf("prune %s: current symlink points at missing release %q — refusing", name, currentBase)
+	}
 
 	type ent struct {
 		name string

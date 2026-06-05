@@ -54,6 +54,12 @@ type Server struct {
 	// Sec is the integrated security layer (RBAC + audit + policy + approvals
 	// + tenants + alerts). nil = legacy "no security" mode.
 	Sec *Security
+
+	// Queue is the durable webhook/deploy job queue. The admin "redeploy"
+	// endpoint enqueues into it; the same worker that drains GitHub
+	// deliveries picks the job up. nil = run-via-UI disabled, CLI still
+	// works (it uses an in-process deploy.JobQueue).
+	Queue *webhook.Queue
 }
 
 // New constructs a Server bound to `addr`.

@@ -77,9 +77,19 @@ func newCmdInit(f *cmdutil.Factory) *cobra.Command {
 					return alreadyInitialised(f, user)
 				}
 			}
-			token, err := generateToken()
-			if err != nil {
-				return err
+			var token string
+			for attempts := 0; attempts < 8; attempts++ {
+				t, gerr := generateToken()
+				if gerr != nil {
+					return gerr
+				}
+				if !tokenInUse(cfg.Security.AdminTokens, t) {
+					token = t
+					break
+				}
+			}
+			if token == "" {
+				return fmt.Errorf("token collision after 8 retries; check entropy source")
 			}
 			cfg.Security.AdminTokens = append(cfg.Security.AdminTokens, config.AdminToken{
 				Name:  user + "-owner",
@@ -136,9 +146,24 @@ func newCmdTokenAdd(f *cmdutil.Factory) *cobra.Command {
 					return fmt.Errorf("token %q already exists; revoke it first", name)
 				}
 			}
-			token, err := generateToken()
-			if err != nil {
-				return err
+			// Retry token generation until we get a value not already in
+			// the table. 256-bit base64 collisions are astronomically
+			// unlikely, but a manual config edit could plant a duplicate
+			// — without this loop the new token would be ambiguous on
+			// lookup (constant-time match would succeed for two identities).
+			var token string
+			for attempts := 0; attempts < 8; attempts++ {
+				t, gerr := generateToken()
+				if gerr != nil {
+					return gerr
+				}
+				if !tokenInUse(cfg.Security.AdminTokens, t) {
+					token = t
+					break
+				}
+			}
+			if token == "" {
+				return fmt.Errorf("token collision after 8 retries; check entropy source")
 			}
 			cfg.Security.AdminTokens = append(cfg.Security.AdminTokens, config.AdminToken{
 				Name:   name,
@@ -288,6 +313,18 @@ func generateToken() (string, error) {
 		return "", fmt.Errorf("rand: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// tokenInUse reports whether the given raw bearer value is already
+// stored under any token entry. Lets `token add` reject manual config
+// edits that planted a duplicate secret value.
+func tokenInUse(tokens []config.AdminToken, value string) bool {
+	for _, t := range tokens {
+		if t.Token == value {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAssignment(as []config.Assignment, user string) bool {

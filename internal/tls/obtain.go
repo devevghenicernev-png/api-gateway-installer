@@ -112,13 +112,30 @@ func Obtain(req ObtainRequest, force bool) error {
 		}
 	}
 
-	// Obtain — one cert covers all SANs in req.Domains.
-	res, err := client.Certificate.Obtain(certificate.ObtainRequest{
-		Domains: req.Domains,
-		Bundle:  true,
-	})
-	if err != nil {
-		return fmt.Errorf("obtain: %w", err)
+	// Obtain — one cert covers all SANs in req.Domains. We wrap the lego
+	// call with a tiny retry loop that backs off on "rate limit" /
+	// "too many" errors from Let's Encrypt. Without backoff a renewal
+	// failure storms LE every minute and earns a longer ban; with
+	// exponential backoff we fail loudly but stop hitting them.
+	var res *certificate.Resource
+	delays := []time.Duration{0, 30 * time.Second, 2 * time.Minute, 15 * time.Minute}
+	for attempt, wait := range delays {
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		res, err = client.Certificate.Obtain(certificate.ObtainRequest{
+			Domains: req.Domains,
+			Bundle:  true,
+		})
+		if err == nil {
+			break
+		}
+		if !isRateLimitErr(err) || attempt == len(delays)-1 {
+			return fmt.Errorf("obtain: %w", err)
+		}
+	}
+	if res == nil {
+		return errors.New("obtain returned nil after retries")
 	}
 	if len(res.Certificate) == 0 || len(res.PrivateKey) == 0 {
 		return errors.New("obtain returned empty cert/key")
@@ -132,6 +149,19 @@ func Obtain(req ObtainRequest, force bool) error {
 		}
 	}
 	return nil
+}
+
+// isRateLimitErr matches the well-known Let's Encrypt error strings for
+// rate limits. lego wraps the upstream error message so we look at the
+// full text rather than a typed error.
+func isRateLimitErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "rate limit") ||
+		strings.Contains(s, "too many") ||
+		strings.Contains(s, "429")
 }
 
 func validate(req ObtainRequest) error {

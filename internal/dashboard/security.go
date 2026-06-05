@@ -62,12 +62,13 @@ type Security struct {
 	tokensMu sync.RWMutex
 	tokens   map[string]rbac.Identity // sha256(token-bytes) → identity
 
-	csrfKey   []byte // signing key for CSRF tokens issued to the dashboard
-	maxBody   int64
-	threshold int
-	stateDir  string
-	enforce   bool
-	logger    *slog.Logger
+	csrfKey    []byte // signing key for CSRF tokens issued to the dashboard
+	maxBody    int64
+	threshold  int
+	stateDir   string
+	enforce    bool
+	auditReads bool // when true, even successful read-only operations land in audit.db
+	logger     *slog.Logger
 }
 
 // NewSecurity constructs the integrated security layer from a Config block.
@@ -86,12 +87,13 @@ func NewSecurity(cfg config.Security, tenants []config.Tenant, alertsCfg config.
 		return nil, fmt.Errorf("security: state dir: %w", err)
 	}
 	s := &Security{
-		stateDir:  stateDir,
-		enforce:   cfg.RBACEnforce,
-		maxBody:   cfg.MaxRequestBytes,
-		threshold: cfg.ApprovalsThreshold,
-		logger:    logger,
-		tokens:    map[string]rbac.Identity{},
+		stateDir:   stateDir,
+		enforce:    cfg.RBACEnforce,
+		maxBody:    cfg.MaxRequestBytes,
+		threshold:  cfg.ApprovalsThreshold,
+		auditReads: cfg.AuditReads,
+		logger:     logger,
+		tokens:     map[string]rbac.Identity{},
 	}
 	if s.maxBody <= 0 {
 		s.maxBody = 1 << 20 // 1 MiB
@@ -106,6 +108,17 @@ func NewSecurity(cfg config.Security, tenants []config.Tenant, alertsCfg config.
 
 	auditHook := func(actor, action, resource, result, reason string) {
 		if s.Audit == nil {
+			return
+		}
+		// RBAC.Check fires this hook before Guard's own recordAudit. On
+		// success Guard writes the full picture (actor + before/after);
+		// on denial Guard short-circuits and never calls recordAudit, so
+		// we MUST write the denial here. Net effect:
+		//   - success →    skipped here, recorded once by Guard
+		//   - denied  →    recorded here (Guard never runs)
+		// This is the single source of truth for audit entries — no
+		// duplicates, no misses.
+		if result == "ok" {
 			return
 		}
 		_, _ = s.Audit.Log(audit.Entry{
@@ -222,6 +235,51 @@ func (s *Security) Close() {
 	}
 }
 
+// ReloadTokens re-reads the admin-token table from a fresh config and
+// swaps it atomically under tokensMu. This is the hot-reload path used
+// by `apigw auth admin token revoke` so a revoked credential stops
+// working immediately, without restarting the dashboard.
+//
+// Roles, role assignments, threshold, OPA policies are all also
+// refreshed since they're cheap and share the same config block —
+// keeping them in sync prevents a state where "token works, but RBAC
+// disagrees about its roles".
+func (s *Security) ReloadTokens(cfg config.Security) {
+	if s == nil {
+		return
+	}
+	s.tokensMu.Lock()
+	s.tokens = map[string]rbac.Identity{}
+	for _, t := range cfg.AdminTokens {
+		if t.Token == "" || t.User == "" {
+			continue
+		}
+		s.tokens[hashToken(t.Token)] = rbac.Identity{User: t.User, Groups: t.Groups}
+	}
+	s.tokensMu.Unlock()
+
+	// Refresh RBAC role assignments too, so revoking a token AND
+	// changing the user's roles in the same edit takes effect
+	// immediately.
+	if s.RBAC != nil {
+		extra := make([]rbac.Role, 0, len(cfg.Roles))
+		for _, r := range cfg.Roles {
+			perms := make([]rbac.Permission, len(r.Permissions))
+			for i, p := range r.Permissions {
+				perms[i] = rbac.Permission(p)
+			}
+			extra = append(extra, rbac.Role{Name: r.Name, Description: r.Description, Permissions: perms})
+		}
+		asg := make([]rbac.Assignment, 0, len(cfg.Assignments))
+		for _, a := range cfg.Assignments {
+			asg = append(asg, rbac.Assignment{User: a.User, Group: a.Group, Roles: a.Roles})
+		}
+		s.RBAC.LoadConfig(extra, asg)
+	}
+	s.threshold = cfg.ApprovalsThreshold
+	s.auditReads = cfg.AuditReads
+}
+
 // Identify extracts the caller's RBAC identity from request headers.
 // Anonymous when no token is presented OR token is unknown.
 func (s *Security) Identify(r *http.Request) rbac.Identity {
@@ -290,12 +348,12 @@ func (s *Security) Guard(r *http.Request, a Action, onCommit func() error) (uint
 		}
 		decision, err := s.Policy.Evaluate(r.Context(), input)
 		if err != nil {
-			s.recordAudit(ident.User, a, "failed", "policy: "+err.Error())
+			_, _ = s.recordAudit(ident.User, a, "failed", "policy: "+err.Error())
 			return 0, fmt.Errorf("policy: %w", err)
 		}
 		if decision.Denied {
 			reason := strings.Join(decision.Reasons, "; ")
-			s.recordAudit(ident.User, a, "denied", reason)
+			_, _ = s.recordAudit(ident.User, a, "denied", reason)
 			return 0, fmt.Errorf("%w: %s", ErrPolicyDenied, reason)
 		}
 	}
@@ -305,22 +363,32 @@ func (s *Security) Guard(r *http.Request, a Action, onCommit func() error) (uint
 		payload := map[string]any{"before": a.Before, "after": a.After}
 		cr, err := s.Approvals.Submit(ident.User, string(a.Permission), a.Resource, payload, s.threshold, 24*time.Hour)
 		if err != nil {
+			if errors.Is(err, approvals.ErrDuplicate) {
+				// Same operator (or anyone) already opened this change request.
+				// Surface the EXISTING id so reviewers don't have to chase
+				// a phantom second request, and don't double-audit.
+				return 0, fmt.Errorf("%w: change %s is already pending — share that id",
+					ErrPendingApproval, cr.ID)
+			}
 			return 0, fmt.Errorf("approvals submit: %w", err)
 		}
-		s.recordAudit(ident.User, a, "parked", "approval id="+cr.ID)
+		_, _ = s.recordAudit(ident.User, a, "parked", "approval id="+cr.ID)
 		return 0, fmt.Errorf("%w: change %s parked, need %d approvals", ErrPendingApproval, cr.ID, s.threshold)
 	}
 
 	// 4. Commit.
 	if onCommit != nil {
 		if err := onCommit(); err != nil {
-			s.recordAudit(ident.User, a, "failed", err.Error())
+			_, _ = s.recordAudit(ident.User, a, "failed", err.Error())
 			return 0, err
 		}
 	}
 
 	// 5. Audit success.
-	id := s.recordAudit(ident.User, a, "ok", "")
+	id, aerr := s.recordAudit(ident.User, a, "ok", "")
+	if aerr != nil {
+		return 0, aerr
+	}
 	return id, nil
 }
 
@@ -342,6 +410,24 @@ func (s *Security) ReadBody(r *http.Request, target any) error {
 	return json.Unmarshal(body, target)
 }
 
+// RecordDenial writes a single denial entry. Used by admin handlers when
+// CSRF / auth fails BEFORE Guard() is reached — without this, those
+// rejections would be invisible to the audit log because the RBAC hook
+// never fires.
+func (s *Security) RecordDenial(r *http.Request, permission rbac.Permission, resource, reason string) {
+	if s == nil || s.Audit == nil {
+		return
+	}
+	ident := s.Identify(r)
+	_, _ = s.Audit.Log(audit.Entry{
+		Actor:    ident.User,
+		Action:   string(permission),
+		Resource: resource,
+		Result:   "denied",
+		Reason:   reason,
+	})
+}
+
 // IssueCSRFToken returns an HMAC-signed token tied to the identity. The
 // dashboard JS reads it from /api/admin/csrf and echoes it back in
 // X-CSRF-Token on every write. Tokens expire after 12h.
@@ -359,24 +445,30 @@ func (s *Security) IssueCSRFToken(user string) string {
 
 // VerifyCSRFToken returns nil if the token is valid for the given user and
 // within the 12h validity window. Constant-time signature compare.
+//
+// All failure modes map to ErrForbidden — a malformed token is just as
+// unauthorised as a missing/wrong one, and returning a distinct 400 on
+// "bad base64" would let an attacker tell apart "we accept this user but
+// reject your token" from "your token is corrupt", which is a small but
+// real probing oracle.
 func (s *Security) VerifyCSRFToken(user, token string) error {
 	if s == nil {
 		return nil // CSRF off when security off
 	}
 	raw, err := base64.URLEncoding.DecodeString(token)
 	if err != nil {
-		return ErrBadRequest
+		return ErrForbidden
 	}
 	parts := strings.SplitN(string(raw), "|", 3)
 	if len(parts) != 3 {
-		return ErrBadRequest
+		return ErrForbidden
 	}
 	if parts[0] != user {
 		return ErrForbidden
 	}
 	var ts int64
 	if _, err := fmt.Sscanf(parts[1], "%d", &ts); err != nil {
-		return ErrBadRequest
+		return ErrForbidden
 	}
 	if time.Since(time.Unix(ts, 0)) > 12*time.Hour {
 		return ErrForbidden
@@ -418,10 +510,11 @@ func (s *Security) AuditCount() uint64 {
 // ---------- errors ----------
 
 var (
-	ErrForbidden       = errors.New("forbidden")
-	ErrPolicyDenied    = errors.New("policy denied")
-	ErrPendingApproval = errors.New("pending approval")
-	ErrBadRequest      = errors.New("bad request")
+	ErrForbidden        = errors.New("forbidden")
+	ErrPolicyDenied     = errors.New("policy denied")
+	ErrPendingApproval  = errors.New("pending approval")
+	ErrBadRequest       = errors.New("bad request")
+	ErrAuditUnavailable = errors.New("audit log unavailable")
 )
 
 // Status maps an error returned by Guard()/ReadBody() to an HTTP status.
@@ -435,6 +528,8 @@ func Status(err error) int {
 		return http.StatusAccepted
 	case errors.Is(err, ErrBadRequest):
 		return http.StatusBadRequest
+	case errors.Is(err, ErrAuditUnavailable):
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -442,9 +537,29 @@ func Status(err error) int {
 
 // ---------- internals ----------
 
-func (s *Security) recordAudit(actor string, a Action, result, reason string) uint64 {
+// recordAudit persists an Entry, EXCEPT when the operation is a successful
+// read-only lookup (.list / .show / .query / .status). Two reasons:
+//
+//  1. The embedded dashboard polls /api/admin/{apis,audit,approvals,...}
+//     every 10s; without this filter every signed-in operator generates
+//     ~6 audit entries per minute of pure noise.
+//  2. SOX / PCI / SOC2 require attribution of MUTATIONS, not lookups.
+//     Anomalous read patterns (e.g. enumeration) still surface because
+//     DENIED reads are always recorded — see the result check below.
+//
+// To capture every read for highest-paranoia mode (defence-in-depth on a
+// compromised dashboard), set security.audit_reads: true in config.
+// On MUTATION audit-write failure we propagate ErrAuditUnavailable so
+// Guard refuses the request — silently mutating state without a
+// hash-chain entry breaks SOX/PCI compliance and our own forensics.
+// Read-only audit-write failures stay warning-only since blocking the
+// API entirely on log-storage problems is worse than degraded auditing.
+func (s *Security) recordAudit(actor string, a Action, result, reason string) (uint64, error) {
 	if s == nil || s.Audit == nil {
-		return 0
+		return 0, nil
+	}
+	if result == "ok" && !s.auditReads && isReadOnlyPermission(a.Permission) {
+		return 0, nil
 	}
 	e, err := s.Audit.Log(audit.Entry{
 		Actor:    actor,
@@ -456,10 +571,26 @@ func (s *Security) recordAudit(actor string, a Action, result, reason string) ui
 		After:    a.After,
 	})
 	if err != nil {
-		s.logger.Warn("audit log failed", "err", err)
-		return 0
+		s.logger.Warn("audit log failed", "result", result, "err", err)
+		if result == "ok" && !isReadOnlyPermission(a.Permission) {
+			return 0, fmt.Errorf("%w: %v", ErrAuditUnavailable, err)
+		}
+		return 0, nil
 	}
-	return e.ID
+	return e.ID, nil
+}
+
+// isReadOnlyPermission returns true when the permission verb is a lookup
+// (list / show / query / status). Anything else is considered a state
+// change and always lands in the audit log.
+func isReadOnlyPermission(p rbac.Permission) bool {
+	s := string(p)
+	for _, suffix := range []string{".list", ".show", ".query", ".status"} {
+		if strings.HasSuffix(s, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func hashToken(t string) string {
@@ -467,6 +598,13 @@ func hashToken(t string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// loadOrCreateCSRFKey returns the persisted 32-byte CSRF key, or
+// generates one and atomically persists it via O_CREATE|O_EXCL. The
+// exclusive create rejects a race where two dashboard processes (or
+// dashboards started simultaneously by a misconfigured systemd) both
+// try to mint a key — without it, last-write-wins meant tokens issued
+// by one process silently failed verification on the other. On a race
+// loser we re-read the file written by the winner.
 func loadOrCreateCSRFKey(dir string, logger *slog.Logger) []byte {
 	path := filepath.Join(dir, "csrf.key")
 	if b, err := os.ReadFile(path); err == nil && len(b) == 32 {
@@ -477,9 +615,21 @@ func loadOrCreateCSRFKey(dir string, logger *slog.Logger) []byte {
 		logger.Warn("csrf key: rand read failed; using static", "err", err)
 		copy(key, []byte("apigw-fallback-csrf-key-DO-NOT-USE!"))
 	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
+	// Exclusive create — if another process already created the file
+	// between our ReadFile above and this OpenFile, we lose the race
+	// gracefully and adopt their key.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if existing, rerr := os.ReadFile(path); rerr == nil && len(existing) == 32 {
+			return existing
+		}
 		logger.Warn("csrf key persist failed", "err", err)
+		return key
 	}
+	if _, werr := f.Write(key); werr != nil {
+		logger.Warn("csrf key write failed", "err", werr)
+	}
+	_ = f.Close()
 	_ = os.Chmod(path, 0o600)
 	return key
 }

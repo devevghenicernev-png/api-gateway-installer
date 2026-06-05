@@ -51,7 +51,7 @@ func TestQueue_FailBackoffThenRequeue(t *testing.T) {
 	q := newTestQueue(t)
 	key, _ := q.Enqueue(Job{Deploy: "x", SHA: "abc"})
 	_ = q.Claim(key, time.Minute)
-	if err := q.Fail(key, "build error"); err != nil {
+	if _, err := q.Fail(key, "build error"); err != nil {
 		t.Fatalf("Fail: %v", err)
 	}
 	// First retry: NotBefore is now+30s — Peek must skip it for now.
@@ -71,10 +71,18 @@ func TestQueue_DeadLetterAfterMaxRetries(t *testing.T) {
 	q := newTestQueue(t)
 	key, _ := q.Enqueue(Job{Deploy: "x", SHA: "abc"})
 	// 6 failures → backoffFor returns -1 → dead-letter.
+	var dlSeen bool
 	for i := 0; i < 6; i++ {
-		if err := q.Fail(key, "still broken"); err != nil {
+		dl, err := q.Fail(key, "still broken")
+		if err != nil {
 			t.Fatalf("Fail #%d: %v", i, err)
 		}
+		if dl {
+			dlSeen = true
+		}
+	}
+	if !dlSeen {
+		t.Fatal("expected one Fail to report deadLettered=true")
 	}
 	queued, dead, _ := q.Depth()
 	if queued != 0 {
@@ -102,7 +110,7 @@ func TestQueue_PruneDeadLetters(t *testing.T) {
 	// Manually shove a job into the dead bucket by failing past max.
 	key, _ := q.Enqueue(Job{Deploy: "x"})
 	for i := 0; i < 6; i++ {
-		_ = q.Fail(key, "doomed")
+		_, _ = q.Fail(key, "doomed")
 	}
 	pruned, err := q.PruneDeadLetters(0) // any age qualifies
 	if err != nil {

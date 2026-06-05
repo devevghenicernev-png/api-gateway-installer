@@ -19,12 +19,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/devevghenicernev-png/apigw/internal/approvals"
 	"github.com/devevghenicernev-png/apigw/internal/audit"
 	"github.com/devevghenicernev-png/apigw/internal/config"
+	"github.com/devevghenicernev-png/apigw/internal/deploy"
 	"github.com/devevghenicernev-png/apigw/internal/rbac"
+	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
+	"github.com/devevghenicernev-png/apigw/internal/webhook"
 )
 
 // adminRoutes registers all /api/admin/* CRUD handlers. The auxiliary
@@ -36,6 +41,10 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/apis/", s.adminAPIHandler)
 	mux.HandleFunc("/api/admin/deploys", s.adminDeploysHandler)
 	mux.HandleFunc("/api/admin/deploys/", s.adminDeployHandler)
+	mux.HandleFunc("/api/admin/deploy-run/", s.adminDeployRunHandler)
+	mux.HandleFunc("/api/admin/deploy-rollback/", s.adminDeployRollbackHandler)
+	mux.HandleFunc("/api/admin/tls-renew/", s.adminTLSRenewHandler)
+	mux.HandleFunc("/api/admin/webhook-rotate/", s.adminWebhookRotateHandler)
 	mux.HandleFunc("/api/admin/tls", s.adminTLSHandler)
 	mux.HandleFunc("/api/admin/config", s.adminConfigHandler)
 }
@@ -43,19 +52,37 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 // ensureCSRF rejects write methods when the X-CSRF-Token header is missing
 // or invalid. Read methods (GET) pass through. When Sec is nil (legacy
 // mode) this is a no-op so installations without security can still GET/POST.
+//
+// On failure we write an audit denial entry — otherwise CSRF rejections
+// would be invisible to operators reviewing the audit log, hiding probes
+// from scanners and replay attempts.
 func (s *Server) ensureCSRF(r *http.Request, ident rbac.Identity) error {
 	if s.Sec == nil {
 		return nil
 	}
+	// Enforce CSRF only on the verbs we actually accept. Letting PATCH /
+	// CONNECT / TRACE through here means the per-handler method switch
+	// returns a clean 405 instead of a misleading 403 (the request was
+	// rejected because of the verb, not the missing CSRF token).
 	switch r.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
+	case http.MethodPost, http.MethodPut, http.MethodDelete:
+	default:
 		return nil
 	}
+	var err error
 	tok := r.Header.Get("X-CSRF-Token")
 	if tok == "" {
-		return ErrForbidden
+		err = ErrForbidden
+	} else {
+		err = s.Sec.VerifyCSRFToken(ident.User, tok)
 	}
-	return s.Sec.VerifyCSRFToken(ident.User, tok)
+	if err != nil {
+		// Synthesize a permission verb so the entry is filterable; resource
+		// is the URL path so the operator can see what was being attempted.
+		s.Sec.RecordDenial(r, rbac.Permission("csrf."+strings.ToLower(r.Method)), r.URL.Path,
+			"csrf: missing or invalid X-CSRF-Token")
+	}
+	return err
 }
 
 // ---------- /api/admin/apis ----------
@@ -90,6 +117,10 @@ func (s *Server) adminAPIsHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if cfg.FindAPI(api.Name) != nil {
+			adminWriteJSONError(w, http.StatusConflict, fmt.Sprintf("api %q already exists", api.Name))
+			return
+		}
 		action := Action{
 			Permission: "api.add",
 			Resource:   "api/" + api.Name,
@@ -100,7 +131,11 @@ func (s *Server) adminAPIsHandler(w http.ResponseWriter, r *http.Request) {
 			if err := enforceTenantQuota(cfg, ident, s, "apis"); err != nil {
 				return err
 			}
-			cfg.APIs = append(cfg.APIs, api)
+			// AddAPI guards uniqueness one more time — defense in depth in
+			// case Find above was racey with another writer.
+			if err := cfg.AddAPI(api); err != nil {
+				return err
+			}
 			return cfg.Save()
 		}); err != nil {
 			adminWriteJSONError(w, Status(err), err.Error())
@@ -227,6 +262,10 @@ func (s *Server) adminDeploysHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if cfg.FindDeploy(dep.Name) != nil {
+			adminWriteJSONError(w, http.StatusConflict, fmt.Sprintf("deploy %q already exists", dep.Name))
+			return
+		}
 		action := Action{
 			Permission: "deploy.add",
 			Resource:   "deploy/" + dep.Name,
@@ -236,7 +275,9 @@ func (s *Server) adminDeploysHandler(w http.ResponseWriter, r *http.Request) {
 			if err := enforceTenantQuota(cfg, ident, s, "deploys"); err != nil {
 				return err
 			}
-			cfg.Deploys = append(cfg.Deploys, dep)
+			if err := cfg.AddDeploy(dep); err != nil {
+				return err
+			}
 			return cfg.Save()
 		}); err != nil {
 			adminWriteJSONError(w, Status(err), err.Error())
@@ -447,6 +488,26 @@ func (s *Server) handleApprovalOne(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Threshold reached → execute the parked mutation and mark applied.
+		// The action verb we stored on Submit drives a small dispatch table
+		// below. Failures here flip the change back to a useful state and
+		// surface to the caller — half-applied changes are worse than a
+		// rejected approval.
+		if cr.Status == "approved" {
+			cfgFresh, cerr := s.ConfigFn()
+			if cerr == nil {
+				if execErr := s.executeParked(cr, cfgFresh); execErr != nil {
+					adminWriteJSONError(w, http.StatusInternalServerError,
+						"approval recorded but apply failed: "+execErr.Error())
+					return
+				}
+				if mErr := s.Sec.Approvals.MarkApplied(id); mErr == nil {
+					cr.Status = "applied"
+					now := cr.SubmittedAt
+					cr.AppliedAt = &now
+				}
+			}
+		}
 		adminWriteJSON(w, http.StatusOK, cr)
 	case "reject":
 		var body struct {
@@ -501,6 +562,248 @@ func (s *Server) handleAlertTest(w http.ResponseWriter, r *http.Request) {
 	s.Sec.FireAlert("test", "info", "apigw alert test",
 		"This is a test alert fired from the dashboard.", "system")
 	adminWriteJSON(w, http.StatusAccepted, map[string]string{"status": "dispatched"})
+}
+
+// executeParked applies an approved ChangeRequest's mutation. Dispatched
+// on the action verb stored at Submit time. Today only *.remove actions
+// can be Dangerous so the table is short — extend here as we tag more
+// permissions Dangerous in admin_api handlers.
+func (s *Server) executeParked(cr approvals.ChangeRequest, cfg *config.Config) error {
+	// Resource format is "<kind>/<name>"; recover the name.
+	name := cr.Resource
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	switch cr.Action {
+	case "api.remove":
+		if err := cfg.RemoveAPI(name); err != nil {
+			return fmt.Errorf("remove api: %w", err)
+		}
+	case "deploy.remove":
+		// Config has no RemoveDeploy helper today — splice manually.
+		for i, d := range cfg.Deploys {
+			if d.Name == name {
+				cfg.Deploys = append(cfg.Deploys[:i], cfg.Deploys[i+1:]...)
+				return cfg.Save()
+			}
+		}
+		return fmt.Errorf("deploy %q not found", name)
+	default:
+		return fmt.Errorf("don't know how to apply %q", cr.Action)
+	}
+	return cfg.Save()
+}
+
+// adminDeployRunHandler is POST /api/admin/deploy-run/<name>. Enqueues a
+// redeploy job into the same durable bbolt queue webhooks use. The worker
+// picks it up; the operator watches the SSE log stream for progress.
+//
+// We accept manual redeploys without a SHA (Repo + Branch alone) — the
+// clone step resolves HEAD on its own.
+func (s *Server) adminDeployRunHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		adminWriteJSONError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/admin/deploy-run/")
+	if name == "" || strings.ContainsAny(name, "/") {
+		adminWriteJSONError(w, http.StatusBadRequest, "deploy name required")
+		return
+	}
+	cfg, err := s.ConfigFn()
+	if err != nil {
+		adminWriteJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ident := s.Sec.Identify(r)
+	if err := s.ensureCSRF(r, ident); err != nil {
+		adminWriteJSONError(w, Status(err), "csrf: "+err.Error())
+		return
+	}
+	dep := cfg.FindDeploy(name)
+	if dep == nil {
+		adminWriteJSONError(w, http.StatusNotFound, "no such deploy")
+		return
+	}
+	if s.Queue == nil {
+		adminWriteJSONError(w, http.StatusServiceUnavailable,
+			"deploy worker not available — start `apigw dashboard serve` (not just /metrics)")
+		return
+	}
+	if _, err := s.Sec.Guard(r, Action{
+		Permission: "deploy.run",
+		Resource:   "deploy/" + name,
+		After:      map[string]any{"requested_by": ident.User, "branch": dep.Branch},
+	}, func() error {
+		_, qerr := s.Queue.Enqueue(webhook.Job{
+			Deploy: name,
+			Event:  "manual",
+			Repo:   dep.Repo,
+			Branch: dep.Branch,
+		})
+		return qerr
+	}); err != nil {
+		adminWriteJSONError(w, Status(err), err.Error())
+		return
+	}
+	adminWriteJSON(w, http.StatusAccepted, map[string]any{
+		"status": "queued",
+		"deploy": name,
+		"branch": dep.Branch,
+		"note":   "watch the live log panel for progress",
+	})
+}
+
+// adminDeployRollbackHandler is POST /api/admin/deploy-rollback/<name>.
+// Moves the `current` symlink to the previous release directory (by
+// mtime) and reloads the deploy unit. Refuses if there's nothing to
+// roll back to.
+func (s *Server) adminDeployRollbackHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		adminWriteJSONError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/admin/deploy-rollback/")
+	if name == "" || strings.ContainsAny(name, "/") {
+		adminWriteJSONError(w, http.StatusBadRequest, "deploy name required")
+		return
+	}
+	cfg, err := s.ConfigFn()
+	if err != nil {
+		adminWriteJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ident := s.Sec.Identify(r)
+	if err := s.ensureCSRF(r, ident); err != nil {
+		adminWriteJSONError(w, Status(err), "csrf: "+err.Error())
+		return
+	}
+	if cfg.FindDeploy(name) == nil {
+		adminWriteJSONError(w, http.StatusNotFound, "no such deploy")
+		return
+	}
+	if _, err := s.Sec.Guard(r, Action{
+		Permission: "deploy.rollback",
+		Resource:   "deploy/" + name,
+		Dangerous:  true,
+		After:      map[string]any{"requested_by": ident.User},
+	}, func() error {
+		prev, rerr := deploy.RollbackToPrevious(name)
+		if rerr != nil {
+			return rerr
+		}
+		_ = cfg.SetDeployStatus(name, prev, "ok", "rolled back")
+		return cfg.Save()
+	}); err != nil {
+		adminWriteJSONError(w, Status(err), err.Error())
+		return
+	}
+	adminWriteJSON(w, http.StatusAccepted, map[string]any{
+		"status": "rolled-back",
+		"deploy": name,
+	})
+}
+
+// adminTLSRenewHandler is POST /api/admin/tls-renew/<domain>. Triggers a
+// renewal attempt and returns whether nginx was reloaded. Long-running
+// (can take 30s+); the operator polls the TLS panel for the new expiry.
+func (s *Server) adminTLSRenewHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		adminWriteJSONError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	domain := strings.TrimPrefix(r.URL.Path, "/api/admin/tls-renew/")
+	if domain == "" || strings.ContainsAny(domain, "/") {
+		adminWriteJSONError(w, http.StatusBadRequest, "domain required")
+		return
+	}
+	ident := s.Sec.Identify(r)
+	if err := s.ensureCSRF(r, ident); err != nil {
+		adminWriteJSONError(w, Status(err), "csrf: "+err.Error())
+		return
+	}
+	if _, err := s.Sec.Guard(r, Action{
+		Permission: "tls.renew",
+		Resource:   "cert/" + domain,
+	}, func() error {
+		// Background it; renewal can take 30s+ and we don't want to hold
+		// an HTTP request open. The result lands in the next /api/status
+		// snapshot via the TLS ticker.
+		go func() {
+			if err := apitls.RenewDomain(domain); err != nil {
+				s.Logger.Warn("tls renew", slog.String("domain", domain), slog.String("err", err.Error()))
+				if s.Sec != nil {
+					s.Sec.FireAlert("cert.renew.failed", "warning",
+						"TLS renew failed: "+domain, err.Error(), "cert/"+domain)
+				}
+				return
+			}
+			s.Logger.Info("tls renew ok", slog.String("domain", domain))
+		}()
+		return nil
+	}); err != nil {
+		adminWriteJSONError(w, Status(err), err.Error())
+		return
+	}
+	adminWriteJSON(w, http.StatusAccepted, map[string]any{
+		"status": "queued",
+		"domain": domain,
+	})
+}
+
+// adminWebhookRotateHandler is POST /api/admin/webhook-rotate/<deploy>.
+// Generates a new HMAC secret for the deploy, stores it, returns the
+// new value ONCE in the response (operator must update GitHub).
+func (s *Server) adminWebhookRotateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		adminWriteJSONError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/admin/webhook-rotate/")
+	if name == "" || strings.ContainsAny(name, "/") {
+		adminWriteJSONError(w, http.StatusBadRequest, "deploy name required")
+		return
+	}
+	cfg, err := s.ConfigFn()
+	if err != nil {
+		adminWriteJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ident := s.Sec.Identify(r)
+	if err := s.ensureCSRF(r, ident); err != nil {
+		adminWriteJSONError(w, Status(err), "csrf: "+err.Error())
+		return
+	}
+	if cfg.FindDeploy(name) == nil {
+		adminWriteJSONError(w, http.StatusNotFound, "no such deploy")
+		return
+	}
+	var newSecret string
+	if _, err := s.Sec.Guard(r, Action{
+		Permission: "webhook.rotate",
+		Resource:   "webhook/" + name,
+		Dangerous:  true,
+	}, func() error {
+		ns, werr := webhook.RotateSecret(name)
+		if werr != nil {
+			return werr
+		}
+		newSecret = ns
+		return nil
+	}); err != nil {
+		adminWriteJSONError(w, Status(err), err.Error())
+		return
+	}
+	adminWriteJSON(w, http.StatusOK, map[string]any{
+		"status":     "rotated",
+		"deploy":     name,
+		"new_secret": newSecret,
+		"note":       "Update the webhook secret in GitHub now — old secret is invalid.",
+	})
 }
 
 // ---------- helpers ----------

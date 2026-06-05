@@ -96,6 +96,13 @@ func run(opts *options) error {
 			WithDocs("E_NGINX_RELOAD")
 	}
 
+	// Always drop the webhook secret — leaving a dangling HMAC key for
+	// a deleted deploy is a security-hygiene leak (an attacker who
+	// reuses the same deploy name could ride the old secret). --purge
+	// is reserved for the heavier filesystem cleanup the operator may
+	// want to keep for forensic inspection.
+	_ = webhook.RemoveSecret(opts.name)
+
 	if opts.purge {
 		if err := os.RemoveAll(deploy.DeployDir(opts.name)); err != nil {
 			fmt.Fprintf(opts.f.IOStreams.ErrOut, "%s could not purge state dir: %s\n",
@@ -103,7 +110,6 @@ func run(opts *options) error {
 		}
 		_ = os.Remove(deploy.EnvFile(opts.name))
 		_ = os.Remove(filepath.Join("/var/log/apigw", opts.name))
-		_ = webhook.RemoveSecret(opts.name)
 	}
 	fmt.Fprintf(opts.f.IOStreams.Out, "\n%s removed %s\n",
 		tui.Styles.Success.Render(tui.GlyphCheck),

@@ -92,6 +92,12 @@ type Security struct {
 	// MaxRequestBytes caps the body size accepted by /api/admin/* endpoints
 	// (defence-in-depth against memory-DoS). 0 = 1 MiB default.
 	MaxRequestBytes int64 `koanf:"max_request_bytes" yaml:"max_request_bytes,omitempty"`
+
+	// AuditReads, when true, logs even successful read-only operations
+	// (list / show / query / status). Default false — these are noisy
+	// and SOX/PCI/SOC2 care about mutations and denials, not lookups.
+	// Flip to true for highest-paranoia / breach-investigation mode.
+	AuditReads bool `koanf:"audit_reads" yaml:"audit_reads,omitempty"`
 }
 
 // AdminToken associates an opaque secret with a user identity + role set.

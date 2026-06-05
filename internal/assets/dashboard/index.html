@@ -7,11 +7,12 @@
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
   <header class="topbar">
-    <div class="brand">
+    <h1 class="brand">
       <span class="logo">apigw</span>
       <span class="muted" id="version">—</span>
-    </div>
+    </h1>
     <div class="stats">
       <span class="stat"><span class="muted">uptime</span> <span id="uptime">—</span></span>
       <span class="stat"><span class="muted">clients</span> <span id="clients">0</span></span>
@@ -22,57 +23,78 @@
     </div>
   </header>
 
-  <main>
-    <section class="panel apis-panel">
-      <h2>APIs <span class="count" id="apis-count">0</span></h2>
+  <main id="main-content">
+    <section class="panel apis-panel" data-panel="apis">
+      <h2>APIs <span class="count" id="apis-count">0</span><button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
       <ul id="apis-list" class="apis"></ul>
       <div class="empty muted" id="apis-empty">Sign in to view configured APIs.</div>
     </section>
 
-    <section class="panel deploys-panel">
-      <h2>Deployments</h2>
+    <section class="panel deploys-panel" data-panel="deploys">
+      <h2>Deployments<button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
       <div id="deploys" class="deploys"></div>
     </section>
 
-    <section class="panel tls-panel">
-      <h2>TLS</h2>
+    <section class="panel tls-panel" data-panel="tls">
+      <h2>TLS<button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
       <ul id="tls-list" class="tls"></ul>
       <div class="empty muted" id="tls-empty">No certificates registered.</div>
     </section>
 
-    <section class="panel audit-panel">
-      <h2>Audit log <span class="muted" id="audit-meta"></span></h2>
-      <ul id="audit-list" class="audit"></ul>
+    <section class="panel audit-panel" data-panel="audit">
+      <h2>Audit log <span class="muted" id="audit-meta"></span><button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
+      <div class="audit-filters" id="audit-filters">
+        <input class="filter-input" id="filter-actor"    placeholder="actor…">
+        <input class="filter-input" id="filter-action"   placeholder="action…">
+        <select class="filter-select" id="filter-result">
+          <option value="">all results</option>
+          <option value="ok">ok</option>
+          <option value="denied">denied</option>
+          <option value="failed">failed</option>
+          <option value="parked">parked</option>
+        </select>
+        <button class="filter-clear" id="filter-clear">clear</button>
+      </div>
+      <ul id="audit-list" class="audit" aria-live="polite" aria-relevant="additions"></ul>
       <div class="empty muted" id="audit-empty">Sign in to read the hash-chained audit log.</div>
     </section>
 
-    <section class="panel approvals-panel">
-      <h2>Pending approvals <span class="count" id="approvals-count">0</span></h2>
+    <section class="panel approvals-panel" data-panel="approvals">
+      <h2>Pending approvals <span class="count" id="approvals-count">0</span><button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
       <ul id="approvals-list" class="approvals"></ul>
       <div class="empty muted" id="approvals-empty">Nothing waiting on approval.</div>
     </section>
 
-    <section class="panel webhook-panel">
-      <h2>Webhook activity</h2>
+    <section class="panel webhook-panel" data-panel="webhook">
+      <h2>Webhook activity<button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
       <ul id="webhook-feed" class="feed"></ul>
       <div class="empty muted" id="webhook-empty">No webhook deliveries yet.</div>
     </section>
 
-    <section class="panel logs-panel">
+    <section class="panel logs-panel" data-panel="logs">
       <h2>
         Live logs
         <select id="log-deploy" class="select"></select>
+        <input class="filter-input log-search" id="log-search" placeholder="grep…" />
+        <label class="log-toggle"><input type="checkbox" id="log-ts" /> ts</label>
+        <label class="log-toggle"><input type="checkbox" id="log-hi" checked /> hi</label>
+        <button class="log-btn" id="log-download" title="Download buffer as .log" aria-label="Download log buffer">⤓</button>
+        <button class="log-btn" id="log-clear" title="Clear buffer" aria-label="Clear log buffer">⌫</button>
         <span class="muted" id="log-drop"></span>
+        <button class="panel-max" title="Expand" aria-label="Expand">⤢</button>
       </h2>
       <pre id="logs" class="logs"></pre>
     </section>
   </main>
 
+  <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
   <div class="modal-bg" id="token-modal" hidden>
-    <div class="modal">
-      <h3>Sign in</h3>
+    <div class="modal" role="dialog" aria-labelledby="token-modal-title" aria-modal="true">
+      <h3 id="token-modal-title">Sign in</h3>
       <p class="muted">Paste your <code>Authorization: Bearer &lt;token&gt;</code> value from <code>config.yaml</code>. The token stays in <code>localStorage</code> — clear it any time by clicking <strong>Sign out</strong>.</p>
-      <input type="password" id="token-input" placeholder="e.g. my-super-secret-32-byte-token" autocomplete="off">
+      <label for="token-input" class="visually-hidden">Bearer token</label>
+      <input type="password" id="token-input" placeholder="e.g. my-super-secret-32-byte-token" autocomplete="off" aria-label="Bearer token">
       <div class="modal-actions">
         <button class="btn-secondary" id="token-cancel">Cancel</button>
         <button class="btn-primary" id="token-save">Sign in</button>

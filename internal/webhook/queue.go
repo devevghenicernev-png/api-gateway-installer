@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"go.etcd.io/bbolt"
+
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 )
 
 // QueueDBPath is where bbolt stores apigw's job queue. Per-host, owned by
@@ -56,11 +58,13 @@ type Queue struct {
 	db *bbolt.DB
 }
 
-// OpenQueue opens (or creates) the queue at QueueDBPath. Idempotent;
-// returns an error if the file is corrupted or another process holds the
-// bbolt lock.
+// OpenQueue opens (or creates) the queue at the path returned by
+// paths.QueueDB(), which honours APIGW_STATE_DIR / XDG (so dev installs
+// on macOS land somewhere writable) and falls back to QueueDBPath on
+// Linux production. Idempotent; returns an error if the file is
+// corrupted or another process holds the bbolt lock.
 func OpenQueue() (*Queue, error) {
-	return OpenQueueAt(QueueDBPath)
+	return OpenQueueAt(paths.QueueDB())
 }
 
 // OpenQueueAt is the explicit-path variant for tests.
@@ -98,6 +102,17 @@ func (q *Queue) Close() error {
 
 // Enqueue persists a new Job, assigning it a monotonic key. Returns the key
 // so the caller can correlate with Stats.
+//
+// Dedup: if an UN-claimed pending Job already exists for the same
+// (Deploy, SHA, Branch) tuple, we return its key instead of inserting a
+// duplicate. This prevents the dashboard redeploy ↻ button from spamming
+// the queue with N identical builds when an impatient operator clicks
+// it repeatedly, and it coalesces GitHub webhook retries that arrive
+// after the original delivery has been replay-cache evicted.
+//
+// Jobs that have already been claimed (a worker holds the lease) are
+// NOT considered duplicates — we want the next push to be processed
+// AFTER the current build finishes, not silently dropped.
 func (q *Queue) Enqueue(j Job) (string, error) {
 	if j.Deploy == "" {
 		return "", errors.New("enqueue: deploy is required")
@@ -109,6 +124,36 @@ func (q *Queue) Enqueue(j Job) (string, error) {
 	err := q.db.Update(func(tx *bbolt.Tx) error {
 		meta := tx.Bucket(bucketMeta)
 		jobs := tx.Bucket(bucketJobs)
+
+		// Dedup scan — small bucket today, full scan is fine. If a deploy
+		// gets thousands of pending jobs the dedup logic is the least of
+		// the operator's problems. We skip jobs that are currently leased
+		// to a worker (claims live in bucketLease), so a NEW push lands
+		// after the in-flight build completes instead of being silently
+		// merged into it.
+		lease := tx.Bucket(bucketLease)
+		now := time.Now().UTC()
+		c := jobs.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var existing Job
+			if err := json.Unmarshal(v, &existing); err != nil {
+				continue
+			}
+			if existing.Deploy != j.Deploy {
+				continue
+			}
+			if existing.SHA != j.SHA || existing.Branch != j.Branch {
+				continue
+			}
+			if leaseRaw := lease.Get(k); leaseRaw != nil {
+				if expiry := decodeUnixNanos(leaseRaw); !expiry.IsZero() && now.Before(expiry) {
+					continue
+				}
+			}
+			// Pending dup found — coalesce.
+			keyStr = existing.Key
+			return nil
+		}
 
 		// Allocate next monotonic ID.
 		seq, _ := jobs.NextSequence()
@@ -193,20 +238,25 @@ func (q *Queue) Ack(key string) error {
 
 // Fail records an error and either re-queues with backoff or dead-letters.
 // Backoff: 30s, 2m, 10m, 30m, 2h. After 5 failures → bucketDead.
-func (q *Queue) Fail(key string, errMsg string) error {
-	k, err := keyBytes(key)
-	if err != nil {
-		return err
+//
+// Returns deadLettered=true when this Fail moved the job to the
+// permanent dead-letter bucket — callers (worker) wire this to a
+// dedicated PagerDuty/Slack alert so on-call sees the permanent
+// failure rather than a series of transient warnings.
+func (q *Queue) Fail(key string, errMsg string) (deadLettered bool, err error) {
+	k, kerr := keyBytes(key)
+	if kerr != nil {
+		return false, kerr
 	}
-	return q.db.Update(func(tx *bbolt.Tx) error {
+	err = q.db.Update(func(tx *bbolt.Tx) error {
 		jobs := tx.Bucket(bucketJobs)
 		body := jobs.Get(k)
 		if body == nil {
 			return nil // already acked or gone
 		}
 		var j Job
-		if err := json.Unmarshal(body, &j); err != nil {
-			return err
+		if uerr := json.Unmarshal(body, &j); uerr != nil {
+			return uerr
 		}
 		j.Retries++
 		j.LastError = errMsg
@@ -216,20 +266,25 @@ func (q *Queue) Fail(key string, errMsg string) error {
 			// Dead-letter.
 			dead := tx.Bucket(bucketDead)
 			updated, _ := json.Marshal(j)
-			if err := dead.Put(k, updated); err != nil {
-				return err
+			if perr := dead.Put(k, updated); perr != nil {
+				return perr
 			}
 			_ = tx.Bucket(bucketLease).Delete(k)
-			return jobs.Delete(k)
+			if derr := jobs.Delete(k); derr != nil {
+				return derr
+			}
+			deadLettered = true
+			return nil
 		}
 		j.NotBefore = time.Now().UTC().Add(backoff)
 		updated, _ := json.Marshal(j)
-		if err := jobs.Put(k, updated); err != nil {
-			return err
+		if perr := jobs.Put(k, updated); perr != nil {
+			return perr
 		}
 		// Release the lease so Peek can see it again after NotBefore.
 		return tx.Bucket(bucketLease).Delete(k)
 	})
+	return deadLettered, err
 }
 
 // SweepStaleLeases removes lease entries whose expiry has passed. Run

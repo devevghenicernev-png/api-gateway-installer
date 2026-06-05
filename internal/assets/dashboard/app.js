@@ -46,7 +46,53 @@
   const deployByName = new Map();
 
   const TOKEN_KEY = "apigw.admin_token";
-  let token = localStorage.getItem(TOKEN_KEY) || "";
+  // localStorage can throw in Safari Private Browsing or when the user
+  // has disabled site data. We fall back to a session-only in-memory
+  // token rather than crashing; the operator will need to re-sign-in
+  // on full reload but at least the dashboard works.
+  function safeLocalGet(key) {
+    try { return localStorage.getItem(key) || ""; } catch { return ""; }
+  }
+  function safeLocalSet(key, val) {
+    try { localStorage.setItem(key, val); } catch { /* ignore */ }
+  }
+  function safeLocalDel(key) {
+    try { localStorage.removeItem(key); } catch { /* ignore */ }
+  }
+  let token = safeLocalGet(TOKEN_KEY);
+
+  // ---- toast notifications ----
+  // Replaces native alert() — non-blocking, dismissible, screen-reader
+  // friendly via the aria-live region. Categories: "info" (default),
+  // "ok" (success), "warn" (degraded), "err" (failed).
+  const elToastStack = $("toast-stack");
+  function toast(message, kind, opts) {
+    const k = kind || "info";
+    const timeout = (opts && opts.timeout) || (k === "err" ? 8000 : 4500);
+    const el = document.createElement("div");
+    el.className = "toast toast-" + k;
+    el.setAttribute("role", k === "err" ? "alert" : "status");
+    el.textContent = message;
+    const close = document.createElement("button");
+    close.className = "toast-close";
+    close.setAttribute("aria-label", "Dismiss notification");
+    close.textContent = "×";
+    close.addEventListener("click", () => dismiss());
+    el.appendChild(close);
+    elToastStack.appendChild(el);
+    const t = setTimeout(dismiss, timeout);
+    function dismiss() {
+      clearTimeout(t);
+      el.classList.add("leaving");
+      setTimeout(() => el.remove(), 200);
+    }
+  }
+
+  // Audit filter state — kept in JS so the user's last query survives the
+  // 10s refresh. We render-time-filter; backend always returns the full
+  // (post-rbac) slice it's authorised to expose.
+  let lastAuditEntries = [];
+  const auditFilter = { actor: "", action: "", result: "" };
 
   // ---- token / sign-in ----
   function updateTokenChip() {
@@ -55,10 +101,11 @@
   }
   updateTokenChip();
 
+  let modalOpenedFrom = null;
   elTokenBtn.addEventListener("click", () => {
     if (token) {
       token = "";
-      localStorage.removeItem(TOKEN_KEY);
+      safeLocalDel(TOKEN_KEY);
       updateTokenChip();
       // Clear protected panels.
       renderApis(null);
@@ -67,23 +114,99 @@
       return;
     }
     elTokenInput.value = "";
+    modalOpenedFrom = document.activeElement;
     elTokenModal.hidden = false;
     setTimeout(() => elTokenInput.focus(), 50);
   });
 
-  $("token-cancel").addEventListener("click", () => { elTokenModal.hidden = true; });
+  // Modal focus trap + restore: keep Tab cycling between the two
+  // buttons + input, and restore focus to the caller on close so
+  // keyboard navigation doesn't dump the user back at the body.
+  function closeModal() {
+    elTokenModal.hidden = true;
+    if (modalOpenedFrom && typeof modalOpenedFrom.focus === "function") {
+      modalOpenedFrom.focus();
+    }
+    modalOpenedFrom = null;
+  }
+  elTokenModal.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      const focusables = elTokenModal.querySelectorAll("input, button");
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  });
+  // Background click dismisses (common pattern, less surprising than
+  // "click anywhere does nothing").
+  elTokenModal.addEventListener("click", (e) => {
+    if (e.target === elTokenModal) closeModal();
+  });
+
+  $("token-cancel").addEventListener("click", () => { closeModal(); });
   $("token-save").addEventListener("click", () => {
     const v = elTokenInput.value.trim();
     if (!v) return;
     token = v;
-    localStorage.setItem(TOKEN_KEY, token);
-    elTokenModal.hidden = true;
+    safeLocalSet(TOKEN_KEY, token);
+    closeModal();
     updateTokenChip();
     refreshAdmin();
   });
   elTokenInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") $("token-save").click();
     if (e.key === "Escape") $("token-cancel").click();
+  });
+
+  // ---- panel maximize ----
+  // Click ⤢ on any panel header → that panel takes over the whole grid;
+  // click again or press Esc → restore the 3×3 layout. State is kept on
+  // <main> via a data-attribute so CSS can do all the visual work.
+  const elMain = document.querySelector("main");
+  document.querySelectorAll(".panel-max").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const panel = btn.closest(".panel");
+      const id = panel.dataset.panel;
+      if (elMain.dataset.maxed === id) {
+        elMain.removeAttribute("data-maxed");
+      } else {
+        elMain.dataset.maxed = id;
+      }
+    });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && elMain.dataset.maxed) {
+      elMain.removeAttribute("data-maxed");
+    }
+  });
+
+  // ---- audit filters ----
+  const elFilterActor  = $("filter-actor");
+  const elFilterAction = $("filter-action");
+  const elFilterResult = $("filter-result");
+  const elFilterClear  = $("filter-clear");
+  function applyAuditFilters() {
+    auditFilter.actor  = elFilterActor.value.trim().toLowerCase();
+    auditFilter.action = elFilterAction.value.trim().toLowerCase();
+    auditFilter.result = elFilterResult.value;
+    renderAudit(lastAuditEntries);
+  }
+  elFilterActor.addEventListener("input",  applyAuditFilters);
+  elFilterAction.addEventListener("input", applyAuditFilters);
+  elFilterResult.addEventListener("change", applyAuditFilters);
+  elFilterClear.addEventListener("click", () => {
+    elFilterActor.value = "";
+    elFilterAction.value = "";
+    elFilterResult.value = "";
+    applyAuditFilters();
   });
 
   function authHeaders() {
@@ -101,7 +224,10 @@
   }
 
   function renderSnapshot(s) {
-    elVer.textContent = `v${s.version}` + (s.commit && s.commit !== "none" ? ` (${s.commit.slice(0, 7)})` : "");
+    // Avoid double-v: goreleaser tags v0.1.0; build-time -X may or may
+    // not include the leading 'v'. Normalise so we never render 'vv'.
+    const ver = String(s.version || "").replace(/^v+/, "");
+    elVer.textContent = `v${ver}` + (s.commit && s.commit !== "none" ? ` (${s.commit.slice(0, 7)})` : "");
     elUptime.textContent = fmtDuration(s.uptime_sec);
     elClients.textContent = s.sse_clients;
 
@@ -141,8 +267,142 @@
       <span class="deploy-name">${esc(d.name)}</span>
       <span class="deploy-meta">${esc(d.runtime || "—")} · ${esc(d.path || "—")} · ${shortSHA(d.last_sha)}</span>
       <span class="badge ${badgeCls}" data-role="badge">${esc(d.last_status || "idle")}</span>
+      <button class="card-btn" data-role="redeploy" title="Redeploy ${esc(d.name)}" aria-label="Redeploy ${esc(d.name)}">↻</button>
+      <button class="card-btn" data-role="rollback" title="Rollback ${esc(d.name)} to previous release" aria-label="Rollback ${esc(d.name)}">⤺</button>
+      <button class="card-btn" data-role="rotate" title="Rotate webhook secret for ${esc(d.name)}" aria-label="Rotate webhook secret">🔑</button>
+      <button class="card-btn danger" data-role="delete" title="Delete ${esc(d.name)}" aria-label="Delete ${esc(d.name)}">🗑</button>
     `;
+    el.querySelector('[data-role="redeploy"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      redeploy(d.name, el);
+    });
+    el.querySelector('[data-role="rollback"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      rollbackDeploy(d.name, el);
+    });
+    el.querySelector('[data-role="rotate"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      rotateWebhook(d.name, el);
+    });
+    el.querySelector('[data-role="delete"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteResource("deploy", d.name, el);
+    });
     return el;
+  }
+
+  // rollbackDeploy posts /api/admin/deploy-rollback/<name>. Confirmation
+  // dialog because it's a destructive-feeling op (though it just flips
+  // a symlink). The Dangerous=true on the server gates this behind
+  // approvals when threshold > 0.
+  async function rollbackDeploy(name, card) {
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    if (!confirm(`Roll back ${name} to the previous release?`)) return;
+    const btn = card.querySelector('[data-role="rollback"]');
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const res = await fetch(`/api/admin/deploy-rollback/${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { ...authHeaders(), "X-CSRF-Token": csrf },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 202) {
+        toast(`Rolled back ${name}.`, "ok");
+      } else if (res.status === 202 || res.status === 200) {
+        // 202 also signals approval-parked.
+        toast(body.error ? body.error : `Queued rollback for ${name}.`, "info", { timeout: 9000 });
+      } else {
+        toast(`Rollback refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+      }
+      refreshAdmin();
+    } catch (e) {
+      toast("Rollback failed: " + e.message, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "⤺";
+    }
+  }
+
+  // rotateWebhook posts /api/admin/webhook-rotate/<name>. The new
+  // secret is shown ONCE — operator must paste it into GitHub before
+  // dismissing the toast. We render the toast at extended timeout +
+  // pin it so an accidental refresh doesn't wipe it.
+  async function rotateWebhook(name, card) {
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    if (!confirm(`Rotate the webhook secret for ${name}?\n\nThe old secret stops working immediately. Be ready to update GitHub.`)) return;
+    const btn = card.querySelector('[data-role="rotate"]');
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const res = await fetch(`/api/admin/webhook-rotate/${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { ...authHeaders(), "X-CSRF-Token": csrf },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 200 && body.new_secret) {
+        // Long-timeout, copyable. The secret won't be shown again.
+        toast(`New webhook secret for ${name} — copy now: ${body.new_secret}`, "warn", { timeout: 60000 });
+      } else if (res.status === 202) {
+        toast(body.error || "Change parked for approvals.", "info", { timeout: 9000 });
+      } else {
+        toast(`Rotate refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+      }
+    } catch (e) {
+      toast("Rotate failed: " + e.message, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🔑";
+    }
+  }
+
+  // redeploy posts to /api/admin/deploy-run/<name>. Success → switch the
+  // log selector to that deploy so the operator sees the build stream
+  // immediately. The badge will flip to "queued" → "building" → "ok|failed"
+  // through the SSE `state` events the worker emits.
+  async function redeploy(name, card) {
+    if (!token) {
+      alert("Sign in first.");
+      return;
+    }
+    const btn = card.querySelector('[data-role="redeploy"]');
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const res = await fetch(`/api/admin/deploy-run/${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { ...authHeaders(), "X-CSRF-Token": csrf },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast(`Redeploy refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+        return;
+      }
+      // Switch log panel to this deploy so the build stream is visible.
+      if (elLogSel.querySelector(`option[value="${cssEsc(name)}"]`)) {
+        elLogSel.value = name;
+        currentDeploy = name;
+        elLogs.innerHTML = "";
+        pinnedToBottom = true;
+        loadHistoricalLogs(name);
+      }
+      // Flip badge to queued immediately for snappy feedback; the real
+      // state will follow via SSE.
+      const badge = card.querySelector('[data-role="badge"]');
+      badge.textContent = "queued";
+      badge.className = "badge building";
+    } catch (e) {
+      toast("Redeploy failed: " + e.message, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "↻";
+    }
   }
 
   function renderTLS(c) {
@@ -156,8 +416,43 @@
       <span class="domain">${esc(c.domain)}</span>
       <span class="muted">${esc(c.strategy || "—")}</span>
       <span class="days ${cls}">${days < 0 ? `expired ${-days}d ago` : `${days}d left`}</span>
+      <button class="card-btn" data-role="renew" title="Renew ${esc(c.domain)}" aria-label="Renew certificate for ${esc(c.domain)}">↻</button>
     `;
+    li.querySelector('[data-role="renew"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      renewCert(c.domain, li);
+    });
     return li;
+  }
+
+  // renewCert posts to /api/admin/tls-renew/<domain>. The renewal runs
+  // asynchronously server-side; we show a toast immediately and let the
+  // operator watch the panel for the new expiry date on the next status
+  // refresh (60s, or sooner if they click again).
+  async function renewCert(domain, rowEl) {
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    const btn = rowEl.querySelector('[data-role="renew"]');
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const res = await fetch(`/api/admin/tls-renew/${encodeURIComponent(domain)}`, {
+        method: "POST",
+        headers: { ...authHeaders(), "X-CSRF-Token": csrf },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 202) {
+        toast(`Renewal queued for ${domain}. Check back in ~30s.`, "ok");
+      } else {
+        toast(`Renew refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+      }
+    } catch (e) {
+      toast("Renew failed: " + e.message, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "↻";
+    }
   }
 
   function badgeClass(s) {
@@ -193,8 +488,9 @@
       if (res.status === 401 || res.status === 403) {
         // Token rejected — wipe so user can re-enter.
         console.warn("admin endpoint rejected token", url, res.status);
+        if (token) toast("Your token was rejected — please sign in again.", "warn");
         token = "";
-        localStorage.removeItem(TOKEN_KEY);
+        safeLocalDel(TOKEN_KEY);
         updateTokenChip();
         return null;
       }
@@ -223,32 +519,134 @@
     elApisEmpty.hidden = true;
     for (const a of apis) {
       const li = document.createElement("li");
+      li.dataset.name = a.Name;
+      const enabled = !!a.Enabled;
       li.innerHTML = `
         <span class="api-name">${esc(a.Name)}</span>
         <span class="muted api-meta">${esc(a.Path || "/api/" + a.Name)} → :${a.Port}</span>
-        <span class="badge ${a.Enabled ? "ok" : "idle"}">${a.Enabled ? "enabled" : "disabled"}</span>
+        <span class="badge ${enabled ? "ok" : "idle"}">${enabled ? "enabled" : "disabled"}</span>
+        <button class="card-btn" data-role="toggle" title="${enabled ? "Disable" : "Enable"} ${esc(a.Name)}" aria-label="${enabled ? "Disable" : "Enable"} ${esc(a.Name)}">${enabled ? "⏸" : "▶"}</button>
+        <button class="card-btn danger" data-role="delete" title="Delete ${esc(a.Name)}" aria-label="Delete ${esc(a.Name)}">🗑</button>
       `;
+      li.querySelector('[data-role="toggle"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleAPI(a, li);
+      });
+      li.querySelector('[data-role="delete"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteResource("api", a.Name, li);
+      });
       elApis.appendChild(li);
+    }
+  }
+
+  // toggleAPI flips api.Enabled by PUT-ing the whole resource back —
+  // the admin PUT handler treats it as a replace (less surface than a
+  // dedicated /enable endpoint). The shape we send mirrors what we got.
+  async function toggleAPI(api, rowEl) {
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    const btn = rowEl.querySelector('[data-role="toggle"]');
+    btn.disabled = true;
+    try {
+      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const next = { ...api, Enabled: !api.Enabled };
+      const res = await fetch(`/api/admin/apis/${encodeURIComponent(api.Name)}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast(`Toggle refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+        return;
+      }
+      toast(`${api.Name} ${next.Enabled ? "enabled" : "disabled"}.`, "ok");
+      refreshAdmin();
+    } catch (e) {
+      toast("Toggle failed: " + e.message, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // deleteResource is the shared DELETE path for APIs and deploys. It
+  // confirms with the user (destructive), POSTs DELETE with CSRF, and
+  // refreshes the relevant panel on success. On 202 (approvals parked)
+  // it surfaces the change ID so reviewers can find it.
+  async function deleteResource(kind, name, rowEl) {
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    const ok = confirm(`Delete ${kind} "${name}"?\n\nThis will remove its nginx config; if approvals are required, the change will be parked instead of applied.`);
+    if (!ok) return;
+    const btn = rowEl.querySelector('[data-role="delete"]');
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const path = kind === "api" ? "/api/admin/apis/" : "/api/admin/deploys/";
+      const res = await fetch(path + encodeURIComponent(name), {
+        method: "DELETE",
+        headers: { ...authHeaders(), "X-CSRF-Token": csrf },
+      });
+      if (res.status === 204) {
+        // Real delete — animate out + refresh.
+        rowEl.classList.add("removing");
+        setTimeout(refreshAdmin, 200);
+        return;
+      }
+      if (res.status === 202) {
+        const body = await res.json().catch(() => ({}));
+        toast(`Change parked for approvals — id: ${body.id || "(see /api/admin/approvals)"}`, "info", { timeout: 9000 });
+        refreshAdmin();
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      toast(`Delete refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+    } catch (e) {
+      toast("Delete failed: " + e.message, "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🗑";
     }
   }
 
   function renderAudit(entries) {
     elAudit.innerHTML = "";
     if (entries === null) {
+      lastAuditEntries = [];
       elAuditEmpty.textContent = "Sign in to read the hash-chained audit log.";
       elAuditEmpty.hidden = false;
       elAuditMeta.textContent = "";
       return;
     }
-    elAuditMeta.textContent = `${entries.length} ${entries.length === 1 ? "entry" : "entries"}`;
-    if (entries.length === 0) {
+    lastAuditEntries = entries;
+    const filtered = entries.filter((e) => {
+      if (auditFilter.actor && !(e.actor || "").toLowerCase().includes(auditFilter.actor)) return false;
+      if (auditFilter.action && !(e.action || "").toLowerCase().includes(auditFilter.action)) return false;
+      if (auditFilter.result && e.result !== auditFilter.result) return false;
+      return true;
+    });
+    const total = entries.length;
+    const shown = filtered.length;
+    const isFiltered = shown !== total;
+    elAuditMeta.textContent = isFiltered
+      ? `${shown} of ${total} ${total === 1 ? "entry" : "entries"}`
+      : `${total} ${total === 1 ? "entry" : "entries"}`;
+    if (total === 0) {
       elAuditEmpty.textContent = "Audit log is empty.";
       elAuditEmpty.hidden = false;
       return;
     }
+    if (shown === 0) {
+      elAuditEmpty.textContent = "No entries match the current filter.";
+      elAuditEmpty.hidden = false;
+      return;
+    }
     elAuditEmpty.hidden = true;
-    // newest first
-    const ordered = entries.slice().reverse().slice(0, 80);
+    // newest first, cap at 200 in DOM (full set lives in lastAuditEntries
+    // and re-applied on filter change).
+    const ordered = filtered.slice().reverse().slice(0, 200);
     for (const e of ordered) {
       const li = document.createElement("li");
       li.className = "audit-row " + resultClass(e.result);
@@ -259,8 +657,47 @@
         <span class="audit-resource muted">${esc(e.resource || "")}</span>
         <span class="badge ${resultClass(e.result)}">${esc(e.result || "")}</span>
       `;
+      // Click to expand detail row: shows reason, before/after, hash chain.
+      li.addEventListener("click", (ev) => {
+        if (ev.target.closest(".badge")) return;
+        toggleAuditDetail(li, e);
+      });
       elAudit.appendChild(li);
     }
+  }
+
+  // toggleAuditDetail injects/removes a sibling <li> with the full Entry
+  // payload (reason, before/after JSON, hash chain). Reading audit details
+  // is itself an audited action when AuditReads is on, so we keep it click-
+  // gated rather than always-rendered.
+  function toggleAuditDetail(li, entry) {
+    const next = li.nextElementSibling;
+    if (next && next.classList.contains("audit-detail")) {
+      next.remove();
+      li.classList.remove("expanded");
+      return;
+    }
+    li.classList.add("expanded");
+    const det = document.createElement("li");
+    det.className = "audit-detail";
+    const beforeStr = entry.before ? JSON.stringify(entry.before, null, 2) : null;
+    const afterStr  = entry.after  ? JSON.stringify(entry.after,  null, 2) : null;
+    det.innerHTML = `
+      <div class="audit-detail-grid">
+        <div><span class="muted">id</span><code>${esc(String(entry.id))}</code></div>
+        <div><span class="muted">timestamp</span><code>${esc(entry.timestamp || "")}</code></div>
+        <div><span class="muted">actor</span><code>${esc(entry.actor || "")}</code></div>
+        <div><span class="muted">action</span><code>${esc(entry.action || "")}</code></div>
+        <div><span class="muted">resource</span><code>${esc(entry.resource || "—")}</code></div>
+        <div><span class="muted">result</span><code>${esc(entry.result || "")}</code></div>
+        ${entry.reason ? `<div class="span2"><span class="muted">reason</span><code>${esc(entry.reason)}</code></div>` : ""}
+        <div class="span2"><span class="muted">prev_hash</span><code class="mono-small">${esc(entry.prev_hash || "(genesis)")}</code></div>
+        <div class="span2"><span class="muted">hash</span><code class="mono-small">${esc(entry.hash || "")}</code></div>
+        ${beforeStr ? `<div class="span2"><span class="muted">before</span><pre class="json">${esc(beforeStr)}</pre></div>` : ""}
+        ${afterStr  ? `<div class="span2"><span class="muted">after</span><pre class="json">${esc(afterStr)}</pre></div>` : ""}
+      </div>
+    `;
+    li.insertAdjacentElement("afterend", det);
   }
 
   function renderApprovals(items) {
@@ -281,6 +718,7 @@
     for (const a of items) {
       const li = document.createElement("li");
       li.className = "approval-row";
+      li.dataset.id = a.id;
       const have = (a.approvals || []).length;
       li.innerHTML = `
         <div class="approval-head">
@@ -291,8 +729,63 @@
           submitted by ${esc(a.submitted_by)} · ${fmtTsISO(a.submitted_at)} · expires ${fmtTsISO(a.expires_at)}
         </div>
         <div class="approval-id muted">id: <code>${esc(a.id)}</code></div>
+        <div class="approval-actions">
+          <button class="btn-approve" data-role="approve">✓ Approve</button>
+          <button class="btn-reject"  data-role="reject">✗ Reject</button>
+        </div>
       `;
+      li.querySelector('[data-role="approve"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        approvalAct("approve", a.id, li, a);
+      });
+      li.querySelector('[data-role="reject"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        approvalAct("reject", a.id, li, a);
+      });
       elApprovals.appendChild(li);
+    }
+  }
+
+  // approvalAct posts /api/admin/approvals/<id>/{approve,reject}. The
+  // submitter cannot self-approve — that comes back as 400 from the
+  // server with a clear message which we surface as-is.
+  async function approvalAct(verb, id, rowEl, cr) {
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    const prompt_msg = verb === "approve"
+      ? `Approve "${cr.action}" on ${cr.resource}?\n\nOptional comment:`
+      : `Reject "${cr.action}" on ${cr.resource}?\n\nReason:`;
+    const note = prompt(prompt_msg, "");
+    if (note === null) return;
+    const btnA = rowEl.querySelector('[data-role="approve"]');
+    const btnR = rowEl.querySelector('[data-role="reject"]');
+    btnA.disabled = btnR.disabled = true;
+    try {
+      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const body = verb === "approve" ? { comment: note } : { reason: note };
+      const res = await fetch(`/api/admin/approvals/${encodeURIComponent(id)}/${verb}`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast(`${verb} refused (HTTP ${res.status}): ${j.error || ""}`, "err");
+        return;
+      }
+      const updated = await res.json();
+      if (updated.status === "applied") {
+        toast(`Approved and applied: ${updated.action} on ${updated.resource}.`, "ok");
+      } else if (updated.status === "approved") {
+        toast(`Approved (${(updated.approvals || []).length}/${updated.threshold}). Waiting for more reviewers.`, "ok");
+      } else if (updated.status === "rejected") {
+        toast(`Rejected.`, "info");
+      }
+      refreshAdmin();
+    } catch (e) {
+      toast(`${verb} failed: ${e.message}`, "err");
+    } finally {
+      btnA.disabled = btnR.disabled = false;
     }
   }
 
@@ -362,17 +855,69 @@
   }
 
   // ---- log batching ----
-  function enqueueLine(line, isErr) {
-    logQueue.push({ line, isErr });
+  // We classify each line on arrival (err / warn / info), store the
+  // classification on the DOM node, then apply visual style and current
+  // search filter on every flush. Keeps the hot path tight.
+  const reError = /\b(?:ERROR|ERR|FATAL|FAIL(?:ED)?|panic(?::|!)?|Exception|Traceback)\b/i;
+  const reWarn  = /\b(?:WARN(?:ING)?|deprecat)/i;
+  function classifyLine(s) {
+    if (reError.test(s)) return "err";
+    if (reWarn.test(s)) return "warn";
+    return "";
+  }
+
+  const elLogSearch = $("log-search");
+  const elLogTs     = $("log-ts");
+  const elLogHi     = $("log-hi");
+  let logSearch = "";
+  function applyLogSearch() {
+    logSearch = elLogSearch.value;
+    // Re-filter existing lines without rewriting them.
+    const q = logSearch.toLowerCase();
+    for (const child of elLogs.children) {
+      const txt = child.dataset.raw || child.textContent;
+      child.hidden = q !== "" && !txt.toLowerCase().includes(q);
+    }
+  }
+  elLogSearch.addEventListener("input", applyLogSearch);
+  elLogTs.addEventListener("change", () => elLogs.classList.toggle("show-ts", elLogTs.checked));
+  elLogHi.addEventListener("change", () => elLogs.classList.toggle("no-highlight", !elLogHi.checked));
+  // initialise classes
+  if (!elLogHi.checked) elLogs.classList.add("no-highlight");
+
+  $("log-clear").addEventListener("click", () => { elLogs.innerHTML = ""; });
+  $("log-download").addEventListener("click", () => {
+    const lines = [];
+    for (const c of elLogs.children) {
+      if (c.hidden) continue;
+      lines.push(c.dataset.raw || c.textContent);
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${currentDeploy || "logs"}-${new Date().toISOString()}.log`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  function enqueueLine(line, isErrStream) {
+    logQueue.push({ line, isErrStream });
     if (logQueue.length === 1) requestAnimationFrame(flushLogs);
   }
 
   function flushLogs() {
     const frag = document.createDocumentFragment();
-    for (const { line, isErr } of logQueue) {
+    const now = new Date();
+    const tsStr = now.toLocaleTimeString();
+    for (const { line, isErrStream } of logQueue) {
       const span = document.createElement("span");
-      span.className = isErr ? "line err" : "line";
-      span.textContent = line + "\n";
+      const cls = isErrStream ? "err" : classifyLine(line);
+      span.className = "line" + (cls ? " " + cls : "");
+      span.dataset.raw = line;
+      span.innerHTML = `<span class="ts">${esc(tsStr)} </span>${esc(line)}\n`;
+      if (logSearch && !line.toLowerCase().includes(logSearch.toLowerCase())) {
+        span.hidden = true;
+      }
       frag.appendChild(span);
     }
     elLogs.appendChild(frag);
@@ -433,7 +978,16 @@
     if (!iso) return "—";
     const d = new Date(iso);
     if (isNaN(d.getTime())) return iso;
-    return d.toLocaleTimeString();
+    // Audit entries are security-relevant: showing only time loses
+    // cross-day context. If the event is today, render HH:MM:SS for
+    // density; otherwise prepend the date so log review across days
+    // doesn't conflate "2am yesterday" with "2am today".
+    const now = new Date();
+    const sameDay = d.getFullYear() === now.getFullYear() &&
+                    d.getMonth() === now.getMonth() &&
+                    d.getDate() === now.getDate();
+    return sameDay ? d.toLocaleTimeString()
+                   : d.toLocaleDateString() + " " + d.toLocaleTimeString();
   }
   function fmtDuration(sec) {
     sec = Math.max(0, Math.floor(sec));

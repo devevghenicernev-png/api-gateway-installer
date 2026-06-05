@@ -80,27 +80,22 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 		}
 	}
 
-	// Webhook + worker share the same hub for live activity feed.
+	// Always open the queue + worker — the dashboard's manual-redeploy
+	// endpoint enqueues into the same queue webhooks use. --no-webhook
+	// only skips the HTTP receiver (no public webhook endpoint).
 	var (
 		whSrv  *webhook.Server
 		worker *webhook.Worker
 		q      *webhook.Queue
 	)
-	if !o.skipWebhook {
+	{
 		var err error
 		q, err = webhook.OpenQueue()
 		if err != nil {
 			return fmt.Errorf("open queue: %w", err)
 		}
 		defer q.Close()
-
-		webhookAddr, err := webhook.ResolveListenAddr(o.webhookAddr)
-		if err != nil {
-			return err
-		}
-		whSrv = webhook.New(webhookAddr, makeWebhookHandler(q, logger), logger)
-		whSrv.Publish = publish
-		whSrv.Metrics = prom
+		dash.Queue = q
 
 		worker = &webhook.Worker{
 			Queue:        q,
@@ -109,10 +104,23 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 			Publish:      publish,
 			ApplyMetrics: prom,
 		}
-		// Bridge worker → alerts dispatcher (lazy: dash.Sec set above).
 		if dash.Sec != nil {
 			worker.AlertHook = dash.Sec.FireAlert
+			if dash.Sec.Approvals != nil {
+				worker.PruneApprovals = func() (int, error) {
+					return dash.Sec.Approvals.PruneExpired(30 * 24 * time.Hour)
+				}
+			}
 		}
+	}
+	if !o.skipWebhook {
+		webhookAddr, err := webhook.ResolveListenAddr(o.webhookAddr)
+		if err != nil {
+			return err
+		}
+		whSrv = webhook.New(webhookAddr, makeWebhookHandler(q, logger), logger)
+		whSrv.Publish = publish
+		whSrv.Metrics = prom
 	}
 
 	logger.Info("apigw dashboard starting",
@@ -128,12 +136,15 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 
 	errCh := make(chan error, 4)
 	go func() { errCh <- dash.ListenAndServe(ctx) }()
+	// Worker always runs — it drains both webhook deliveries and the
+	// dashboard's manual-redeploy enqueues.
+	go func() { errCh <- worker.Run(ctx) }()
 	if whSrv != nil {
 		go func() { errCh <- whSrv.ListenAndServe(ctx) }()
-		go func() { errCh <- worker.Run(ctx) }()
 	}
 	go runTLSTicker(ctx, publish, logger, dash.Sec)
 	go runStatusTicker(ctx, publish, logger)
+	go runSecurityReloader(ctx, dash.Sec, logger)
 	if dash.Sec != nil {
 		go runGitOpsReconciler(ctx, logger, dash.Sec)
 	}

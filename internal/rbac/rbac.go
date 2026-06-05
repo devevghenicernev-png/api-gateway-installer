@@ -92,6 +92,10 @@ func (e *Engine) LoadConfig(extraRoles []Role, assignments []Assignment) {
 		e.roles[r.Name] = r
 	}
 
+	// Dedup as we go: a config file with two `Assignment{User: "alice"}`
+	// blocks (intentional or copy-paste) would otherwise double-count
+	// roles. Append-then-dedup is cheaper than repeated linear scans for
+	// our small N (≤ a few hundred users per install).
 	e.users = map[string][]string{}
 	e.groups = map[string][]string{}
 	for _, a := range assignments {
@@ -102,6 +106,26 @@ func (e *Engine) LoadConfig(extraRoles []Role, assignments []Assignment) {
 			e.groups[a.Group] = append(e.groups[a.Group], a.Roles...)
 		}
 	}
+	for k, v := range e.users {
+		e.users[k] = dedupStrings(v)
+	}
+	for k, v := range e.groups {
+		e.groups[k] = dedupStrings(v)
+	}
+}
+
+// dedupStrings preserves order and drops duplicates.
+func dedupStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // Identity is what Check() receives. User is the primary key; Groups are

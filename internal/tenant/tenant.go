@@ -115,8 +115,9 @@ func (r *Registry) List() []Tenant {
 	return out
 }
 
-// Remove deletes the tenant. APIs/deploys/etc that referenced it become
-// orphans — caller is responsible for cleanup OR refusing if non-empty.
+// Remove deletes the tenant. The basic form leaves orphan-cleanup to the
+// caller; use RemoveSafe when the caller can supply the current API and
+// deploy lists to refuse removal of a non-empty tenant.
 func (r *Registry) Remove(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -125,6 +126,48 @@ func (r *Registry) Remove(id string) error {
 	}
 	delete(r.tenants, id)
 	return nil
+}
+
+// RemoveSafe refuses to delete a tenant that still has APIs or deploys
+// pinned to its PathPrefix — those would otherwise become orphan nginx
+// locations that no RBAC role can see or manage. The caller passes the
+// live (path-of-X) slices; tenant compares against PathPrefix.
+func (r *Registry) RemoveSafe(id string, apiPaths, deployPaths []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tenants[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if t.PathPrefix != "" {
+		var apis, deploys int
+		for _, p := range apiPaths {
+			if hasPathPrefix(p, t.PathPrefix) {
+				apis++
+			}
+		}
+		for _, p := range deployPaths {
+			if hasPathPrefix(p, t.PathPrefix) {
+				deploys++
+			}
+		}
+		if apis+deploys > 0 {
+			return fmt.Errorf("tenant %q still owns %d APIs and %d deploys — remove those first",
+				id, apis, deploys)
+		}
+	}
+	delete(r.tenants, id)
+	return nil
+}
+
+func hasPathPrefix(p, prefix string) bool {
+	if prefix == "" || p == "" {
+		return false
+	}
+	if len(p) < len(prefix) {
+		return false
+	}
+	return p[:len(prefix)] == prefix
 }
 
 // IsAdmin reports whether `user` has admin powers inside `tenantID`.
