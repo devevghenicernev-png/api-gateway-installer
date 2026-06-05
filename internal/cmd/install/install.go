@@ -5,9 +5,12 @@
 package install
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 
@@ -43,6 +46,11 @@ type Answers struct {
 	TLSToken      string `yaml:"tls_token" koanf:"tls_token"`
 	TLSCommonName string `yaml:"tls_cn" koanf:"tls_cn"`
 	TLSStaging    bool   `yaml:"tls_staging" koanf:"tls_staging"`
+
+	// Security — set when user opts into RBAC on the admin API.
+	// SecurityUser is the RBAC subject for the bootstrap owner-token.
+	SecurityEnabled bool   `yaml:"security_enabled" koanf:"security_enabled"`
+	SecurityUser    string `yaml:"security_user" koanf:"security_user"`
 }
 
 func defaults() Answers {
@@ -55,6 +63,8 @@ func defaults() Answers {
 		WebhookPort:      9000,
 		ConfigPath:       "/etc/apigw/config.yaml",
 		TLSStrategy:      "skip",
+		SecurityEnabled:  false,
+		SecurityUser:     "admin",
 	}
 }
 
@@ -171,12 +181,17 @@ func buildPlan(a Answers) *tui.PlanCard {
 		webhook = fmt.Sprintf("enabled on :%d", a.WebhookPort)
 	}
 	tlsLabel := tlsPlanLabel(a)
+	security := "off"
+	if a.SecurityEnabled {
+		security = fmt.Sprintf("on (soft-rollout, owner=%s)", a.SecurityUser)
+	}
 	return tui.NewPlan("Install apigw").
 		Add("HTTP port", fmt.Sprintf("%d", a.HTTPPort)).
 		Add("Server name", a.ServerName).
 		Add("TLS", tlsLabel).
 		Add("Dashboard", dashboard).
 		Add("Webhook", webhook).
+		Add("Admin RBAC", security).
 		Add("Config", a.ConfigPath).
 		Add("Nginx site", nginx.SitePath)
 }
@@ -227,6 +242,32 @@ func apply(opts *options, a Answers) error {
 	if cfg.Webhook.Path == "" {
 		cfg.Webhook.Path = "/webhook"
 	}
+
+	// If the operator opted into security in the wizard AND there's no
+	// existing owner token, mint one now. RBAC starts in soft-rollout —
+	// see `apigw auth admin enforce` to promote.
+	var freshToken, freshUser string
+	if a.SecurityEnabled && !hasOwnerToken(cfg.Security, a.SecurityUser) {
+		t, err := generateAdminToken()
+		if err != nil {
+			return fmt.Errorf("generate admin token: %w", err)
+		}
+		freshToken = t
+		freshUser = a.SecurityUser
+		cfg.Security.AdminTokens = append(cfg.Security.AdminTokens, config.AdminToken{
+			Name:  a.SecurityUser + "-owner",
+			User:  a.SecurityUser,
+			Token: t,
+		})
+		if !securityHasAssignment(cfg.Security.Assignments, a.SecurityUser) {
+			cfg.Security.Assignments = append(cfg.Security.Assignments, config.Assignment{
+				User:  a.SecurityUser,
+				Roles: []string{"owner"},
+			})
+		}
+		cfg.Security.RBACEnforce = false
+	}
+
 	cfg.SetPath(a.ConfigPath)
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -234,6 +275,10 @@ func apply(opts *options, a Answers) error {
 	fmt.Fprintf(opts.f.IOStreams.Out, "%s wrote %s\n",
 		tui.Styles.Success.Render(tui.GlyphCheck),
 		tui.Styles.Identifier.Render(a.ConfigPath))
+
+	if freshToken != "" {
+		printBootstrapToken(opts.f.IOStreams.Out, freshUser, freshToken)
+	}
 
 	mgr := nginx.NewManager()
 	if err := mgr.WriteAndReload(&cfg); err != nil {
@@ -259,7 +304,60 @@ func apply(opts *options, a Answers) error {
 		fmt.Fprintf(opts.f.IOStreams.Out, "  %s apigw tls enable letsencrypt --domain <fqdn> --email <addr>\n",
 			tui.Styles.Accent.Render("Then:"))
 	}
+	if a.SecurityEnabled {
+		fmt.Fprintf(opts.f.IOStreams.Out, "  %s apigw auth admin token add <name> --user <subject>\n",
+			tui.Styles.Accent.Render("Mint more tokens:"))
+		fmt.Fprintf(opts.f.IOStreams.Out, "  %s apigw auth admin enforce\n",
+			tui.Styles.Accent.Render("Flip to hard-RBAC:"))
+	}
 	return nil
+}
+
+// hasOwnerToken reports whether the operator already has an admin token
+// under their identity — install is idempotent and won't mint a second
+// token in that case.
+func hasOwnerToken(sec config.Security, user string) bool {
+	for _, t := range sec.AdminTokens {
+		if t.User == user {
+			return true
+		}
+	}
+	return false
+}
+
+func securityHasAssignment(as []config.Assignment, user string) bool {
+	for _, a := range as {
+		if a.User == user {
+			return true
+		}
+	}
+	return false
+}
+
+// generateAdminToken returns a 32-byte (256-bit) cryptographically random
+// secret encoded as base64-URL without padding.
+func generateAdminToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func printBootstrapToken(w io.Writer, user, token string) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  ┌──────────────────────────────────────────────────────────────┐")
+	fmt.Fprintln(w, "  │  apigw admin token issued — copy NOW, it won't be shown again │")
+	fmt.Fprintln(w, "  └──────────────────────────────────────────────────────────────┘")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "    user:   %s\n", user)
+	fmt.Fprintf(w, "    token:  %s\n", token)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  Open the dashboard, click Sign in, paste the token. RBAC is in")
+	fmt.Fprintln(w, "  SOFT-ROLLOUT mode — denials are audit-logged but still pass.")
+	fmt.Fprintln(w, "  Promote to hard-RBAC after a few days with:")
+	fmt.Fprintln(w, "    sudo apigw auth admin enforce")
+	fmt.Fprintln(w)
 }
 
 // applyTLS runs the chosen TLS strategy after nginx is up on :80. The HTTP-01

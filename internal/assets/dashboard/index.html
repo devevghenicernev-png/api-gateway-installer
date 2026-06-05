@@ -16,13 +16,46 @@
       <span class="stat"><span class="muted">uptime</span> <span id="uptime">—</span></span>
       <span class="stat"><span class="muted">clients</span> <span id="clients">0</span></span>
       <span class="conn" id="conn-status" title="SSE connection">●</span>
+      <button class="token-btn" id="token-btn" title="Sign in with bearer token">
+        <span id="token-label">Sign in</span>
+      </button>
     </div>
   </header>
 
   <main>
+    <section class="panel apis-panel">
+      <h2>APIs <span class="count" id="apis-count">0</span></h2>
+      <ul id="apis-list" class="apis"></ul>
+      <div class="empty muted" id="apis-empty">Sign in to view configured APIs.</div>
+    </section>
+
     <section class="panel deploys-panel">
       <h2>Deployments</h2>
       <div id="deploys" class="deploys"></div>
+    </section>
+
+    <section class="panel tls-panel">
+      <h2>TLS</h2>
+      <ul id="tls-list" class="tls"></ul>
+      <div class="empty muted" id="tls-empty">No certificates registered.</div>
+    </section>
+
+    <section class="panel audit-panel">
+      <h2>Audit log <span class="muted" id="audit-meta"></span></h2>
+      <ul id="audit-list" class="audit"></ul>
+      <div class="empty muted" id="audit-empty">Sign in to read the hash-chained audit log.</div>
+    </section>
+
+    <section class="panel approvals-panel">
+      <h2>Pending approvals <span class="count" id="approvals-count">0</span></h2>
+      <ul id="approvals-list" class="approvals"></ul>
+      <div class="empty muted" id="approvals-empty">Nothing waiting on approval.</div>
+    </section>
+
+    <section class="panel webhook-panel">
+      <h2>Webhook activity</h2>
+      <ul id="webhook-feed" class="feed"></ul>
+      <div class="empty muted" id="webhook-empty">No webhook deliveries yet.</div>
     </section>
 
     <section class="panel logs-panel">
@@ -33,17 +66,19 @@
       </h2>
       <pre id="logs" class="logs"></pre>
     </section>
-
-    <section class="panel webhook-panel">
-      <h2>Webhook activity</h2>
-      <ul id="webhook-feed" class="feed"></ul>
-    </section>
-
-    <section class="panel tls-panel">
-      <h2>TLS</h2>
-      <ul id="tls-list" class="tls"></ul>
-    </section>
   </main>
+
+  <div class="modal-bg" id="token-modal" hidden>
+    <div class="modal">
+      <h3>Sign in</h3>
+      <p class="muted">Paste your <code>Authorization: Bearer &lt;token&gt;</code> value from <code>config.yaml</code>. The token stays in <code>localStorage</code> — clear it any time by clicking <strong>Sign out</strong>.</p>
+      <input type="password" id="token-input" placeholder="e.g. my-super-secret-32-byte-token" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn-secondary" id="token-cancel">Cancel</button>
+        <button class="btn-primary" id="token-save">Sign in</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/app.js" defer></script>
 </body>

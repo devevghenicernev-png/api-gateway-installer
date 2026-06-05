@@ -129,10 +129,30 @@ func runWizard(f *cmdutil.Factory, def Answers) (Answers, error) {
 				Validate(portValidator),
 		),
 
-		// ---- Step 5: storage ----
+		// ---- Step 5: admin API security ----
 		huh.NewGroup(
 			huh.NewNote().
-				Title("apigw install — step 5 of 5").
+				Title("apigw install — step 5 of 6").
+				Description("Admin API security. With this on, /api/admin/* (the\n"+
+					"mutation endpoints behind the dashboard) require a bearer\n"+
+					"token. We'll bootstrap one owner-token for you and start\n"+
+					"in SOFT-ROLLOUT mode (denials are audit-logged, not enforced).\n"+
+					"You promote to hard-enforce later with `apigw auth admin enforce`."),
+			huh.NewConfirm().
+				Title("Enable RBAC on the admin API?").
+				Description("Strongly recommended for anything shared with teammates.").
+				Value(&a.SecurityEnabled),
+			huh.NewInput().
+				Title("Owner identity").
+				Description("Subject name for the bootstrap token (e.g. 'admin', your username).").
+				Value(&a.SecurityUser).
+				Validate(nonEmpty),
+		),
+
+		// ---- Step 6: storage ----
+		huh.NewGroup(
+			huh.NewNote().
+				Title("apigw install — step 6 of 6").
 				Description("Storage. /etc/apigw/config.yaml is the conventional location."),
 			huh.NewInput().
 				Title("Config file path").
