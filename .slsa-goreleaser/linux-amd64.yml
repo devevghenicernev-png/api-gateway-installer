@@ -1,0 +1,24 @@
+# SLSA L3 build config — mirrors .goreleaser.yaml's `builds:` section for
+# linux/amd64. The SLSA workflow consumes this to produce the
+# non-forgeable provenance attached to each release artifact.
+version: 1
+
+main: ./cmd/apigw
+binary: apigw_{{ .Os }}_{{ .Arch }}
+
+env:
+  - CGO_ENABLED=0
+  - GO111MODULE=on
+
+flags:
+  - -trimpath
+
+ldflags:
+  - -s -w
+  - -X github.com/devevghenicernev-png/apigw/internal/build.Version={{ .Version }}
+  - -X github.com/devevghenicernev-png/apigw/internal/build.Commit={{ .Commit }}
+  - -X github.com/devevghenicernev-png/apigw/internal/build.Date={{ .CommitDate }}
+  - -extldflags=-static
+
+goos: linux
+goarch: amd64

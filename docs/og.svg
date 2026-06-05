@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a0c14"/>
+      <stop offset="1" stop-color="#050608"/>
+    </linearGradient>
+    <linearGradient id="grad" x1="0" y1="0" x2="600" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="200" cy="100" r="350" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="1000" cy="100" r="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#10b981" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#10b981" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" x="0" y="0" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M 64 0 L 0 0 0 64" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect width="1200" height="630" fill="url(#glow1)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+
+  <!-- logo -->
+  <g transform="translate(96, 130)">
+    <path d="M0 60 L40 20 L80 60 L40 100 Z" stroke="#22d3ee" stroke-width="6" fill="none" stroke-linejoin="round"/>
+    <path d="M40 60 L80 20 L120 60 L80 100 Z" stroke="#10b981" stroke-width="6" fill="none" stroke-linejoin="round"/>
+    <text x="148" y="92" font-family="Inter, system-ui, sans-serif" font-size="64" font-weight="800" fill="#e7e9ee" letter-spacing="-2">apigw</text>
+  </g>
+
+  <!-- main headline -->
+  <text x="96" y="350" font-family="Inter, system-ui, sans-serif" font-size="78" font-weight="800" fill="#e7e9ee" letter-spacing="-3">The API gateway,</text>
+  <text x="96" y="440" font-family="Inter, system-ui, sans-serif" font-size="78" font-weight="800" fill="url(#grad)" letter-spacing="-3">installed in 30 seconds.</text>
+
+  <!-- subtitle -->
+  <text x="96" y="510" font-family="Inter, system-ui, sans-serif" font-size="26" font-weight="400" fill="#8a909c">One static Go binary. nginx + TLS + webhooks + dashboard. Zero runtime deps.</text>
+
+  <!-- bottom row -->
+  <g transform="translate(96, 555)" font-family="JetBrains Mono, monospace" font-size="20" fill="#8a909c">
+    <text>$ curl -fsSL apigw.sh | sudo sh</text>
+  </g>
+  <g transform="translate(1104, 580)" font-family="Inter, system-ui, sans-serif" font-size="18" fill="#5a6070" text-anchor="end">
+    <text>github.com/devevghenicernev-png/apigw</text>
+  </g>
+</svg>

@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# apigw webhook receiver — OpenRC init script
+
+name="apigw-webhook"
+description="apigw webhook receiver + deploy worker"
+command="{{ .BinPath }}"
+command_args="webhook serve --addr {{ .Addr }}"
+command_user="root"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/apigw/webhook.log"
+error_log="/var/log/apigw/webhook.err"
+
+depend() {
+    need net
+    after nginx
+}
+
+start_pre() {
+    checkpath --directory --owner root:root --mode 0755 /var/log/apigw
+}

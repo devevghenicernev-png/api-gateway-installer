@@ -1,0 +1,29 @@
+# Backup files
+*.backup
+*.bak
+
+# Temporary files
+*.tmp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Go build artifacts
+/apigw
+/bin/
+/dist/
+*.test
+*.out
+coverage.txt
+
+# Local install / dev
+/var-apigw/
+/etc-apigw/

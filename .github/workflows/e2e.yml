@@ -1,0 +1,66 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'test/e2e/**'
+      - 'go.mod'
+      - '.github/workflows/e2e.yml'
+  schedule:
+    # Nightly so we catch upstream distro drift even when no PRs land.
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.distro }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian12, ubuntu22, ubuntu24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build apigw
+        run: make build
+
+      # GitHub-hosted runners use cgroup v2 with systemd — the privileged
+      # container approach below works out of the box. No docker setup step
+      # needed; the docker daemon is preinstalled.
+
+      - name: Build e2e image
+        run: |
+          docker build \
+            -t apigw-e2e:${{ matrix.distro }} \
+            -f test/e2e/docker/Dockerfile.${{ matrix.distro }} \
+            test/e2e/docker
+
+      - name: Run e2e scenarios
+        env:
+          APIGW_E2E_DISTRO: ${{ matrix.distro }}
+        run: |
+          go test -tags=e2e -count=1 -v -timeout=20m ./test/e2e/...
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^apigw-e2e-' || true); do
+            echo "::group::docker logs $c"
+            docker logs --tail=500 "$c" || true
+            echo "::endgroup::"
+            echo "::group::journalctl $c"
+            docker exec "$c" journalctl -n 500 --no-pager || true
+            echo "::endgroup::"
+          done

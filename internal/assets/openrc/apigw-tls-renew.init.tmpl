@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+# apigw TLS renewal — OpenRC oneshot. Schedule via cron (/etc/periodic/daily).
+
+name="apigw-tls-renew"
+description="apigw TLS certificate renewal"
+command="{{ .BinPath }}"
+command_args="tls renew"
+command_user="root"
+command_background="no"
+
+depend() {
+    need net
+}

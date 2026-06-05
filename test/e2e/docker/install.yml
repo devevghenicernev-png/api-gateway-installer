@@ -1,0 +1,16 @@
+# Apigw e2e — unattended install answers. Drop into the container at
+# /tmp/install.yml; `apigw install --config-file /tmp/install.yml --yes`
+# uses it for non-interactive setup.
+
+http_port: 80
+server_name: localhost
+
+dashboard_enabled: true
+dashboard_port: 9080
+
+webhook_enabled: true
+webhook_port: 9000
+
+config_path: /etc/apigw/config.yaml
+
+tls_strategy: skip

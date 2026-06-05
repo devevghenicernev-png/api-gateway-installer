@@ -1,0 +1,40 @@
+run:
+  timeout: 5m
+  go: '1.23'
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - errcheck
+    - gofmt
+    - goimports
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - typecheck
+    - unconvert
+    - unused
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/devevghenicernev-png/apigw
+  revive:
+    rules:
+      - name: exported
+        disabled: true   # too noisy for cmd packages
+  gosec:
+    excludes:
+      - G204   # subprocess with variadic — we sanitize inputs at boundary
+      - G304   # file inclusion via variable — we validate paths
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck

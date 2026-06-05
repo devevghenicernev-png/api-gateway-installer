@@ -1,0 +1,34 @@
+# apigw e2e — Ubuntu 22.04 LTS (jammy) with systemd inside the container.
+#
+# See Dockerfile.debian12 for the runtime caveats; the pattern is identical.
+# Ubuntu's systemd ships with two additional masks not needed on Debian
+# (ondemand, multipath).
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        systemd systemd-sysv dbus \
+        nginx \
+        curl ca-certificates jq \
+        openssl \
+        iproute2 procps \
+    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/apt/*
+
+RUN systemctl mask -- \
+        systemd-logind.service \
+        getty@tty1.service \
+        getty-static.service \
+        systemd-firstboot.service \
+        sys-fs-fuse-connections.mount \
+        sys-kernel-config.mount \
+        sys-kernel-debug.mount \
+        sys-kernel-tracing.mount \
+        ondemand.service \
+        multipathd.service \
+        multipathd.socket
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

@@ -1,0 +1,35 @@
+# apigw e2e — Ubuntu 24.04 LTS (noble) with systemd inside the container.
+#
+# Same shape as Dockerfile.ubuntu22. Noble's systemd defaults to user
+# instances enabled, which we don't want in a container — masking
+# user@.service avoids journald spam on startup.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        systemd systemd-sysv dbus \
+        nginx \
+        curl ca-certificates jq \
+        openssl \
+        iproute2 procps \
+    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/apt/*
+
+RUN systemctl mask -- \
+        systemd-logind.service \
+        getty@tty1.service \
+        getty-static.service \
+        systemd-firstboot.service \
+        sys-fs-fuse-connections.mount \
+        sys-kernel-config.mount \
+        sys-kernel-debug.mount \
+        sys-kernel-tracing.mount \
+        ondemand.service \
+        multipathd.service \
+        multipathd.socket \
+        user@.service
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

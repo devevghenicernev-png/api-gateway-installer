@@ -1,0 +1,54 @@
+[Unit]
+Description=apigw webhook receiver + deploy worker
+Documentation=https://apigw.dev/webhooks
+After=network-online.target nginx.service
+Wants=network-online.target
+PartOf=apigw.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=30s
+ExecStart={{ .BinPath }} webhook serve --addr {{ .Addr }}
+Restart=on-failure
+RestartSec=2s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=apigw-webhook
+
+# --- identity ---
+# We run as root because the worker calls into the deploy engine which writes
+# to /etc/systemd/system/ and shells out to systemctl. A non-root webhook
+# server is achievable (CAP_NET_BIND_SERVICE + a privileged worker via Polkit)
+# but the trade-off is more moving parts; deferred to Phase 7.
+User=root
+Group=root
+
+# --- hardening — Go binary, no JIT → MDWX is safe ---
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true        # Go has no JIT — safe here
+NoNewPrivileges=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @debug @mount @swap @reboot @raw-io
+
+# Directories the worker writes: queue DB, secret dir, deploy state.
+ReadWritePaths=/var/lib/apigw /etc/apigw /etc/nginx /etc/systemd/system /run /var/log/apigw
+
+# --- resource limits ---
+TasksMax=512
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

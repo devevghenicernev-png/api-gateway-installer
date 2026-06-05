@@ -1,0 +1,282 @@
+package nginx
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
+
+	"github.com/devevghenicernev-png/apigw/internal/config"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
+	"github.com/spf13/afero"
+)
+
+// SitePath is where apigw writes its generated nginx server block.
+//
+// On Debian/Ubuntu (Linux): /etc/nginx/sites-available/apigw.conf with a
+// symlink in sites-enabled (apigw owns one filename — never the directory —
+// so user-managed sites coexist).
+//
+// On macOS (Homebrew nginx): /opt/homebrew/etc/nginx/servers/apigw.conf (or
+// /usr/local on Intel). Homebrew nginx has no sites-enabled split; it loads
+// every file under servers/, so EnabledLink == SitePath there.
+//
+// These are var, not const, because the values are os-dependent.
+var (
+	SitePath        = paths.NginxSitesAvailable() + "/apigw.conf"
+	EnabledLink     = paths.NginxSitesEnabled() + "/apigw.conf"
+	HTTPConfPath    = paths.NginxConfD() + "/apigw-http.conf"
+	BackupExtension = ".apigw-prev"
+)
+
+// Manager is the operational counterpart to Generator: it writes config to
+// disk under a temp file, validates `nginx -t`, then renames into place and
+// reloads. If validation fails, it leaves the previous file untouched.
+type Manager struct {
+	fs        afero.Fs
+	gen       *Generator
+	sitePath  string
+	enabled   string
+	reloadCmd func() error // injectable for tests; default systemctl reload nginx
+	validate  func(path string) error
+
+	// Metrics, when non-nil, receives a result-labeled increment on every
+	// WriteAndReload call ("ok" | "validate_fail" | "rollback").
+	Metrics ReloadCounter
+}
+
+// ReloadCounter is the minimal surface Manager depends on for Prometheus.
+type ReloadCounter interface {
+	IncNginxReload(result string)
+}
+
+// NewManager wires a Manager against the real OS filesystem. Tests use
+// NewManagerWithFS for an afero.MemMapFs and mocked reload/validate hooks.
+func NewManager() *Manager {
+	return &Manager{
+		fs:        afero.NewOsFs(),
+		gen:       NewGenerator(),
+		sitePath:  SitePath,
+		enabled:   EnabledLink,
+		reloadCmd: defaultReload,
+		validate:  defaultValidate,
+	}
+}
+
+// NewManagerWithFS lets tests inject a memory filesystem and stubbed reload.
+func NewManagerWithFS(fs afero.Fs, sitePath, enabled string, reload func() error, validate func(string) error) *Manager {
+	return &Manager{
+		fs:        fs,
+		gen:       NewGenerator(),
+		sitePath:  sitePath,
+		enabled:   enabled,
+		reloadCmd: reload,
+		validate:  validate,
+	}
+}
+
+// Render produces both files apigw would write; no side effects.
+// Useful for `apigw install --dry-run` and golden-file tests.
+func (m *Manager) Render(cfg *config.Config) (serverBytes, httpBytes []byte, err error) {
+	return m.gen.Render(cfg)
+}
+
+// Validate runs `nginx -t` against the current on-disk config. Does NOT
+// re-render. Use WriteAndReload to apply a new config.
+func (m *Manager) Validate() error {
+	return m.validate("")
+}
+
+// Reload sends SIGHUP via systemctl. Idempotent; safe to call repeatedly.
+func (m *Manager) Reload() error { return m.reloadCmd() }
+
+// WriteAndReload is the atomic apply: render → tmp → validate → rename →
+// reload. On any failure the previous file is restored.
+//
+// Sequence:
+//  1. Render the new config to bytes.
+//  2. If the destination exists, copy it to <path>.apigw-prev.
+//  3. Write the new bytes to <path>.new, fsync, rename onto <path>.
+//  4. nginx -t — if it fails, restore <path>.apigw-prev → <path> and return.
+//  5. systemctl reload nginx.
+func (m *Manager) WriteAndReload(cfg *config.Config) error {
+	serverBody, httpBody, err := m.gen.Render(cfg)
+	if err != nil {
+		return fmt.Errorf("render: %w", err)
+	}
+
+	// Snapshot + stage server file + http file simultaneously. If either
+	// rename fails, restore both snapshots so the live nginx state stays
+	// consistent.
+	if err := m.snapshotAndStage(m.sitePath, serverBody); err != nil {
+		return err
+	}
+	if err := m.snapshotAndStage(HTTPConfPath, httpBody); err != nil {
+		// server file already staged; roll back the .new but leave the
+		// previously-committed server file alone (no rename happened yet
+		// for either — both .new files just need cleanup).
+		_ = m.fs.Remove(m.sitePath + ".new")
+		return err
+	}
+	// Commit phase: rename .new → live for both files. If the second
+	// rename fails, restore the first from its snapshot.
+	if err := m.fs.Rename(m.sitePath+".new", m.sitePath); err != nil {
+		_ = m.fs.Remove(HTTPConfPath + ".new")
+		return fmt.Errorf("rename server: %w", err)
+	}
+	if err := m.fs.Rename(HTTPConfPath+".new", HTTPConfPath); err != nil {
+		// Restore server from snapshot so http remains untouched.
+		if prev, rerr := afero.ReadFile(m.fs, m.sitePath+BackupExtension); rerr == nil {
+			_ = afero.WriteFile(m.fs, m.sitePath, prev, 0o640)
+		}
+		return fmt.Errorf("rename http: %w", err)
+	}
+
+	// Ensure sites-enabled symlink exists BEFORE validate so `nginx -t` sees
+	// the linked file in the canonical location it would read at reload —
+	// otherwise validate can pass while the live config diverges.
+	m.ensureEnabled()
+
+	if err := m.validate(m.sitePath); err != nil {
+		// Validate failed → roll back BOTH files from their snapshots.
+		m.rollbackBoth()
+		if m.Metrics != nil {
+			m.Metrics.IncNginxReload("validate_fail")
+		}
+		return fmt.Errorf("nginx validate failed (rolled back): %w", err)
+	}
+
+	if err := m.reloadCmd(); err != nil {
+		if m.Metrics != nil {
+			m.Metrics.IncNginxReload("reload_fail")
+		}
+		// Reload failure: leave new config in place; nginx still runs old config.
+		return fmt.Errorf("nginx reload: %w", err)
+	}
+	if m.Metrics != nil {
+		m.Metrics.IncNginxReload("ok")
+	}
+	return nil
+}
+
+// snapshotAndStage handles the per-file "snapshot existing → write tmp →
+// fsync" sub-step shared by sitePath and HTTPConfPath. The actual rename
+// onto the live path is deferred to the caller so it can ensure both files
+// commit together.
+func (m *Manager) snapshotAndStage(path string, body []byte) error {
+	dir := filepath.Dir(path)
+	if err := m.fs.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	if existing, err := afero.ReadFile(m.fs, path); err == nil {
+		if werr := afero.WriteFile(m.fs, path+BackupExtension, existing, 0o640); werr != nil {
+			return fmt.Errorf("snapshot %s: %w", path, werr)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read previous %s: %w", path, err)
+	}
+	tmp := path + ".new"
+	if err := afero.WriteFile(m.fs, tmp, body, 0o640); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if _, isOsFs := m.fs.(*afero.OsFs); isOsFs {
+		if f, ferr := os.OpenFile(tmp, os.O_RDWR, 0); ferr == nil {
+			_ = f.Sync()
+			_ = f.Close()
+		}
+	}
+	return nil
+}
+
+// rollbackBoth restores both the server and http config files from their
+// .apigw-prev snapshots. Best-effort — partial restore is still better
+// than leaving torn config.
+func (m *Manager) rollbackBoth() {
+	for _, p := range []string{m.sitePath, HTTPConfPath} {
+		if prev, rerr := afero.ReadFile(m.fs, p+BackupExtension); rerr == nil {
+			_ = afero.WriteFile(m.fs, p, prev, 0o640)
+		} else {
+			_ = m.fs.Remove(p)
+		}
+	}
+}
+
+// ensureEnabled creates the sites-enabled symlink if missing. Best-effort.
+// Only runs against the OS filesystem (afero.OsFs); skips for memory fs.
+func (m *Manager) ensureEnabled() {
+	osFs, ok := m.fs.(*afero.OsFs)
+	_ = osFs
+	if !ok {
+		return
+	}
+	if _, err := os.Lstat(m.enabled); err == nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(m.enabled), 0o755)
+	_ = os.Symlink(m.sitePath, m.enabled)
+}
+
+// defaultReload triggers an nginx reload. Tries `nginx -s reload` first
+// (cross-platform: works on systemd, launchd, OpenRC, and bare init) and
+// falls back to `systemctl reload nginx` if signalling the master directly
+// requires extra privileges or a missing pid file.
+func defaultReload() error {
+	cmd := exec.Command("nginx", "-s", "reload")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		return nil
+	} else {
+		nginxStderr := stderr.String()
+		stderr.Reset()
+		cmd2 := exec.Command("systemctl", "reload", "nginx")
+		cmd2.Stderr = &stderr
+		if err2 := cmd2.Run(); err2 != nil {
+			return fmt.Errorf("nginx reload: %w (nginx -s: %s) (systemctl: %s)", err2, nginxStderr, stderr.String())
+		}
+	}
+	return nil
+}
+
+// defaultValidate runs `nginx -t`. If `path` is non-empty it's passed as -c.
+func defaultValidate(path string) error {
+	args := []string{"-t"}
+	if path != "" {
+		args = append(args, "-c", path)
+	}
+	cmd := exec.Command("nginx", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("nginx -t: %w (%s)", err, stderr.String())
+	}
+	return nil
+}
+
+// DryRunWriter writes both rendered files to w instead of disk, each
+// prefixed with a header marking which path it would land at. Used by
+// `apigw install --dry-run` to show the full intended state.
+func (m *Manager) DryRunWriter(cfg *config.Config, w io.Writer) error {
+	serverBody, httpBody, err := m.gen.Render(cfg)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := fmt.Fprintf(w, "# would write to %s @ %s\n", m.sitePath, now); err != nil {
+		return err
+	}
+	if _, err := w.Write(serverBody); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "\n# would write to %s @ %s\n", HTTPConfPath, now); err != nil {
+		return err
+	}
+	if _, err := w.Write(httpBody); err != nil {
+		return err
+	}
+	return nil
+}

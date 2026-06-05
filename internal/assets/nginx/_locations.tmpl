@@ -1,0 +1,301 @@
+{{ define "_locations" -}}
+    {{ range .APIs -}}
+    {{ if .Enabled -}}
+    {{ if .ForwardAuth -}}
+    # auth-check upstream for {{ .Name }}
+    location = /{{ .ForwardAuth.UpstreamName }} {
+        internal;
+        proxy_pass {{ .ForwardAuth.Upstream }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    {{ end -}}
+    {{ if .JWT -}}
+    # JWT auth-check for {{ .Name }} → dashboard daemon
+    location = /_apigw_jwt_{{ .Name }} {
+        internal;
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/auth/jwt/{{ .Name }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+    }
+    {{ end -}}
+    {{ if .MTLS -}}
+    # mTLS auth-check for {{ .Name }} → dashboard daemon
+    location = /_apigw_mtls_{{ .Name }} {
+        internal;
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/auth/mtls/{{ .Name }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Apigw-Mtls-Verify      $ssl_client_verify;
+        proxy_set_header X-Apigw-Mtls-SDN         $ssl_client_s_dn;
+        proxy_set_header X-Apigw-Mtls-Cert        $ssl_client_escaped_cert;
+        proxy_set_header X-Apigw-Mtls-Fingerprint $ssl_client_fingerprint;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+    {{ end -}}
+    location {{ .Path }} {
+        {{ if .MaxBodySize }}client_max_body_size {{ .MaxBodySize }};
+        {{ end -}}
+        {{ range .Allow }}allow {{ . }};
+        {{ end -}}
+        {{ range .Deny }}deny {{ . }};
+        {{ end -}}
+        {{ if .Allow }}deny all;
+        {{ end -}}
+        {{ if .BasicAuthRealm -}}
+        auth_basic "{{ .BasicAuthRealm }}";
+        auth_basic_user_file {{ .BasicAuthFile }};
+        {{ end -}}
+        {{ if .ForwardAuth -}}
+        auth_request /{{ .ForwardAuth.UpstreamName }};
+        {{ range .ForwardAuth.SetHeaders -}}
+        auth_request_set ${{ . }} $upstream_http_{{ . }};
+        proxy_set_header {{ . }} ${{ . }};
+        {{ end -}}
+        {{ if .ForwardAuth.SignInURL -}}
+        error_page 401 = @apigw_sign_in_{{ .Name }};
+        {{ end -}}
+        {{ end -}}
+        {{ if .JWT -}}
+        auth_request /_apigw_jwt_{{ .Name }};
+        auth_request_set $apigw_subject $upstream_http_x_apigw_subject;
+        proxy_set_header X-Remote-User $apigw_subject;
+        {{ end -}}
+        {{ if .MTLS -}}
+        auth_request /_apigw_mtls_{{ .Name }};
+        auth_request_set $apigw_client_cn $upstream_http_x_apigw_client_cn;
+        proxy_set_header X-Client-CN $apigw_client_cn;
+        {{ end -}}
+        {{ if .RateLimitZone -}}
+        limit_req zone=apigw_{{ .RateLimitZone }} burst={{ .RateLimitBurst }} nodelay;
+        limit_req_status 429;
+        {{ end -}}
+        {{ if .CORS -}}
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin $apigw_cors_origin always;
+            add_header Access-Control-Allow-Methods "{{ .CORS.Methods }}" always;
+            add_header Access-Control-Allow-Headers "{{ .CORS.Headers }}" always;
+            {{ if .CORS.Credentials }}add_header Access-Control-Allow-Credentials "true" always;{{ end }}
+            add_header Access-Control-Max-Age {{ .CORS.MaxAge }} always;
+            return 204;
+        }
+        add_header Access-Control-Allow-Origin $apigw_cors_origin always;
+        {{ if .CORS.Credentials }}add_header Access-Control-Allow-Credentials "true" always;{{ end }}
+        {{ end -}}
+        {{ if .GRPC -}}
+        {{ if .UpstreamName }}grpc_pass grpc://{{ .UpstreamName }};
+        {{ else }}grpc_pass grpc://127.0.0.1:{{ .Port }};
+        {{ end -}}
+        grpc_set_header Host               $host;
+        grpc_set_header X-Real-IP          $remote_addr;
+        grpc_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+        grpc_set_header X-Forwarded-Proto  $scheme;
+        {{ range $k, $v := .RequestHeaders -}}
+        grpc_set_header {{ $k }} "{{ $v }}";
+        {{ end -}}
+        {{ else -}}
+        {{ if .UpstreamName }}proxy_pass http://{{ .UpstreamName }};
+        {{ else }}proxy_pass http://127.0.0.1:{{ .Port }};
+        {{ end -}}
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        "upgrade";
+        {{ range $k, $v := .RequestHeaders -}}
+        proxy_set_header {{ $k }} "{{ $v }}";
+        {{ end -}}
+        {{ end -}}
+        {{ range $k, $v := .ResponseHeaders -}}
+        add_header {{ $k }} "{{ $v }}" always;
+        {{ end -}}
+        {{ range .ResponseHide -}}
+        proxy_hide_header {{ . }};
+        {{ end -}}
+        {{ if .NextUpstream }}proxy_next_upstream {{ .NextUpstream }};
+        proxy_next_upstream_tries 3;
+        {{ end -}}
+        proxy_read_timeout                 300s;
+        proxy_send_timeout                 300s;
+        proxy_buffering                    off;
+        {{ if .CustomLocation -}}
+        # apigw custom_location ({{ .Name }}) — operator-supplied directives
+        {{ .CustomLocation }}
+        {{ end -}}
+    }
+    {{ if and .ForwardAuth .ForwardAuth.SignInURL -}}
+    location @apigw_sign_in_{{ .Name }} {
+        return 302 {{ .ForwardAuth.SignInURL }};
+    }
+    {{ end }}
+
+    {{ end -}}
+    {{ end -}}
+    {{ range .Deploys -}}
+    {{ if .Enabled -}}
+    # deploy {{ .Name }} ({{ .Runtime }}, sha={{ .SHA }})
+    {{ if eq .Runtime "static" -}}
+    location {{ .Path }} {
+        {{ if .MaxBodySize }}client_max_body_size {{ .MaxBodySize }};
+        {{ end -}}
+        {{ range .Allow }}allow {{ . }};
+        {{ end -}}
+        {{ range .Deny }}deny {{ . }};
+        {{ end -}}
+        {{ if .Allow }}deny all;
+        {{ end -}}
+        {{ if .BasicAuthRealm -}}
+        auth_basic "{{ .BasicAuthRealm }}";
+        auth_basic_user_file {{ .BasicAuthFile }};
+        {{ end -}}
+        alias {{ .CurrentDir }}/;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+    {{ else -}}
+    {{ if .ForwardAuth -}}
+    location = /{{ .ForwardAuth.UpstreamName }} {
+        internal;
+        proxy_pass {{ .ForwardAuth.Upstream }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    {{ end -}}
+    {{ if .JWT -}}
+    location = /_apigw_jwt_{{ .Name }} {
+        internal;
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/auth/jwt/{{ .Name }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Method $request_method;
+    }
+    {{ end -}}
+    location {{ .Path }} {
+        {{ if .MaxBodySize }}client_max_body_size {{ .MaxBodySize }};
+        {{ end -}}
+        {{ range .Allow }}allow {{ . }};
+        {{ end -}}
+        {{ range .Deny }}deny {{ . }};
+        {{ end -}}
+        {{ if .Allow }}deny all;
+        {{ end -}}
+        {{ if .BasicAuthRealm -}}
+        auth_basic "{{ .BasicAuthRealm }}";
+        auth_basic_user_file {{ .BasicAuthFile }};
+        {{ end -}}
+        {{ if .ForwardAuth -}}
+        auth_request /{{ .ForwardAuth.UpstreamName }};
+        {{ range .ForwardAuth.SetHeaders -}}
+        auth_request_set ${{ . }} $upstream_http_{{ . }};
+        proxy_set_header {{ . }} ${{ . }};
+        {{ end -}}
+        {{ if .ForwardAuth.SignInURL -}}
+        error_page 401 = @apigw_sign_in_deploy_{{ .Name }};
+        {{ end -}}
+        {{ end -}}
+        {{ if .JWT -}}
+        auth_request /_apigw_jwt_{{ .Name }};
+        auth_request_set $apigw_subject $upstream_http_x_apigw_subject;
+        proxy_set_header X-Remote-User $apigw_subject;
+        {{ end -}}
+        {{ if .MTLS -}}
+        auth_request /_apigw_mtls_{{ .Name }};
+        auth_request_set $apigw_client_cn $upstream_http_x_apigw_client_cn;
+        proxy_set_header X-Client-CN $apigw_client_cn;
+        {{ end -}}
+        {{ if .RateLimitZone -}}
+        limit_req zone=apigw_{{ .RateLimitZone }} burst={{ .RateLimitBurst }} nodelay;
+        limit_req_status 429;
+        {{ end -}}
+        {{ if .CORS -}}
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin $apigw_cors_origin always;
+            add_header Access-Control-Allow-Methods "{{ .CORS.Methods }}" always;
+            add_header Access-Control-Allow-Headers "{{ .CORS.Headers }}" always;
+            {{ if .CORS.Credentials }}add_header Access-Control-Allow-Credentials "true" always;{{ end }}
+            add_header Access-Control-Max-Age {{ .CORS.MaxAge }} always;
+            return 204;
+        }
+        add_header Access-Control-Allow-Origin $apigw_cors_origin always;
+        {{ if .CORS.Credentials }}add_header Access-Control-Allow-Credentials "true" always;{{ end }}
+        {{ end -}}
+        {{ if .UpstreamName }}proxy_pass http://{{ .UpstreamName }};
+        {{ else }}proxy_pass http://127.0.0.1:{{ .Port }};
+        {{ end -}}
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        "upgrade";
+        {{ range $k, $v := .RequestHeaders -}}
+        proxy_set_header {{ $k }} "{{ $v }}";
+        {{ end -}}
+        {{ range $k, $v := .ResponseHeaders -}}
+        add_header {{ $k }} "{{ $v }}" always;
+        {{ end -}}
+        {{ range .ResponseHide -}}
+        proxy_hide_header {{ . }};
+        {{ end -}}
+        {{ if .NextUpstream }}proxy_next_upstream {{ .NextUpstream }};
+        proxy_next_upstream_tries 3;
+        {{ end -}}
+        proxy_read_timeout                 300s;
+        proxy_send_timeout                 300s;
+        proxy_buffering                    off;
+        {{ if .CustomLocation -}}
+        # apigw custom_location ({{ .Name }}) — operator-supplied directives
+        {{ .CustomLocation }}
+        {{ end -}}
+    }
+    {{ if and .ForwardAuth .ForwardAuth.SignInURL -}}
+    location @apigw_sign_in_deploy_{{ .Name }} {
+        return 302 {{ .ForwardAuth.SignInURL }};
+    }
+    {{ end -}}
+    {{ end }}
+
+    {{ end -}}
+    {{ end -}}
+    {{ if .Webhook.Enabled -}}
+    location {{ .Webhook.Path }} {
+        client_max_body_size 1m;
+        proxy_pass http://127.0.0.1:{{ .Webhook.Port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    }
+
+    {{ end -}}
+    {{ if .Dashboard.Enabled -}}
+    location {{ .Dashboard.Path }} {
+        proxy_pass http://127.0.0.1:{{ .Dashboard.Port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_buffering off;                    # SSE — never buffer
+        proxy_set_header X-Accel-Buffering no;  # SSE — never buffer
+    }
+    {{ end -}}
+    location / {
+        return 404;
+    }
+{{- end }}

@@ -1,0 +1,51 @@
+name: slsa-l3
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  actions: read
+
+jobs:
+  # Build + provenance via the official SLSA generator. The output is an
+  # intoto.jsonl provenance file users verify with the slsa-verifier CLI:
+  #
+  #   slsa-verifier verify-artifact \
+  #     --provenance-path apigw.intoto.jsonl \
+  #     --source-uri github.com/devevghenicernev-png/apigw \
+  #     apigw_<version>_linux_amd64.tar.gz
+  #
+  # The provenance is non-forgeable — bound to this exact workflow's OIDC
+  # identity at signing time. See ARCHITECTURE.md §"Build & release".
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: arm
+            goarm: '7'
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.0.0
+    with:
+      go-version-file: go.mod
+      config-file: .slsa-goreleaser/${{ matrix.goos }}-${{ matrix.goarch }}.yml
+      upload-assets: true
+      private-repository: false

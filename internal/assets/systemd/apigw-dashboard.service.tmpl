@@ -1,0 +1,63 @@
+[Unit]
+Description=apigw live dashboard + webhook receiver + deploy worker
+Documentation=https://apigw.dev/dashboard
+After=network-online.target nginx.service
+Wants=network-online.target
+PartOf=apigw.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=30s
+ExecStart={{ .BinPath }} dashboard serve --addr {{ .Addr }} --webhook-addr {{ .WebhookAddr }}
+Restart=on-failure
+RestartSec=2s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=apigw-dashboard
+
+# --- identity ---
+# Root for now — Phase 7 will introduce a dedicated `apigw` user with
+# CAP_NET_BIND_SERVICE so the dashboard binds 443 without privileges. Until
+# the worker stops needing systemctl write access, we stay root.
+User=root
+Group=root
+
+# --- hardening — single Go binary, no JIT → MDWX is safe ---
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true        # safe: Go has no JIT
+RestrictRealtime=true
+NoNewPrivileges=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @debug @mount @swap @reboot @raw-io
+
+# Worker writes deploy state + units; dashboard reads /etc/apigw config; both
+# touch the bbolt queue at /var/lib/apigw/jobs.db.
+ReadWritePaths=/var/lib/apigw /etc/apigw /etc/nginx /etc/systemd/system /run /var/log/apigw
+
+# --- resource limits ---
+TasksMax=512
+LimitNOFILE=4096
+MemoryHigh=192M
+MemoryMax=256M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

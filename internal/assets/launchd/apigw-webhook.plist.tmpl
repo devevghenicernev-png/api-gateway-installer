@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.apigw.webhook</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ .BinPath }}</string>
+        <string>webhook</string>
+        <string>serve</string>
+        <string>--addr</string>
+        <string>{{ .Addr }}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{{ .LogDir }}/webhook.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ .LogDir }}/webhook.err.log</string>
+    <key>WorkingDirectory</key>
+    <string>{{ .StateDir }}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>APIGW_CONFIG_DIR</key>
+        <string>{{ .ConfigDir }}</string>
+        <key>APIGW_STATE_DIR</key>
+        <string>{{ .StateDir }}</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

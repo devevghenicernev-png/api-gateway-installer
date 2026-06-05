@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# apigw dashboard daemon (dashboard + webhook + worker consolidated) — OpenRC
+
+name="apigw-dashboard"
+description="apigw live dashboard + webhook + deploy worker"
+command="{{ .BinPath }}"
+command_args="dashboard serve --addr {{ .Addr }} --webhook-addr {{ .WebhookAddr }}"
+command_user="root"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/apigw/dashboard.log"
+error_log="/var/log/apigw/dashboard.err"
+
+depend() {
+    need net
+    after nginx
+}
+
+start_pre() {
+    checkpath --directory --owner root:root --mode 0755 /var/log/apigw
+}

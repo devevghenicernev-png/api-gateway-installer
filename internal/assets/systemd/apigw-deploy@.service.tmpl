@@ -1,0 +1,93 @@
+# Template unit for apigw-managed deployments.
+# Instantiate per deploy as:  apigw-deploy@<name>.service
+# Per-deploy values (port, env file) come from /etc/systemd/system/apigw-deploy@<name>.service.d/override.conf
+# which apigw writes alongside.
+
+[Unit]
+Description=apigw deployment %i
+Documentation=https://apigw.dev/deploy
+After=network-online.target nginx.service
+Wants=network-online.target
+PartOf=apigw.target
+
+[Service]
+Type=simple
+# Type=notify with sd_notify(READY=1) is the gold standard (ARCHITECTURE.md
+# §"Gold-standard hardened unit"), but it requires app cooperation. We use
+# simple for compatibility — apigw runs its own health probe at the swap step.
+
+# --- identity ---
+User={{ .User }}
+Group={{ .Group }}
+
+# --- managed dirs (systemd creates/chowns) ---
+StateDirectory=apigw/%i
+LogsDirectory=apigw/%i
+ConfigurationDirectory=apigw/%i
+RuntimeDirectory=apigw/%i
+WorkingDirectory=/var/lib/apigw/%i/current
+EnvironmentFile=-/etc/apigw/%i.env
+ExecStart=/var/lib/apigw/%i/current/.apigw/start.sh
+
+# --- filesystem isolation ---
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadOnlyPaths=/etc
+ReadWritePaths=/var/lib/apigw/%i /var/log/apigw/%i /run/apigw/%i
+
+# --- kernel isolation ---
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# --- privilege isolation ---
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+
+# --- namespace / personality ---
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+PrivateUsers=no
+
+# --- syscall filter ---
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @debug @mount @swap @reboot @raw-io
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+# NOTE: MemoryDenyWriteExecute=yes is INTENTIONALLY OMITTED.
+# Node.js (V8 JIT), Python (ctypes, some C extensions), and the JVM all
+# require W+X mappings. The dashboard unit DOES enable it because it's Go.
+
+# --- resource limits (defaults; override via apigw deploy set-limits) ---
+CPUQuota=50%
+MemoryHigh=384M
+MemoryMax=512M
+TasksMax=256
+IOWeight=100
+LimitNOFILE=4096
+
+# --- restart policy ---
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=120s
+StartLimitBurst=5
+
+# Logs flow to journald.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=apigw-deploy-%i
+
+[Install]
+WantedBy=multi-user.target

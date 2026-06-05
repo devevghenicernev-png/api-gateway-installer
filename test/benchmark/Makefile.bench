@@ -1,0 +1,39 @@
+.PHONY: bench-deps bench-smoke bench-full bench-compare bench-report profile-cpu profile-mem
+
+# Benchmark dependencies
+bench-deps:
+	@echo "Installing benchmark tools..."
+	@command -v wrk2 >/dev/null || (echo "wrk2 not found. Install: brew install wrk2" && exit 1)
+	@command -v hey >/dev/null || go install github.com/rakyll/hey@latest
+	@command -v vegeta >/dev/null || go install github.com/tsenart/vegeta@latest
+	@echo "✓ All benchmark tools installed"
+
+# Quick smoke test (30s)
+bench-smoke:
+	@echo "Running smoke test..."
+	cd test/benchmark && go test -bench=. -benchtime=10s -timeout=60s
+
+# Full benchmark suite (unit + integration)
+bench-full: bench-smoke
+	@echo "Running full benchmark suite..."
+	cd test/benchmark && go test -bench=. -benchtime=30s -benchmem -cpuprofile=cpu.prof -memprofile=mem.prof
+
+# Compare vs Kong, Traefik, Caddy
+bench-compare:
+	@echo "Running comparative benchmarks..."
+	test/benchmark/compare.sh
+
+# Profile CPU
+profile-cpu:
+	cd test/benchmark && go test -bench=. -cpuprofile=cpu.prof
+	go tool pprof -http=:8080 test/benchmark/cpu.prof
+
+# Profile memory
+profile-mem:
+	cd test/benchmark && go test -bench=. -memprofile=mem.prof
+	go tool pprof -http=:8080 test/benchmark/mem.prof
+
+# Generate HTML report
+bench-report:
+	@echo "Generating benchmark report..."
+	@ls -t bench-results/*/summary.md | head -1 | xargs cat

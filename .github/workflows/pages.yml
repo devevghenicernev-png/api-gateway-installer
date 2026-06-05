@@ -1,0 +1,56 @@
+# Publish the docs/ folder to GitHub Pages.
+#
+# Two modes are wired:
+#   - push to main → deploys automatically
+#   - workflow_dispatch → manual re-run from the Actions tab
+#
+# This workflow uses the official actions/{configure-pages,upload-pages-artifact,
+# deploy-pages} trio. No Jekyll: docs/ is served verbatim (we ship plain
+# HTML + CSS + JS, no Markdown rendering needed). The .nojekyll file tells
+# Pages to skip the Jekyll preprocessor entirely.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Pages needs id-token (OIDC for the artifact upload) + pages: write.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Avoid overlapping deploys — Pages only has one live build at a time.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tell Pages this is plain HTML, not Jekyll
+        run: touch docs/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - name: Upload docs/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

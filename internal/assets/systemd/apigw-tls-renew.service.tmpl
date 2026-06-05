@@ -1,0 +1,30 @@
+[Unit]
+Description=apigw TLS certificate renewal
+Documentation=https://apigw.dev/tls
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ .BinPath }} tls renew
+
+# Renewal needs to read account.key (0600 root) and write cert files.
+# Running as root is intentional and matches certbot's renewal model.
+User=root
+Group=root
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Minimal hardening — this is a short-lived oneshot, not a daemon.
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+
+# /var/lib/apigw must be writable (account key + cert storage)
+ReadWritePaths=/var/lib/apigw /etc/nginx /run
+
+[Install]
+WantedBy=multi-user.target

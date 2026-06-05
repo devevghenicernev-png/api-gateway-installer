@@ -1,0 +1,50 @@
+# {{ .Banner }}
+#
+# MANAGED BY apigw — installed into /etc/nginx/conf.d/ so nginx auto-loads it
+# at http{} scope. Holds named upstreams, rate-limit zones, gzip settings,
+# and the CORS origin map — anything that can't live inside a server block.
+
+{{ if .Gzip.Enabled -}}
+# --- Compression ---
+gzip                on;
+gzip_vary           on;
+gzip_proxied        any;
+gzip_comp_level     {{ .Gzip.Level }};
+gzip_min_length     {{ .Gzip.MinLength }};
+gzip_types          {{ range $i, $t := .Gzip.Types }}{{ if $i }} {{ end }}{{ $t }}{{ end }};
+{{ end }}
+
+{{ range .Upstreams -}}
+# --- Upstream: {{ .Name }} ({{ len .Servers }} server{{ if ne (len .Servers) 1 }}s{{ end }}) ---
+upstream apigw_{{ .Name }} {
+    {{ if .LoadBalance }}{{ .LoadBalance }};
+    {{ end -}}
+    {{ range .Servers -}}
+    server {{ .Address }}{{ if gt .Weight 0 }} weight={{ .Weight }}{{ end }}{{ if gt .MaxFails 0 }} max_fails={{ .MaxFails }}{{ end }}{{ if .FailTimeout }} fail_timeout={{ .FailTimeout }}{{ end }}{{ if .Backup }} backup{{ end }}{{ if .Down }} down{{ end }};
+    {{ end -}}
+    keepalive {{ .Keepalive }};
+}
+{{ end }}
+
+{{ range .RateLimitZones -}}
+# --- Rate limit zone: {{ .Name }} ---
+limit_req_zone {{ .Key }} zone=apigw_{{ .Name }}:10m rate={{ .RPS }}r/s;
+{{ end }}
+
+{{ if .CORSOriginMap -}}
+# --- CORS origin allow-list (echo back if exact match, "" otherwise) ---
+map $http_origin $apigw_cors_origin {
+    default                       "";
+    {{ range .CORSOriginMap -}}
+    "~^{{ . }}$" $http_origin;
+    {{ end -}}
+}
+{{ end }}
+
+{{ range .SplitClients -}}
+# --- Canary split for {{ .Name }} ({{ .CanaryPct }}% to canary) ---
+split_clients "{{ .HashSource }}" ${{ .Name }} {
+    {{ .CanaryPct }}% {{ .CanaryName }};
+    *                {{ .PrimaryName }};
+}
+{{ end }}

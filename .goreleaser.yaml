@@ -1,0 +1,116 @@
+version: 2
+
+project_name: apigw
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: apigw
+    main: ./cmd/apigw
+    binary: apigw
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/devevghenicernev-png/apigw/internal/build.Version={{ .Version }}
+      - -X github.com/devevghenicernev-png/apigw/internal/build.Commit={{ .Commit }}
+      - -X github.com/devevghenicernev-png/apigw/internal/build.Date={{ .CommitDate }}
+      - -extldflags=-static
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - '7'
+    ignore:
+      - goos: darwin
+        goarch: arm
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}'
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+
+sboms:
+  - artifacts: archive
+    documents:
+      - "${artifact}.sbom.spdx.json"
+
+signs:
+  - id: cosign-checksums
+    cmd: cosign
+    signature: '${artifact}.sig'
+    certificate: '${artifact}.pem'
+    args:
+      - sign-blob
+      - '--output-signature=${signature}'
+      - '--output-certificate=${certificate}'
+      - '--yes'
+      - '${artifact}'
+    artifacts: checksum
+    output: true
+
+nfpms:
+  - id: apigw
+    package_name: apigw
+    vendor: apigw
+    homepage: https://github.com/devevghenicernev-png/apigw
+    maintainer: apigw maintainers <noreply@example.com>
+    description: API Gateway installer and operator (single binary)
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/apigw/LICENSE
+
+release:
+  draft: true
+  prerelease: auto
+  github:
+    owner: devevghenicernev-png
+    name: api-gateway-installer

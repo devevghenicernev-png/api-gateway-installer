@@ -1,0 +1,13 @@
+[Unit]
+Description=Run apigw tls renew twice daily
+Documentation=https://apigw.dev/tls
+
+[Timer]
+# Twice daily, randomised within a 12h window. Matches certbot's timer cadence.
+OnCalendar=*-*-* 03,15:00:00
+RandomizedDelaySec=43200
+Persistent=true
+Unit=apigw-tls-renew.service
+
+[Install]
+WantedBy=timers.target

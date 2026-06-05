@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.apigw.tls-renew</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ .BinPath }}</string>
+        <string>tls</string>
+        <string>renew</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>3</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>15</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>{{ .LogDir }}/tls-renew.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ .LogDir }}/tls-renew.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>APIGW_CONFIG_DIR</key>
+        <string>{{ .ConfigDir }}</string>
+        <key>APIGW_STATE_DIR</key>
+        <string>{{ .StateDir }}</string>
+    </dict>
+</dict>
+</plist>

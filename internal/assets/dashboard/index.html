@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>apigw dashboard</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">apigw</span>
+      <span class="muted" id="version">—</span>
+    </div>
+    <div class="stats">
+      <span class="stat"><span class="muted">uptime</span> <span id="uptime">—</span></span>
+      <span class="stat"><span class="muted">clients</span> <span id="clients">0</span></span>
+      <span class="conn" id="conn-status" title="SSE connection">●</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel deploys-panel">
+      <h2>Deployments</h2>
+      <div id="deploys" class="deploys"></div>
+    </section>
+
+    <section class="panel logs-panel">
+      <h2>
+        Live logs
+        <select id="log-deploy" class="select"></select>
+        <span class="muted" id="log-drop"></span>
+      </h2>
+      <pre id="logs" class="logs"></pre>
+    </section>
+
+    <section class="panel webhook-panel">
+      <h2>Webhook activity</h2>
+      <ul id="webhook-feed" class="feed"></ul>
+    </section>
+
+    <section class="panel tls-panel">
+      <h2>TLS</h2>
+      <ul id="tls-list" class="tls"></ul>
+    </section>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

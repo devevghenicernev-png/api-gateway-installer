@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>apigw — the single-binary API gateway</title>
+  <meta name="description" content="Install, deploy, and observe an nginx-fronted API gateway from one static Go binary. TLS, webhooks, dashboard, RBAC, multi-tenancy — included." />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="styles.css" />
+
+  <meta property="og:title" content="apigw — the single-binary API gateway" />
+  <meta property="og:description" content="One static Go binary replaces nginx config drift, certbot, and your hand-rolled deploy scripts. Install in 30 seconds." />
+  <meta property="og:image" content="https://devevghenicernev-png.github.io/apigw/og.svg" />
+  <meta property="og:image:type" content="image/svg+xml" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://devevghenicernev-png.github.io/apigw/" />
+  <meta property="og:site_name" content="apigw" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="apigw — the single-binary API gateway" />
+  <meta name="twitter:description" content="nginx + Let's Encrypt + GitHub webhooks + live dashboard + RBAC. One binary." />
+  <meta name="twitter:image" content="https://devevghenicernev-png.github.io/apigw/og.svg" />
+  <meta name="theme-color" content="#0a0a0f" />
+</head>
+
+<body>
+  <div class="grid-bg" aria-hidden="true"></div>
+  <div class="glow-bg" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a href="#" class="nav-logo">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M4 16 L12 8 L20 16 L12 24 Z" stroke="url(#g1)" stroke-width="2" fill="none"/>
+        <path d="M12 16 L20 8 L28 16 L20 24 Z" stroke="url(#g2)" stroke-width="2" fill="none"/>
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="32" y2="32">
+            <stop offset="0" stop-color="#22d3ee"/>
+            <stop offset="1" stop-color="#10b981"/>
+          </linearGradient>
+          <linearGradient id="g2" x1="0" y1="0" x2="32" y2="32">
+            <stop offset="0" stop-color="#10b981"/>
+            <stop offset="1" stop-color="#22d3ee"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span>apigw</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="#config">Config</a>
+      <a href="#compare">Compare</a>
+      <a href="https://github.com/devevghenicernev-png/apigw/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+      <a class="nav-cta" href="https://github.com/devevghenicernev-png/apigw" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.4.5 0 5.9 0 12.5c0 5.3 3.4 9.8 8.2 11.4.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2 1-.3 2-.4 3-.4s2 .1 3 .4c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.3v3.3c0 .3.2.7.8.6 4.8-1.6 8.2-6.1 8.2-11.4C24 5.9 18.6.5 12 .5z"/></svg>
+        Star on GitHub
+      </a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-inner">
+        <div class="hero-badge">
+          <span class="dot"></span>
+          v0.1 — open-source, MIT licensed
+        </div>
+        <h1 class="hero-title">
+          The API gateway<br/>
+          <span class="grad">installed in 30 seconds.</span>
+        </h1>
+        <p class="hero-sub">
+          One static Go binary replaces your nginx config, certbot, GitHub
+          deploy scripts, and the dashboard you never built.
+          <strong>Zero runtime dependencies.</strong> Boots on a Raspberry Pi.
+        </p>
+
+        <div class="install-card">
+          <div class="install-tabs" role="tablist">
+            <button class="tab active" data-tab="curl" role="tab">curl</button>
+            <button class="tab" data-tab="brew" role="tab">Homebrew</button>
+            <button class="tab" data-tab="manual" role="tab">manual</button>
+          </div>
+          <div class="install-body">
+            <pre class="install-cmd" data-tab="curl"><code>curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/apigw/main/scripts/install.sh | sudo sh</code></pre>
+            <pre class="install-cmd hidden" data-tab="brew"><code>brew install devevghenicernev-png/tap/apigw</code></pre>
+            <pre class="install-cmd hidden" data-tab="manual"><code>curl -fsSL -o apigw https://github.com/devevghenicernev-png/apigw/releases/latest/download/apigw_linux_amd64
+sudo install -m 0755 apigw /usr/local/bin/</code></pre>
+            <button class="copy-btn" title="Copy command">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span class="copy-label">Copy</span>
+            </button>
+          </div>
+          <div class="install-meta">
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/></svg> cosign + sha256 verified</span>
+            <span>Debian 12 · Ubuntu 22.04/24.04 · arm64 · amd64 · armv7</span>
+          </div>
+        </div>
+
+        <div class="hero-ctas">
+          <a class="btn primary" href="#install">Get started →</a>
+          <a class="btn ghost" href="https://github.com/devevghenicernev-png/apigw" target="_blank" rel="noopener">View source</a>
+        </div>
+      </div>
+
+      <div class="terminal" aria-hidden="true">
+        <div class="terminal-bar">
+          <span class="tdot tdot-r"></span>
+          <span class="tdot tdot-y"></span>
+          <span class="tdot tdot-g"></span>
+          <span class="terminal-title">~ ssh root@api.example.com</span>
+        </div>
+        <div class="terminal-body" id="terminal-body"></div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><strong>1</strong><span>static binary</span></div>
+      <div class="stat"><strong>0</strong><span>runtime deps</span></div>
+      <div class="stat"><strong>16K</strong><span>lines of Go</span></div>
+      <div class="stat"><strong>30s</strong><span>to first request</span></div>
+      <div class="stat"><strong>5</strong><span>auth backends</span></div>
+    </section>
+
+    <section id="features" class="features">
+      <div class="section-head">
+        <span class="kicker">Everything you'd hand-roll, included</span>
+        <h2>One binary. The whole platform.</h2>
+        <p>
+          Stop gluing together certbot, nginx-config-generator scripts,
+          GitHub webhook receivers, and a dashboard nobody maintains.
+        </p>
+      </div>
+
+      <div class="feature-grid">
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div>
+          <h3>Git push to deploy</h3>
+          <p>Auto-detects Node, Python, Go, Docker, or static. GitHub webhooks redeploy on push — HMAC-verified, durable bbolt queue, atomic release swap.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+          <h3>TLS that actually renews</h3>
+          <p>Let's Encrypt HTTP-01, DuckDNS DNS-01, or self-signed. systemd timer renewals, atomic rotation so nginx never serves a torn cert.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg></div>
+          <h3>Live dashboard</h3>
+          <p>SSE-driven UI at /dashboard. Deploy state, log stream, webhook activity, TLS countdowns — no manual refresh. Embedded JS, no Node runtime.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <h3>Auth, batteries included</h3>
+          <p>mTLS, JWT (HS/RS/ES/EdDSA + JWKS), SAML, LDAP, BasicAuth. Per-API rules; nginx auth_request routes through the embedded validator.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.65 1.65 0 0 0-1.8-.3 1.65 1.65 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.65 1.65 0 0 0-1-1.5 1.65 1.65 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.65 1.65 0 0 0 .3-1.8 1.65 1.65 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.65 1.65 0 0 0 1.5-1 1.65 1.65 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.65 1.65 0 0 0 1.8.3h0a1.65 1.65 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.65 1.65 0 0 0 1 1.5h0a1.65 1.65 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.65 1.65 0 0 0-.3 1.8v0a1.65 1.65 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.65 1.65 0 0 0-1.5 1z"/></svg></div>
+          <h3>RBAC + audit + OPA</h3>
+          <p>Hash-chained audit log (SIEM-ready JSON-lines), wildcard permissions, Rego policies against every mutation. SOX-friendly approvals workflow.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg></div>
+          <h3>Multi-tenancy</h3>
+          <p>Per-tenant path prefixes, RBAC, quotas (MaxAPIs/MaxDeploys), audit slice. One process, many isolated workspaces.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+          <h3>Alerts → wherever you live</h3>
+          <p>Slack · Microsoft Teams · PagerDuty · generic webhook · SMTP. Fires on TLS expiry, deploy failure, GitOps reconcile, queue health.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 2v6M15 2v6M3 10h18M5 6h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/></svg></div>
+          <h3>GitOps + optional Raft HA</h3>
+          <p>Pull config from a git repo on a schedule, or replicate state across peers via Raft. Choose your level of theatre.</p>
+        </article>
+
+        <article class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 7l-8-4-8 4 8 4 8-4z"/><path d="M4 12l8 4 8-4M4 17l8 4 8-4"/></svg></div>
+          <h3>Observability built-in</h3>
+          <p>Prometheus /metrics, OpenTelemetry traces, structured slog. Nginx access log tailed live into the SSE feed.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="install" class="quickstart">
+      <div class="section-head">
+        <span class="kicker">5 commands. 5 minutes.</span>
+        <h2>From clean box to live API.</h2>
+      </div>
+
+      <div class="cmd-list">
+        <div class="cmd-row">
+          <span class="cmd-num">1</span>
+          <div class="cmd-block">
+            <div class="cmd-label">Install the binary</div>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/apigw/main/scripts/install.sh | sudo sh</code></pre>
+          </div>
+        </div>
+        <div class="cmd-row">
+          <span class="cmd-num">2</span>
+          <div class="cmd-block">
+            <div class="cmd-label">Run the install wizard</div>
+            <pre><code>sudo apigw install</code></pre>
+          </div>
+        </div>
+        <div class="cmd-row">
+          <span class="cmd-num">3</span>
+          <div class="cmd-block">
+            <div class="cmd-label">Get TLS from Let's Encrypt</div>
+            <pre><code>sudo apigw tls enable letsencrypt --domain api.example.com --email me@example.com</code></pre>
+          </div>
+        </div>
+        <div class="cmd-row">
+          <span class="cmd-num">4</span>
+          <div class="cmd-block">
+            <div class="cmd-label">Connect a GitHub repo</div>
+            <pre><code>sudo apigw deploy add hello --repo https://github.com/me/hello --port 3000
+apigw webhook setup hello   # prints the URL + secret to paste into GitHub</code></pre>
+          </div>
+        </div>
+        <div class="cmd-row">
+          <span class="cmd-num">5</span>
+          <div class="cmd-block">
+            <div class="cmd-label">Open the dashboard</div>
+            <pre><code>apigw dashboard open   # https://api.example.com/dashboard</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="config" class="config">
+      <div class="section-head">
+        <span class="kicker">One YAML, the whole gateway</span>
+        <h2>Declarative when you want it.</h2>
+        <p>Every CLI command writes to the same <code>/etc/apigw/config.yaml</code>. Edit by hand, point GitOps at it, or replicate via Raft — same file.</p>
+      </div>
+
+      <div class="code-card">
+        <div class="code-bar">
+          <span class="tdot tdot-r"></span>
+          <span class="tdot tdot-y"></span>
+          <span class="tdot tdot-g"></span>
+          <span class="code-title">/etc/apigw/config.yaml</span>
+          <button class="copy-btn" data-copy="#cfg-sample" title="Copy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        </div>
+<pre id="cfg-sample"><code><span class="k">listen:</span>
+  <span class="k">https_port:</span> <span class="n">443</span>
+  <span class="k">server_name:</span> <span class="s">api.example.com</span>
+
+<span class="k">apis:</span>
+  - <span class="k">name:</span> <span class="s">billing</span>
+    <span class="k">path:</span> <span class="s">/api/billing</span>
+    <span class="k">port:</span> <span class="n">8081</span>
+    <span class="k">rate_limit:</span> { <span class="k">rps:</span> <span class="n">50</span>, <span class="k">burst:</span> <span class="n">100</span> }
+    <span class="k">jwt:</span>
+      <span class="k">algorithm:</span> <span class="s">RS256</span>
+      <span class="k">jwks_url:</span> <span class="s">https://auth.example.com/.well-known/jwks.json</span>
+      <span class="k">audience:</span> <span class="s">billing-api</span>
+
+<span class="k">deployments:</span>
+  - <span class="k">name:</span> <span class="s">hello</span>
+    <span class="k">repo:</span> <span class="s">https://github.com/me/hello</span>
+    <span class="k">branch:</span> <span class="s">main</span>
+    <span class="k">port:</span> <span class="n">3000</span>
+
+<span class="k">tls:</span>
+  <span class="k">strategy:</span> <span class="s">letsencrypt</span>
+  <span class="k">domains:</span> [<span class="s">api.example.com</span>]
+  <span class="k">email:</span> <span class="s">ops@example.com</span>
+
+<span class="k">security:</span>
+  <span class="k">rbac_enforce:</span> <span class="n">true</span>
+  <span class="k">admin_tokens:</span>
+    - { <span class="k">name:</span> <span class="s">deploy-bot</span>, <span class="k">user:</span> <span class="s">ci</span>, <span class="k">token:</span> <span class="s">$APIGW_CI_TOKEN</span> }
+
+<span class="k">alerts:</span>
+  <span class="k">slack_webhook:</span> <span class="s">https://hooks.slack.com/services/...</span>
+  <span class="k">tls_expiry_warn_days:</span> <span class="n">30</span></code></pre>
+      </div>
+    </section>
+
+    <section id="compare" class="compare">
+      <div class="section-head">
+        <span class="kicker">vs. the alternatives</span>
+        <h2>Why not just nginx?</h2>
+      </div>
+
+      <div class="compare-table">
+        <div class="ct-row ct-head">
+          <div></div>
+          <div class="ct-self">apigw</div>
+          <div>nginx + scripts</div>
+          <div>Kong / Tyk</div>
+          <div>Caddy</div>
+        </div>
+        <div class="ct-row"><div class="ct-feat">Single binary</div><div class="ct-self"><span class="yes">✓</span></div><div><span class="no">✗</span></div><div><span class="no">✗</span></div><div><span class="yes">✓</span></div></div>
+        <div class="ct-row"><div class="ct-feat">Zero runtime deps</div><div class="ct-self"><span class="yes">✓</span></div><div><span class="no">✗</span></div><div><span class="no">DB</span></div><div><span class="yes">✓</span></div></div>
+        <div class="ct-row"><div class="ct-feat">Git push to deploy</div><div class="ct-self"><span class="yes">✓</span></div><div>DIY</div><div><span class="no">✗</span></div><div><span class="no">✗</span></div></div>
+        <div class="ct-row"><div class="ct-feat">Live dashboard</div><div class="ct-self"><span class="yes">✓</span></div><div><span class="no">✗</span></div><div>$$</div><div><span class="no">✗</span></div></div>
+        <div class="ct-row"><div class="ct-feat">Hash-chained audit</div><div class="ct-self"><span class="yes">✓</span></div><div><span class="no">✗</span></div><div>$$</div><div><span class="no">✗</span></div></div>
+        <div class="ct-row"><div class="ct-feat">Multi-tenant quotas</div><div class="ct-self"><span class="yes">✓</span></div><div><span class="no">✗</span></div><div><span class="yes">✓</span></div><div><span class="no">✗</span></div></div>
+        <div class="ct-row"><div class="ct-feat">OPA policy admission</div><div class="ct-self"><span class="yes">✓</span></div><div><span class="no">✗</span></div><div>plugin</div><div><span class="no">✗</span></div></div>
+        <div class="ct-row"><div class="ct-feat">Boots on Raspberry Pi</div><div class="ct-self"><span class="yes">✓</span></div><div><span class="yes">✓</span></div><div><span class="no">✗</span></div><div><span class="yes">✓</span></div></div>
+        <div class="ct-row"><div class="ct-feat">License</div><div class="ct-self">MIT</div><div>BSD/various</div><div>Apache + EE</div><div>Apache</div></div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="cta-inner">
+        <h2>Ship behind TLS this afternoon.</h2>
+        <p>Open source. MIT. Built for the boring middle of the internet.</p>
+        <div class="hero-ctas">
+          <a class="btn primary" href="https://github.com/devevghenicernev-png/apigw" target="_blank" rel="noopener">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.4.5 0 5.9 0 12.5c0 5.3 3.4 9.8 8.2 11.4.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2 1-.3 2-.4 3-.4s2 .1 3 .4c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.3v3.3c0 .3.2.7.8.6 4.8-1.6 8.2-6.1 8.2-11.4C24 5.9 18.6.5 12 .5z"/></svg>
+            Star on GitHub
+          </a>
+          <a class="btn ghost" href="https://github.com/devevghenicernev-png/apigw/blob/main/docs/install.md" target="_blank" rel="noopener">Read the install guide</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="nav-logo">
+          <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path d="M4 16 L12 8 L20 16 L12 24 Z" stroke="url(#g3)" stroke-width="2" fill="none" stroke-linejoin="round"/>
+            <path d="M12 16 L20 8 L28 16 L20 24 Z" stroke="url(#g4)" stroke-width="2" fill="none" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="g3" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#10b981"/></linearGradient>
+              <linearGradient id="g4" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#10b981"/><stop offset="1" stop-color="#22d3ee"/></linearGradient>
+            </defs>
+          </svg>
+          <span>apigw</span>
+        </div>
+        <p>The single-binary API gateway. MIT licensed.</p>
+      </div>
+      <div class="footer-cols">
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/devevghenicernev-png/apigw">GitHub</a>
+          <a href="https://github.com/devevghenicernev-png/apigw/releases">Releases</a>
+          <a href="https://github.com/devevghenicernev-png/apigw/issues">Issues</a>
+          <a href="https://github.com/devevghenicernev-png/apigw/blob/main/CHANGELOG.md">Changelog</a>
+        </div>
+        <div>
+          <h4>Docs</h4>
+          <a href="https://github.com/devevghenicernev-png/apigw/blob/main/docs/install.md" target="_blank" rel="noopener">Install</a>
+          <a href="https://github.com/devevghenicernev-png/apigw/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture</a>
+          <a href="https://github.com/devevghenicernev-png/apigw/tree/main/docs/cli" target="_blank" rel="noopener">CLI reference</a>
+          <a href="https://github.com/devevghenicernev-png/apigw/blob/main/docs/migration-from-bash.md" target="_blank" rel="noopener">Migration</a>
+        </div>
+        <div>
+          <h4>Community</h4>
+          <a href="https://github.com/devevghenicernev-png/apigw/discussions">Discussions</a>
+          <a href="https://github.com/devevghenicernev-png/apigw/blob/main/LICENSE">License</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bot">
+      <span>© apigw contributors. MIT.</span>
+      <span>Made with Go, nginx, and obstinacy.</span>
+    </div>
+  </footer>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

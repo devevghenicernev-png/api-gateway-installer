@@ -1,0 +1,58 @@
+# apigw e2e — Debian 12 (bookworm) with systemd inside the container.
+#
+# This image runs the same systemd PID 1 + journald + cgroups that a bare
+# Debian VM would, so apigw exercises real units, real timers, real D-Bus.
+# Reference pattern: github.com/jrei/systemd-debian.
+#
+# Caller MUST run with:
+#   docker run \
+#     --privileged \
+#     --cgroupns=host \
+#     --tmpfs /run --tmpfs /run/lock \
+#     -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+#     --stop-signal=SIGRTMIN+3 \
+#     <image>
+#
+# Privileged is required so systemd-tmpfiles can mount cgroup v2.
+# --cgroupns=host avoids the kernel quirk where journald never starts under
+# a unprivileged cgroup namespace.
+
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+# Core: systemd as PID 1 + nginx + tools the test harness invokes.
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        systemd systemd-sysv dbus \
+        nginx \
+        curl ca-certificates jq \
+        openssl \
+        iproute2 procps \
+    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/apt/*
+
+# Disable the services systemd would normally try to start that don't make
+# sense in a container — kernel modules, lvm, etc. Keeping the list short
+# so distro upgrades don't surprise us.
+RUN systemctl mask -- \
+        systemd-logind.service \
+        getty@tty1.service \
+        getty-static.service \
+        systemd-firstboot.service \
+        sys-fs-fuse-connections.mount \
+        sys-kernel-config.mount \
+        sys-kernel-debug.mount \
+        sys-kernel-tracing.mount
+
+# We use the journald + journalctl shipped by the systemd package — no extra
+# config. nginx is installed but NOT enabled; the e2e scenarios bring it up.
+
+# The apigw binary is built once on the host and copied in via the test
+# harness — keeping image churn off the dependency graph for `make e2e`.
+# Expected layout: /usr/local/bin/apigw (chmod 0755).
+# (No COPY here — done in the run step.)
+
+STOPSIGNAL SIGRTMIN+3
+
+# systemd takes over.
+CMD ["/sbin/init"]
