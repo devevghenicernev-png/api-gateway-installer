@@ -49,7 +49,10 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           # v2.x — config schema matches .golangci.yml `version: "2"`.
-          version: v2.5.0
+          # Pin to v2.12.x: the QF1011 / staticcheck checks we reference
+          # were added after v2.5, so older v2 patch releases fail
+          # `config verify`.
+          version: v2.12.2
           args: --timeout=5m
 
   vuln:
