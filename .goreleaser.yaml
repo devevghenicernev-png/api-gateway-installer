@@ -109,8 +109,34 @@ nfpms:
         dst: /usr/share/doc/apigw/LICENSE
 
 release:
-  draft: true
+  draft: false
   prerelease: auto
   github:
     owner: devevghenicernev-png
-    name: api-gateway-installer
+    name: apigw
+  header: |
+    ## apigw {{ .Tag }}
+
+    The single-binary API gateway. nginx + Let's Encrypt + GitHub
+    deploys + live dashboard — one static Go binary.
+
+    ### Install
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/devevghenicernev-png/apigw/main/scripts/install.sh | sudo sh
+    ```
+
+    Verifies the release with cosign keyless OIDC and sha256 before
+    landing the binary at `/usr/local/bin/apigw`.
+
+    ### Verify a download manually
+
+    ```sh
+    cosign verify-blob \
+      --certificate-identity-regexp "https://github.com/devevghenicernev-png/apigw/.github/workflows/release.yml@.*" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      --certificate checksums.txt.pem \
+      --signature   checksums.txt.sig \
+      checksums.txt
+    sha256sum -c checksums.txt --ignore-missing
+    ```
