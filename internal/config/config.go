@@ -415,6 +415,7 @@ type API struct {
 	ConnectionPool *ConnectionPool `koanf:"connection_pool" yaml:"connection_pool,omitempty"`
 	Buffering      *Buffering      `koanf:"buffering" yaml:"buffering,omitempty"`
 	Rewrites       []RewriteRule   `koanf:"rewrites" yaml:"rewrites,omitempty"`
+	SLO            *SLO            `koanf:"slo" yaml:"slo,omitempty"`
 	Transform      *Transform      `koanf:"transform" yaml:"transform,omitempty"`
 	Versioning     *Versioning     `koanf:"versioning" yaml:"versioning,omitempty"`
 
@@ -781,6 +782,30 @@ type Retry struct {
 //
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
+// SLO declares the service-level objectives for one API. The SLA
+// evaluator (internal/sla) periodically samples observed metrics and
+// classifies the API as in-bounds or breaching. Breaches fire alerts
+// + audit entries.
+//
+// Each field is optional; zero values disable that dimension.
+// Period bounds the wall-clock window over which Availability is
+// computed (rolling). LatencyP95Ms is evaluated point-in-time
+// against the most recent metrics scrape.
+type SLO struct {
+	// LatencyP95Ms — alert when the request p95 latency exceeds this
+	// many milliseconds. 0 = no latency SLO.
+	LatencyP95Ms int `koanf:"latency_p95_ms" yaml:"latency_p95_ms,omitempty"`
+
+	// AvailabilityPercent — alert when (success / total) over the
+	// rolling Period falls below this fraction (0.0-100.0). 0 = no
+	// availability SLO.
+	AvailabilityPercent float64 `koanf:"availability_percent" yaml:"availability_percent,omitempty"`
+
+	// PeriodHours is the rolling window for the availability
+	// calculation. 0 = default 1h.
+	PeriodHours int `koanf:"period_hours" yaml:"period_hours,omitempty"`
+}
+
 // RewriteRule maps to nginx's `rewrite <match> <replace> <flag>`
 // directive. Multiple rules are emitted in order; nginx evaluates
 // them sequentially until a `last` / `redirect` / `permanent` flag

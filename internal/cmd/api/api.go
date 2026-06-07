@@ -23,6 +23,7 @@ import (
 	apiRemove "github.com/devevghenicernev-png/apigw/internal/cmd/api/remove"
 	apiRetry "github.com/devevghenicernev-png/apigw/internal/cmd/api/retry"
 	apiRewrite "github.com/devevghenicernev-png/apigw/internal/cmd/api/rewrite"
+	apiSLO "github.com/devevghenicernev-png/apigw/internal/cmd/api/slo"
 	apiVariants "github.com/devevghenicernev-png/apigw/internal/cmd/api/variants"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 )
@@ -56,5 +57,6 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiBuffering.NewCmdBuffering(f))
 	cmd.AddCommand(apiRewrite.NewCmdRewrite(f))
 	cmd.AddCommand(apiLog.NewCmdLog(f))
+	cmd.AddCommand(apiSLO.NewCmdSLO(f))
 	return cmd
 }
