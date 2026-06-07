@@ -285,7 +285,19 @@
         {{ end -}}
         proxy_read_timeout                 {{ if .ReadTimeout }}{{ .ReadTimeout }}{{ else }}300s{{ end }};
         proxy_send_timeout                 300s;
-        proxy_buffering                    off;
+        proxy_buffering                    {{ if and .Buffering .Buffering.Response }}{{ .Buffering.Response }}{{ else }}off{{ end }};
+        {{ if and .Buffering .Buffering.Request -}}
+        proxy_request_buffering            {{ .Buffering.Request }};
+        {{ end -}}
+        {{ if and .Buffering .Buffering.ClientBodyBufferSize -}}
+        client_body_buffer_size            {{ .Buffering.ClientBodyBufferSize }};
+        {{ end -}}
+        {{ if and .Buffering .Buffering.ProxyBufferSize -}}
+        proxy_buffer_size                  {{ .Buffering.ProxyBufferSize }};
+        {{ end -}}
+        {{ if and .Buffering .Buffering.ProxyBuffers -}}
+        proxy_buffers                      {{ .Buffering.ProxyBuffers }};
+        {{ end -}}
         {{ if .CustomLocation -}}
         # apigw custom_location ({{ .Name }}) — operator-supplied directives
         {{ .CustomLocation }}
@@ -419,7 +431,19 @@
         {{ end -}}
         proxy_read_timeout                 {{ if .ReadTimeout }}{{ .ReadTimeout }}{{ else }}300s{{ end }};
         proxy_send_timeout                 300s;
-        proxy_buffering                    off;
+        proxy_buffering                    {{ if and .Buffering .Buffering.Response }}{{ .Buffering.Response }}{{ else }}off{{ end }};
+        {{ if and .Buffering .Buffering.Request -}}
+        proxy_request_buffering            {{ .Buffering.Request }};
+        {{ end -}}
+        {{ if and .Buffering .Buffering.ClientBodyBufferSize -}}
+        client_body_buffer_size            {{ .Buffering.ClientBodyBufferSize }};
+        {{ end -}}
+        {{ if and .Buffering .Buffering.ProxyBufferSize -}}
+        proxy_buffer_size                  {{ .Buffering.ProxyBufferSize }};
+        {{ end -}}
+        {{ if and .Buffering .Buffering.ProxyBuffers -}}
+        proxy_buffers                      {{ .Buffering.ProxyBuffers }};
+        {{ end -}}
         {{ if .CustomLocation -}}
         # apigw custom_location ({{ .Name }}) — operator-supplied directives
         {{ .CustomLocation }}

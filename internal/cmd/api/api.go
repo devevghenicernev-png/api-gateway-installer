@@ -11,6 +11,7 @@ import (
 	apiACL "github.com/devevghenicernev-png/apigw/internal/cmd/api/acl"
 	apiAdd "github.com/devevghenicernev-png/apigw/internal/cmd/api/add"
 	apiBlueGreen "github.com/devevghenicernev-png/apigw/internal/cmd/api/bluegreen"
+	apiBuffering "github.com/devevghenicernev-png/apigw/internal/cmd/api/buffering"
 	apiCanary "github.com/devevghenicernev-png/apigw/internal/cmd/api/canary"
 	apiConnPool "github.com/devevghenicernev-png/apigw/internal/cmd/api/connpool"
 	apiDisable "github.com/devevghenicernev-png/apigw/internal/cmd/api/disable"
@@ -50,5 +51,6 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiVariants.NewCmdVariants(f))
 	cmd.AddCommand(apiRetry.NewCmdRetry(f))
 	cmd.AddCommand(apiConnPool.NewCmdConnPool(f))
+	cmd.AddCommand(apiBuffering.NewCmdBuffering(f))
 	return cmd
 }

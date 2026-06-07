@@ -243,6 +243,10 @@ type apiEntry struct {
 	NextUpstreamTimeout string
 	ReadTimeout         string
 
+	// Buffering — when non-nil, overrides per-route. Each child field
+	// emits only when non-empty / non-default.
+	Buffering *bufferingEntry
+
 	GRPC             bool   // F9 — emit grpc_pass instead of proxy_pass
 	JWT              bool   // F12 — emit auth_request /_apigw_jwt/<api>
 	JWTDashboardPort int    // F12 — port the dashboard daemon listens on
@@ -319,6 +323,17 @@ type forwardAuthEntry struct {
 	Upstream     string // proxy_pass target (URL form)
 	SignInURL    string
 	SetHeaders   []string // auth_request_set $var $upstream_http_<header>
+}
+
+// bufferingEntry mirrors config.Buffering. Request/Response are
+// pre-rendered to "", "on", or "off" in the middleware layer so the
+// template doesn't need a helper to dereference *bool.
+type bufferingEntry struct {
+	Request              string // "" | "on" | "off"
+	Response             string // "" | "on" | "off"
+	ClientBodyBufferSize string
+	ProxyBufferSize      string
+	ProxyBuffers         string
 }
 
 type deployEntry struct {

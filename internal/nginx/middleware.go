@@ -144,6 +144,15 @@ func applyMiddleware(
 		}
 	}
 
+	if b := a.Buffering; b != nil {
+		out.Buffering = &bufferingEntry{
+			Request:              boolToOnOff(b.Request),
+			Response:             boolToOnOff(b.Response),
+			ClientBodyBufferSize: b.ClientBodyBufferSize,
+			ProxyBufferSize:      b.ProxyBufferSize,
+			ProxyBuffers:         b.ProxyBuffers,
+		}
+	}
 	if r := a.Retry; r != nil {
 		applyRetry(out, r)
 	} else if a.HealthCheck != nil {
@@ -319,4 +328,17 @@ func rateLimitKey(apiName, key string) (variable, zoneName string, err error) {
 func regexEscape(s string) string {
 	// nginx uses PCRE; escape per https://www.pcre.org/current/doc/html/pcre2pattern.html
 	return regexp.QuoteMeta(s)
+}
+
+// boolToOnOff turns a *bool into the empty string (operator left it
+// unset), "on", or "off". The template branches on the empty case to
+// keep nginx's own defaults.
+func boolToOnOff(b *bool) string {
+	if b == nil {
+		return ""
+	}
+	if *b {
+		return "on"
+	}
+	return "off"
 }

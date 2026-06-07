@@ -365,6 +365,7 @@ type API struct {
 	BlueGreen      *BlueGreen      `koanf:"blue_green" yaml:"blue_green,omitempty"`
 	Variants       []Variant       `koanf:"variants" yaml:"variants,omitempty"`
 	ConnectionPool *ConnectionPool `koanf:"connection_pool" yaml:"connection_pool,omitempty"`
+	Buffering      *Buffering      `koanf:"buffering" yaml:"buffering,omitempty"`
 	Transform      *Transform      `koanf:"transform" yaml:"transform,omitempty"`
 	Versioning     *Versioning     `koanf:"versioning" yaml:"versioning,omitempty"`
 
@@ -709,6 +710,48 @@ type Retry struct {
 //
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
+// Buffering controls nginx's request + response buffering for one
+// route. The default (nil) keeps nginx's own defaults — request body
+// buffered to memory/disk, response buffered for HTTP/1.1. Two big
+// reasons to override:
+//
+//  1. Streaming uploads: Request=false sets proxy_request_buffering
+//     off so nginx forwards the body as it arrives, instead of
+//     spooling the whole thing first. Required for very large
+//     uploads, multi-GB tarballs, log shipping.
+//  2. Streaming responses: Response=false sets proxy_buffering off
+//     for SSE / chunked / long-poll endpoints that need the bytes
+//     to flow to the client without buffering.
+//
+// Tuning fields (empty = nginx default):
+//   - ClientBodyBufferSize  → client_body_buffer_size
+//   - ProxyBufferSize       → proxy_buffer_size  (1st response chunk)
+//   - ProxyBuffers          → proxy_buffers      ("<count> <size>")
+type Buffering struct {
+	// Request, when explicitly set to false, disables
+	// proxy_request_buffering. Default (nil-checked separately) is
+	// nginx's "on". Use *bool here so YAML `request: false` is
+	// distinguishable from omitted.
+	Request *bool `koanf:"request" yaml:"request,omitempty"`
+
+	// Response, when explicitly set to false, disables proxy_buffering.
+	Response *bool `koanf:"response" yaml:"response,omitempty"`
+
+	// ClientBodyBufferSize sets client_body_buffer_size (e.g. "16k",
+	// "1m"). Empty = nginx default (8k/16k depending on platform).
+	ClientBodyBufferSize string `koanf:"client_body_buffer_size" yaml:"client_body_buffer_size,omitempty"`
+
+	// ProxyBufferSize sets the size of the buffer used for the first
+	// part of the response (headers + initial body). E.g. "8k", "64k".
+	// Bump for upstream that emits large response headers.
+	ProxyBufferSize string `koanf:"proxy_buffer_size" yaml:"proxy_buffer_size,omitempty"`
+
+	// ProxyBuffers sets the number + size of buffers nginx allocates
+	// per request for buffering responses. Format: "<count> <size>",
+	// e.g. "8 16k".
+	ProxyBuffers string `koanf:"proxy_buffers" yaml:"proxy_buffers,omitempty"`
+}
+
 // ConnectionPool tunes nginx's upstream keepalive — the pool of
 // idle TCP connections to upstream servers nginx maintains for
 // reuse. Defaults are fine for most workloads; bump
