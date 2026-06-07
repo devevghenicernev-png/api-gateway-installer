@@ -97,6 +97,9 @@ func (s *Server) handleSessionAuth(w http.ResponseWriter, r *http.Request) {
 	if !s.runACL(w, apiCfg, apiName, auth.ACLMatchSubject, sess.Subject, "session") {
 		return
 	}
+	if !s.applyConsumer(w, cfg, apiCfg, apiName, sess.Subject, "session") {
+		return
+	}
 
 	w.Header().Set("X-Apigw-Subject", sess.Subject)
 	w.Header().Set("X-Apigw-Session-ID", sess.ID)

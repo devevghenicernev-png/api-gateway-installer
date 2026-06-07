@@ -35,7 +35,7 @@ func NewCmdHMAC(f *cmdutil.Factory) *cobra.Command {
 }
 
 func newAdd(f *cmdutil.Factory) *cobra.Command {
-	var owner, ttl, alg string
+	var owner, ttl, alg, consumerID string
 	var scopes []string
 	var requireBodyHash bool
 	cmd := &cobra.Command{
@@ -70,11 +70,12 @@ func newAdd(f *cmdutil.Factory) *cobra.Command {
 				return gerr
 			}
 			entry := config.HMACKey{
-				ID:        keyID,
-				Secret:    secret,
-				Algorithm: alg,
-				Owner:     owner,
-				Scopes:    scopes,
+				ID:         keyID,
+				Secret:     secret,
+				Algorithm:  alg,
+				Owner:      owner,
+				Scopes:     scopes,
+				ConsumerID: consumerID,
 			}
 			if ttl != "" {
 				d, perr := time.ParseDuration(ttl)
@@ -97,6 +98,8 @@ func newAdd(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringSliceVar(&scopes, "scopes", nil, "comma-separated scopes the key carries")
 	cmd.Flags().BoolVar(&requireBodyHash, "require-body-hash", false,
 		"reject UNSIGNED-PAYLOAD on this API (forces clients to include X-Apigw-Content-SHA256)")
+	cmd.Flags().StringVar(&consumerID, "consumer-id", "",
+		"map this key to a Consumer entry (default: use the key ID itself as the consumer)")
 	return cmd
 }
 

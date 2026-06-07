@@ -112,6 +112,41 @@ type Security struct {
 	// calls that endpoint with the verified identity and gets back a
 	// cookie to set on the user's browser.
 	Sessions *Sessions `koanf:"sessions" yaml:"sessions,omitempty"`
+
+	// Consumers is the registry of identities the gateway knows about,
+	// bundled into Groups for policy application. After an auth method
+	// succeeds, the handler maps the credential to a Consumer (key.ConsumerID
+	// for APIKey/HMAC, subject for JWT/OAuth2/Session, CN for mTLS) and
+	// surfaces X-Apigw-Consumer-Id + X-Apigw-Consumer-Groups to the upstream.
+	// Per-route ACL with match=consumer-id or match=consumer-group then
+	// filters based on this resolved identity.
+	Consumers []Consumer `koanf:"consumers" yaml:"consumers,omitempty"`
+
+	// ConsumerGroups documents the named groups Consumers reference.
+	// Pure-metadata today — populated for `apigw consumer group list` and
+	// for future per-group features (rate limits, plugins). A group named
+	// here that's referenced by a Consumer is fine even if the inverse is
+	// true (Consumer references an undefined group), so this list isn't
+	// authoritative — it's documentation + a place to hang descriptions.
+	ConsumerGroups []ConsumerGroup `koanf:"consumer_groups" yaml:"consumer_groups,omitempty"`
+}
+
+// Consumer is one identity in the registry. ID is the canonical
+// reference used by ACLs and credential mappings; Groups list the
+// named groups the consumer belongs to.
+type Consumer struct {
+	ID          string   `koanf:"id" yaml:"id"`
+	Name        string   `koanf:"name" yaml:"name,omitempty"`
+	Groups      []string `koanf:"groups" yaml:"groups,omitempty"`
+	Description string   `koanf:"description" yaml:"description,omitempty"`
+}
+
+// ConsumerGroup is metadata-only for now: a named bucket that
+// Consumer.Groups references. Future enhancements (per-group rate
+// limits, per-group plugins, per-group quotas) will hang fields here.
+type ConsumerGroup struct {
+	Name        string `koanf:"name" yaml:"name"`
+	Description string `koanf:"description" yaml:"description,omitempty"`
 }
 
 // Sessions is the dashboard's cookie-based session store config.
@@ -381,6 +416,11 @@ type APIKey struct {
 	ExpiresAt time.Time `koanf:"expires_at" yaml:"expires_at,omitempty"`
 	Disabled  bool      `koanf:"disabled" yaml:"disabled,omitempty"`
 	Scopes    []string  `koanf:"scopes" yaml:"scopes,omitempty"`
+	// ConsumerID maps this credential to a Security.Consumers entry.
+	// Empty = use the key ID itself as the consumer ID (1:1 mapping).
+	// Multiple credentials can share a ConsumerID — e.g. a long-lived
+	// "ci-bot" consumer with rotated keys all pointing at it.
+	ConsumerID string `koanf:"consumer_id" yaml:"consumer_id,omitempty"`
 }
 
 // HMACAuth turns the route into HMAC-signed. Each request must carry
@@ -443,6 +483,9 @@ type HMACKey struct {
 	ExpiresAt time.Time `koanf:"expires_at" yaml:"expires_at,omitempty"`
 	Disabled  bool      `koanf:"disabled" yaml:"disabled,omitempty"`
 	Scopes    []string  `koanf:"scopes" yaml:"scopes,omitempty"`
+	// ConsumerID maps this credential to a Security.Consumers entry.
+	// See APIKey.ConsumerID — same semantics.
+	ConsumerID string `koanf:"consumer_id" yaml:"consumer_id,omitempty"`
 }
 
 // OAuth2 turns on RFC 7662 token introspection — opaque bearer tokens

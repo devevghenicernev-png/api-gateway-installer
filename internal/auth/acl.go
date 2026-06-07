@@ -8,10 +8,12 @@
 package auth
 
 const (
-	ACLMatchAPIKeyID = "apikey-id"
-	ACLMatchHMACID   = "hmac-id"
-	ACLMatchSubject  = "subject"
-	ACLMatchMTLSCN   = "mtls-cn"
+	ACLMatchAPIKeyID      = "apikey-id"
+	ACLMatchHMACID        = "hmac-id"
+	ACLMatchSubject       = "subject"
+	ACLMatchMTLSCN        = "mtls-cn"
+	ACLMatchConsumerID    = "consumer-id"
+	ACLMatchConsumerGroup = "consumer-group"
 )
 
 // ACL mirrors config.ACL. Kept here so internal/auth doesn't import
@@ -53,4 +55,43 @@ func MatchACL(cfg *ACL, wantMatch, identity string) (bool, string) {
 		}
 	}
 	return false, "not in allow-list: " + identity
+}
+
+// MatchACLAny is the set-semantics version of MatchACL: the caller's
+// "identity" is a SET of values (e.g. the consumer's groups), and the
+// rule's Allow/Deny lists are matched by intersection.
+//
+//   - cfg nil OR cfg.Match != wantMatch → no-op, allowed=true.
+//   - ANY element of identities appears in Deny → blocked (deny wins).
+//   - Allow non-empty: at least one element of identities must appear
+//     in Allow.
+//   - Allow empty + no Deny hit → allowed.
+//
+// Used for ACLMatchConsumerGroup — a request's consumer may belong to
+// multiple groups; matching is "intersect with Allow / Deny".
+func MatchACLAny(cfg *ACL, wantMatch string, identities []string) (bool, string) {
+	if cfg == nil || cfg.Match == "" {
+		return true, "no acl"
+	}
+	if cfg.Match != wantMatch {
+		return true, "acl match=" + cfg.Match + " skipped for " + wantMatch
+	}
+	for _, d := range cfg.Deny {
+		for _, id := range identities {
+			if d == id {
+				return false, "denied via group: " + id
+			}
+		}
+	}
+	if len(cfg.Allow) == 0 {
+		return true, "no allow constraint"
+	}
+	for _, a := range cfg.Allow {
+		for _, id := range identities {
+			if a == id {
+				return true, "allowed via group: " + id
+			}
+		}
+	}
+	return false, "no identity in allow-list"
 }

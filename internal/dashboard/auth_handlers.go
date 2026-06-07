@@ -95,6 +95,21 @@ func (s *Server) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request) {
 	if entry != nil && !s.runACL(w, apiCfg, apiName, auth.ACLMatchAPIKeyID, entry.ID, "apikey") {
 		return
 	}
+	// Resolve consumer (credential.ConsumerID || credential.ID), set
+	// X-Apigw-Consumer-* headers, and run consumer-level ACL gates.
+	if entry != nil {
+		var consumerOverride string
+		for _, k := range apiCfg.APIKey.Keys {
+			if k.ID == entry.ID {
+				consumerOverride = k.ConsumerID
+				break
+			}
+		}
+		cid := auth.CredentialConsumerID(entry.ID, consumerOverride)
+		if !s.applyConsumer(w, cfg, apiCfg, apiName, cid, "apikey") {
+			return
+		}
+	}
 	// Surface identity for the upstream via headers auth_request_set
 	// can copy forward. Useful for app-level audit + per-user analytics.
 	if entry != nil {
@@ -300,6 +315,58 @@ func (s *Server) runACL(w http.ResponseWriter, apiCfg *config.API, apiName, want
 	return true
 }
 
+// applyConsumer resolves the consumer for an authenticated request,
+// surfaces X-Apigw-Consumer-Id / X-Apigw-Consumer-Groups on the
+// response (so nginx auth_request_set can forward to upstream), and
+// runs consumer-level ACL gates (consumer-id and consumer-group).
+// Returns false on deny (caller short-circuits — runACL has already
+// written 403). Empty consumerID = no-op so per-handler call sites
+// stay one-liners.
+func (s *Server) applyConsumer(w http.ResponseWriter, cfg *config.Config, apiCfg *config.API, apiName, consumerID, kind string) bool {
+	if consumerID == "" {
+		return true
+	}
+	w.Header().Set("X-Apigw-Consumer-Id", consumerID)
+
+	registry := make([]auth.Consumer, 0, len(cfg.Security.Consumers))
+	for _, c := range cfg.Security.Consumers {
+		registry = append(registry, auth.Consumer{ID: c.ID, Name: c.Name, Groups: c.Groups})
+	}
+	consumer, _ := auth.ResolveConsumer(consumerID, registry)
+	var groups []string
+	if consumer != nil {
+		groups = consumer.Groups
+		if len(groups) > 0 {
+			w.Header().Set("X-Apigw-Consumer-Groups", strings.Join(groups, " "))
+		}
+	}
+
+	// Consumer-id ACL (scalar). Runs even when there's no registry entry
+	// for this ID — the credential's ConsumerID is still the identity.
+	if !s.runACL(w, apiCfg, apiName, auth.ACLMatchConsumerID, consumerID, kind+"/consumer-id") {
+		return false
+	}
+
+	// Consumer-group ACL (set semantics). Only matters when the route's
+	// ACL is configured for consumer-group; otherwise no-op.
+	if apiCfg.ACL == nil || apiCfg.ACL.Match != auth.ACLMatchConsumerGroup {
+		return true
+	}
+	aclCfg := &auth.ACL{
+		Match: apiCfg.ACL.Match,
+		Allow: apiCfg.ACL.Allow,
+		Deny:  apiCfg.ACL.Deny,
+	}
+	ok, why := auth.MatchACLAny(aclCfg, auth.ACLMatchConsumerGroup, groups)
+	if !ok {
+		s.Logger.Info("acl: deny", "api", apiName, "auth", kind+"/consumer-group",
+			"consumer", consumerID, "groups", groups, "reason", why)
+		w.WriteHeader(http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // handleHMACAuth backs nginx auth_request /auth/hmac/<api>. The
 // subrequest is always GET on /auth/hmac/<api>, so the original method
 // and URI are passed via X-Original-Method and X-Original-URI headers
@@ -388,6 +455,19 @@ func (s *Server) handleHMACAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entry != nil {
+		var consumerOverride string
+		for _, k := range apiCfg.HMAC.Keys {
+			if k.ID == entry.ID {
+				consumerOverride = k.ConsumerID
+				break
+			}
+		}
+		cid := auth.CredentialConsumerID(entry.ID, consumerOverride)
+		if !s.applyConsumer(w, cfg, apiCfg, apiName, cid, "hmac") {
+			return
+		}
+	}
+	if entry != nil {
 		w.Header().Set("X-Apigw-HMAC-Key-ID", entry.ID)
 		if entry.Owner != "" {
 			w.Header().Set("X-Apigw-HMAC-Owner", entry.Owner)
@@ -444,6 +524,9 @@ func (s *Server) handleOAuth2Auth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ir != nil && !s.runACL(w, apiCfg, apiName, auth.ACLMatchSubject, ir.Subject, "oauth2") {
+		return
+	}
+	if ir != nil && !s.applyConsumer(w, cfg, apiCfg, apiName, ir.Subject, "oauth2") {
 		return
 	}
 	if ir != nil {

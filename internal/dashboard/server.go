@@ -261,6 +261,9 @@ func (s *Server) handleJWTAuth(w http.ResponseWriter, r *http.Request) {
 	if !s.runACL(w, apiCfg, apiName, auth.ACLMatchSubject, sub, "jwt") {
 		return
 	}
+	if !s.applyConsumer(w, cfg, apiCfg, apiName, sub, "jwt") {
+		return
+	}
 	// On success, surface the subject as a response header so nginx can
 	// `auth_request_set` and forward to the upstream (X-Remote-User pattern).
 	if sub != "" {
@@ -316,6 +319,9 @@ func (s *Server) handleMTLSAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.runACL(w, apiCfg, apiName, auth.ACLMatchMTLSCN, cn, "mtls") {
+		return
+	}
+	if !s.applyConsumer(w, cfg, apiCfg, apiName, cn, "mtls") {
 		return
 	}
 

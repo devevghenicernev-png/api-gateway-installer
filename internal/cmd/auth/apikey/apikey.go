@@ -32,7 +32,7 @@ func NewCmdAPIKey(f *cmdutil.Factory) *cobra.Command {
 }
 
 func newAdd(f *cmdutil.Factory) *cobra.Command {
-	var owner, ttl, header string
+	var owner, ttl, header, consumerID string
 	var rps int
 	var scopes []string
 	cmd := &cobra.Command{
@@ -66,11 +66,12 @@ func newAdd(f *cmdutil.Factory) *cobra.Command {
 				return gerr
 			}
 			entry := config.APIKey{
-				ID:     keyID,
-				Secret: secret,
-				Owner:  owner,
-				RPS:    rps,
-				Scopes: scopes,
+				ID:         keyID,
+				Secret:     secret,
+				Owner:      owner,
+				RPS:        rps,
+				Scopes:     scopes,
+				ConsumerID: consumerID,
 			}
 			if ttl != "" {
 				d, perr := time.ParseDuration(ttl)
@@ -92,6 +93,8 @@ func newAdd(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&ttl, "ttl", "", "time until expiry, e.g. 720h (30d). Empty = never expires")
 	cmd.Flags().StringVar(&header, "header", "", "override the X-API-Key header name for this API")
 	cmd.Flags().StringSliceVar(&scopes, "scopes", nil, "comma-separated scopes the key carries")
+	cmd.Flags().StringVar(&consumerID, "consumer-id", "",
+		"map this key to a Consumer entry (default: use the key ID itself as the consumer)")
 	return cmd
 }
 

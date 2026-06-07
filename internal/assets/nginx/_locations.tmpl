@@ -145,6 +145,15 @@
         proxy_set_header X-Apigw-ApiKey-Owner $apigw_apikey_owner;
         proxy_set_header X-Apigw-ApiKey-Scopes $apigw_apikey_scopes;
         {{ end -}}
+        {{ if or .APIKey .HMAC .Session .OAuth2 .JWT .MTLS -}}
+        # Consumer headers — set by whichever auth handler ran.
+        # Empty when the consumer isn't in the registry (resolution
+        # is best-effort).
+        auth_request_set $apigw_consumer_id $upstream_http_x_apigw_consumer_id;
+        auth_request_set $apigw_consumer_groups $upstream_http_x_apigw_consumer_groups;
+        proxy_set_header X-Apigw-Consumer-Id $apigw_consumer_id;
+        proxy_set_header X-Apigw-Consumer-Groups $apigw_consumer_groups;
+        {{ end -}}
         {{ if .Session -}}
         auth_request /_apigw_session_{{ .Name }};
         auth_request_set $apigw_session_sub $upstream_http_x_apigw_subject;

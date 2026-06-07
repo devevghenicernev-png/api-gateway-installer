@@ -18,6 +18,7 @@ import (
 	authcmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth"
 	backupcmd "github.com/devevghenicernev-png/apigw/internal/cmd/backup"
 	completioncmd "github.com/devevghenicernev-png/apigw/internal/cmd/completion"
+	consumercmd "github.com/devevghenicernev-png/apigw/internal/cmd/consumer"
 	dashboardcmd "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard"
 	deploycmd "github.com/devevghenicernev-png/apigw/internal/cmd/deploy"
 	doctorcmd "github.com/devevghenicernev-png/apigw/internal/cmd/doctor"
@@ -171,6 +172,10 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	authCmd := authcmd.NewCmdAuth(f)
 	authCmd.GroupID = "manage"
 	cmd.AddCommand(authCmd)
+
+	consumerCmd := consumercmd.NewCmdConsumer(f)
+	consumerCmd.GroupID = "manage"
+	cmd.AddCommand(consumerCmd)
 
 	statusCmd := statuscmd.NewCmdStatus(f)
 	statusCmd.GroupID = "diagnostics"
