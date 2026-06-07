@@ -17,6 +17,7 @@ import (
 	apiDisable "github.com/devevghenicernev-png/apigw/internal/cmd/api/disable"
 	apiEnable "github.com/devevghenicernev-png/apigw/internal/cmd/api/enable"
 	apiList "github.com/devevghenicernev-png/apigw/internal/cmd/api/list"
+	apiLog "github.com/devevghenicernev-png/apigw/internal/cmd/api/log"
 	apiImport "github.com/devevghenicernev-png/apigw/internal/cmd/api/openapiimport"
 	apiReload "github.com/devevghenicernev-png/apigw/internal/cmd/api/reload"
 	apiRemove "github.com/devevghenicernev-png/apigw/internal/cmd/api/remove"
@@ -54,5 +55,6 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiConnPool.NewCmdConnPool(f))
 	cmd.AddCommand(apiBuffering.NewCmdBuffering(f))
 	cmd.AddCommand(apiRewrite.NewCmdRewrite(f))
+	cmd.AddCommand(apiLog.NewCmdLog(f))
 	return cmd
 }

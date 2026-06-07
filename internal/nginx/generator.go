@@ -273,7 +273,8 @@ type apiEntry struct {
 	GRPCWeb       bool           // wraps gRPC for browsers via grpc_web_proxy_*
 	StickyMode    string         // "ip_hash" or "cookie:<name>"
 	BotGuard      *botGuardEntry
-	AccessLogMode string // "" (default) | "json" | "off"
+	AccessLogMode string // "" (default) | "json" | "combined" | "off"
+	AccessLogFile string // "" = nginx default path
 }
 
 type cacheEntry struct {
@@ -578,6 +579,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 			}
 		}
 		entry.AccessLogMode = a.AccessLog
+		entry.AccessLogFile = a.AccessLogFile
 
 		// BlueGreen, when set, replaces a.Upstreams as the primary pool.
 		// The non-active pool is intentionally NOT emitted as a separate

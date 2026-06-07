@@ -393,9 +393,17 @@ type API struct {
 	// HashKey is consumed when LoadBalance == "consistent_hash". Usually
 	// "$remote_addr" or "$http_x_session_id".
 	HashKey string `koanf:"hash_key" yaml:"hash_key,omitempty"`
-	// AccessLog overrides global behaviour for this route. "json" emits
-	// the structured log_format; "off" disables logging for the route.
+	// AccessLog overrides the global log format for this route.
+	// "json" emits the structured log_format; "combined" emits the
+	// stock combined format; "off" disables logging for the route.
+	// Empty = inherit Logging.Format.
 	AccessLog string `koanf:"access_log" yaml:"access_log,omitempty"`
+
+	// AccessLogFile, when non-empty, directs this route's access log
+	// to a dedicated file path (must be writable by nginx). Combine
+	// with AccessLog to control the format. Empty = use the nginx
+	// default (/var/log/nginx/access.log).
+	AccessLogFile string `koanf:"access_log_file" yaml:"access_log_file,omitempty"`
 
 	// CustomLocation / CustomServer (F14) inject raw nginx directives into
 	// the generated config. CustomLocation lands inside the `location {…}`

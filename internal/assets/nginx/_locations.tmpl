@@ -226,7 +226,9 @@
         {{ end -}}
         {{ end -}}
         {{ if eq .AccessLogMode "off" }}access_log off;
-        {{ else if eq .AccessLogMode "json" }}access_log /var/log/nginx/access.log apigw_json;
+        {{ else if eq .AccessLogMode "json" }}access_log {{ if .AccessLogFile }}{{ .AccessLogFile }}{{ else }}/var/log/nginx/access.log{{ end }} apigw_json;
+        {{ else if eq .AccessLogMode "combined" }}access_log {{ if .AccessLogFile }}{{ .AccessLogFile }}{{ else }}/var/log/nginx/access.log{{ end }} combined;
+        {{ else if .AccessLogFile }}access_log {{ .AccessLogFile }};
         {{ end -}}
         {{ if .RateLimitZone -}}
         limit_req zone=apigw_{{ .RateLimitZone }} burst={{ .RateLimitBurst }} nodelay;
