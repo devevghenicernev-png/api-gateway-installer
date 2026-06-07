@@ -104,6 +104,16 @@ type Security struct {
 	// Flip to true for highest-paranoia / breach-investigation mode.
 	AuditReads bool `koanf:"audit_reads" yaml:"audit_reads,omitempty"`
 
+	// IPReputationFeed is an absolute path to a file with one IP or
+	// CIDR per line (comments with #). When set, APIs with
+	// BotGuard.UseIPReputation=true reject requests whose $remote_addr
+	// matches. The file is read at config generation time and emitted
+	// into a global nginx `geo` block — reload via `apigw api reload`
+	// after updating the file. Live hot-reload (without nginx reload)
+	// is out of scope; a 10K-IP feed renders into ~200KB of nginx
+	// config which the kernel `include` handles fine.
+	IPReputationFeed string `koanf:"ip_reputation_feed" yaml:"ip_reputation_feed,omitempty"`
+
 	// Sessions configures the cookie-based session store. Nil = sessions
 	// disabled (per-API API.Session is then ignored). State lives in
 	// StateDir/sessions.db (bbolt). Issuing happens via the
@@ -544,6 +554,25 @@ type BotGuard struct {
 	RequireUserAgent    bool     `koanf:"require_user_agent" yaml:"require_user_agent,omitempty"`
 	BlockEmptyReferer   bool     `koanf:"block_empty_referer" yaml:"block_empty_referer,omitempty"`
 	BlockCommonScanners bool     `koanf:"block_common_scanners" yaml:"block_common_scanners,omitempty"`
+
+	// UseIPReputation, when true, blocks requests whose $remote_addr
+	// matches Security.IPReputationFeed. Per-API opt-in so the feed
+	// applies only to public routes — internal admin paths and mTLS
+	// upstreams usually shouldn't be filtered.
+	UseIPReputation bool `koanf:"use_ip_reputation" yaml:"use_ip_reputation,omitempty"`
+
+	// ForwardTLSFingerprint, when true, surfaces the synthetic TLS
+	// profile to the upstream via X-Apigw-TLS-Profile header. The
+	// value is `<protocol>/<cipher>/<curves>/<ciphers>` — not a JA3
+	// hash (real JA3 needs the ngx_ssl_ja3 module, which isn't in
+	// stock nginx). Still useful for upstream-side anomaly detection.
+	ForwardTLSFingerprint bool `koanf:"forward_tls_fingerprint" yaml:"forward_tls_fingerprint,omitempty"`
+
+	// BlockTLSPatterns rejects requests whose synthetic TLS profile
+	// matches any regex pattern. Cheap nginx-level filter for blocking
+	// legacy TLS versions, headless-browser cipher orderings, or
+	// specific tool fingerprints without involving the dashboard.
+	BlockTLSPatterns []string `koanf:"block_tls_patterns" yaml:"block_tls_patterns,omitempty"`
 }
 
 // Stream is a TCP or UDP proxy entry, served via nginx stream {}.

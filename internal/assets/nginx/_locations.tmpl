@@ -190,6 +190,12 @@
         {{ end -}}
         {{ range .BotGuard.BlockedAgents }}if ($http_user_agent ~* "{{ . }}") { return 403; }
         {{ end -}}
+        {{ if .BotGuard.UseIPReputation }}if ($apigw_ip_blocked = 1) { return 403; }
+        {{ end -}}
+        {{ if .BotGuard.HasTLSPatterns }}if ($apigw_tls_blocked_{{ .Name }} = 1) { return 403; }
+        {{ end -}}
+        {{ if .BotGuard.ForwardTLSFingerprint }}proxy_set_header X-Apigw-TLS-Profile "$ssl_protocol/$ssl_cipher/$ssl_curves/$ssl_ciphers";
+        {{ end -}}
         {{ end -}}
         {{ if .Mirror -}}
         mirror {{ .Mirror.Path }};

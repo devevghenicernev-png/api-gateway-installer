@@ -87,3 +87,26 @@ map $apigw_log_sample $apigw_log_skip {
     default 1;
 }
 {{ end }}
+
+{{ if .IPReputationFeed -}}
+# --- IP reputation blocklist (BotGuard.UseIPReputation) ---
+# File format: one IP or CIDR per line, # for comments. Update the file
+# then `apigw api reload` to push the new list to nginx.
+geo $apigw_ip_blocked {
+    default 0;
+    include {{ .IPReputationFeed }};
+}
+{{ end }}
+
+{{ range .TLSPatternMaps -}}
+# --- TLS pattern blocker for {{ .APIName }} ---
+# Synthetic profile: <protocol>|<cipher>|<curves>|<ciphers>.
+# Real JA3 requires the ngx_ssl_ja3 module; this is the stock-nginx
+# approximation good enough to block legacy TLS + obvious tool patterns.
+map "$ssl_protocol|$ssl_cipher|$ssl_curves|$ssl_ciphers" $apigw_tls_blocked_{{ .APIName }} {
+    default 0;
+    {{ range .Patterns -}}
+    "~{{ . }}" 1;
+    {{ end -}}
+}
+{{ end }}

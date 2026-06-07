@@ -92,6 +92,15 @@ type httpData struct {
 	CacheZones    []cacheZoneEntry
 	JSONLogFormat bool
 	LogSampleRate int // 1-100
+
+	// IPReputationFeed — when non-empty, emit a global geo
+	// $apigw_ip_blocked block that includes the file. Set from
+	// Security.IPReputationFeed when at least one API opts in via
+	// BotGuard.UseIPReputation; otherwise empty (no emission).
+	IPReputationFeed string
+
+	// TLSPatternMaps — one per-API map for BotGuard.BlockTLSPatterns.
+	TLSPatternMaps []tlsPatternMapEntry
 }
 
 type cacheZoneEntry struct {
@@ -234,11 +243,21 @@ type mirrorEntry struct {
 }
 
 type botGuardEntry struct {
-	BlockedAgents       []string
-	AllowedAgents       []string
-	RequireUserAgent    bool
-	BlockEmptyReferer   bool
-	BlockCommonScanners bool
+	BlockedAgents         []string
+	AllowedAgents         []string
+	RequireUserAgent      bool
+	BlockEmptyReferer     bool
+	BlockCommonScanners   bool
+	UseIPReputation       bool // emit `if ($apigw_ip_blocked = 1) { return 403; }`
+	HasTLSPatterns        bool // emit `if ($apigw_tls_blocked_<name> = 1) { return 403; }`
+	ForwardTLSFingerprint bool // emit proxy_set_header X-Apigw-TLS-Profile
+}
+
+// tlsPatternMapEntry drives the http{}-scope `map` for per-API TLS
+// pattern blocking.
+type tlsPatternMapEntry struct {
+	APIName  string
+	Patterns []string // regex fragments — already operator-supplied, emitted as `~`-prefixed
 }
 
 type corsEntry struct {
@@ -469,11 +488,14 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		entry.StickyMode = a.StickySession
 		if a.BotGuard != nil {
 			entry.BotGuard = &botGuardEntry{
-				BlockedAgents:       a.BotGuard.BlockUserAgents,
-				AllowedAgents:       a.BotGuard.AllowUserAgents,
-				RequireUserAgent:    a.BotGuard.RequireUserAgent,
-				BlockEmptyReferer:   a.BotGuard.BlockEmptyReferer,
-				BlockCommonScanners: a.BotGuard.BlockCommonScanners,
+				BlockedAgents:         a.BotGuard.BlockUserAgents,
+				AllowedAgents:         a.BotGuard.AllowUserAgents,
+				RequireUserAgent:      a.BotGuard.RequireUserAgent,
+				BlockEmptyReferer:     a.BotGuard.BlockEmptyReferer,
+				BlockCommonScanners:   a.BotGuard.BlockCommonScanners,
+				UseIPReputation:       a.BotGuard.UseIPReputation && cfg.Security.IPReputationFeed != "",
+				HasTLSPatterns:        len(a.BotGuard.BlockTLSPatterns) > 0,
+				ForwardTLSFingerprint: a.BotGuard.ForwardTLSFingerprint,
 			}
 		}
 		entry.AccessLogMode = a.AccessLog
@@ -659,16 +681,42 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 			})
 		}
 	}
+	// Collect TLS pattern maps + decide if the IP reputation block should
+	// emit. The feed only renders when at least one API opts in — empty
+	// http{} otherwise.
+	var tlsMaps []tlsPatternMapEntry
+	ipRepNeeded := false
+	for _, a := range cfg.APIs {
+		if a.BotGuard == nil {
+			continue
+		}
+		if a.BotGuard.UseIPReputation && cfg.Security.IPReputationFeed != "" {
+			ipRepNeeded = true
+		}
+		if len(a.BotGuard.BlockTLSPatterns) > 0 {
+			tlsMaps = append(tlsMaps, tlsPatternMapEntry{
+				APIName:  a.Name,
+				Patterns: a.BotGuard.BlockTLSPatterns,
+			})
+		}
+	}
+	ipFeed := ""
+	if ipRepNeeded {
+		ipFeed = cfg.Security.IPReputationFeed
+	}
+
 	hd := httpData{
-		Banner:         "PLACEHOLDER",
-		Gzip:           resolveGzip(cfg),
-		Upstreams:      upstreams,
-		RateLimitZones: rlZones,
-		CORSOriginMap:  corsOrigins,
-		SplitClients:   splits,
-		CacheZones:     cacheZones,
-		JSONLogFormat:  cfg.Logging.Format == "json",
-		LogSampleRate:  resolveSampleRate(cfg.Logging.SamplePercent),
+		Banner:           "PLACEHOLDER",
+		Gzip:             resolveGzip(cfg),
+		Upstreams:        upstreams,
+		RateLimitZones:   rlZones,
+		CORSOriginMap:    corsOrigins,
+		SplitClients:     splits,
+		CacheZones:       cacheZones,
+		JSONLogFormat:    cfg.Logging.Format == "json",
+		LogSampleRate:    resolveSampleRate(cfg.Logging.SamplePercent),
+		IPReputationFeed: ipFeed,
+		TLSPatternMaps:   tlsMaps,
 	}
 	var httpBuf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&httpBuf, "_http.tmpl", hd); err != nil {
