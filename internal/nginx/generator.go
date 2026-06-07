@@ -68,6 +68,13 @@ type templateData struct {
 	// auth_request enforce per-API.
 	MTLSAnyEnabled bool
 	MTLSCAFile     string
+
+	// OCSPStapling, when true, emits ssl_stapling + ssl_stapling_verify
+	// and a resolver directive. Off by default — Let's Encrypt killed
+	// their OCSP responders in Aug 2025, so flipping this on for LE
+	// certs is worse than useless. Operators with non-LE certs
+	// (DigiCert, Sectigo, internal CA) opt in via `apigw tls ocsp enable`.
+	OCSPStapling bool
 }
 
 // httpData drives the new _http.tmpl that renders into
@@ -569,6 +576,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		Banner:         "PLACEHOLDER", // substituted post-render
 		MTLSAnyEnabled: mtlsAny,
 		MTLSCAFile:     mtlsCAFile,
+		OCSPStapling:   cfg.TLS.OCSPStapling,
 	}
 
 	templateName := "server.tmpl"

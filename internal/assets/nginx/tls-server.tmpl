@@ -48,10 +48,15 @@ server {
     ssl_session_cache    shared:SSL:50m;
     ssl_session_tickets  off;          # forward secrecy
 
-    # OCSP stapling intentionally OFF.
-    # Let's Encrypt killed OCSP responders on 2025-08-06; new LE certs no
-    # longer carry OCSP URLs. Stapling-on yields warnings and zero benefit.
-    # ssl_stapling off;
+    # OCSP stapling — opt-in via `apigw tls ocsp enable` (TLS.OCSPStapling).
+    # OFF for LE certs (Let's Encrypt killed responders on 2025-08-06).
+    # ON for DigiCert / Sectigo / internal CAs whose responders are alive.
+    {{ if .OCSPStapling -}}
+    ssl_stapling        on;
+    ssl_stapling_verify on;
+    resolver            1.1.1.1 8.8.8.8 valid=300s ipv6=off;
+    resolver_timeout    5s;
+    {{ end -}}
 
     # HSTS — 2 years. includeSubDomains only when we control siblings on the apex.
     {{ if .HSTSIncludeSubDomains -}}

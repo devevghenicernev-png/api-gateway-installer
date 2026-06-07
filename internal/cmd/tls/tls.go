@@ -7,6 +7,7 @@ import (
 	tlsAddDomain "github.com/devevghenicernev-png/apigw/internal/cmd/tls/adddomain"
 	tlsDisable "github.com/devevghenicernev-png/apigw/internal/cmd/tls/disable"
 	tlsEnable "github.com/devevghenicernev-png/apigw/internal/cmd/tls/enable"
+	tlsOCSP "github.com/devevghenicernev-png/apigw/internal/cmd/tls/ocsp"
 	tlsRenew "github.com/devevghenicernev-png/apigw/internal/cmd/tls/renew"
 	tlsStatus "github.com/devevghenicernev-png/apigw/internal/cmd/tls/status"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
@@ -31,5 +32,6 @@ func NewCmdTLS(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(tlsStatus.NewCmdStatus(f))
 	cmd.AddCommand(tlsRenew.NewCmdRenew(f))
 	cmd.AddCommand(tlsDisable.NewCmdDisable(f))
+	cmd.AddCommand(tlsOCSP.NewCmdOCSP(f))
 	return cmd
 }

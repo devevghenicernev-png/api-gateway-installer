@@ -31,6 +31,11 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
 )
 
+// DefaultOCSPCachePath is where the dashboard opens its OCSP cache
+// when Security.StateDir is unset. Mirrors audit.db / approvals.db /
+// jobs.db locations.
+const DefaultOCSPCachePath = "/var/lib/apigw/ocsp.db"
+
 // Server bundles the hub + HTTP mux + dependencies. One per process.
 type Server struct {
 	Addr     string
@@ -64,6 +69,15 @@ type Server struct {
 	// hmacNonces holds the per-API nonce LRU for HMAC replay protection.
 	// Lazily inited in New(); never nil after construction.
 	hmacNonces *auth.HMACNonces
+
+	// OCSPCache is the bbolt-backed cache of client-cert OCSP responses.
+	// Lazily opened on first use by the mTLS handler (so installs without
+	// OCSP-enabled APIs pay no I/O cost). Nil = not yet opened.
+	OCSPCache *apitls.OCSPCache
+
+	// ocspHTTP is the outbound HTTP client used to fetch fresh OCSP
+	// responses. 5s timeout is the responder-industry norm.
+	ocspHTTP *http.Client
 }
 
 // New constructs a Server bound to `addr`.
@@ -84,7 +98,32 @@ func New(addr string, hub *events.Hub, cfgFn func() (*config.Config, error), log
 		started:    time.Now(),
 		Metrics:    m,
 		hmacNonces: auth.NewHMACNonces(),
+		ocspHTTP:   &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+// ocspCachePath resolves where the OCSP bbolt DB lives. Mirrors the
+// audit/approvals StateDir convention.
+func ocspCachePath(cfg *config.Config) string {
+	if cfg != nil && cfg.Security.StateDir != "" {
+		return cfg.Security.StateDir + "/ocsp.db"
+	}
+	return DefaultOCSPCachePath
+}
+
+// ensureOCSPCache opens the bbolt cache on first use; subsequent calls
+// are a no-op. Returns an error only the first time around — callers
+// must handle a nil cache by either soft-failing or returning 500.
+func (s *Server) ensureOCSPCache(cfg *config.Config) error {
+	if s.OCSPCache != nil {
+		return nil
+	}
+	c, err := apitls.OpenOCSPCache(ocspCachePath(cfg))
+	if err != nil {
+		return err
+	}
+	s.OCSPCache = c
+	return nil
 }
 
 // Routes wires the mux. Split out for testability so callers can mount
@@ -239,6 +278,22 @@ func (s *Server) handleMTLSAuth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(res.HTTPStatus())
 		return
 	}
+
+	// Revocation check (RFC 6960). Off unless the API config has OCSPCheck.
+	// On revoked → 403; on responder error → soft/hard-fail per config.
+	if apiCfg.MTLS.OCSPCheck {
+		ok, status, oerr := s.checkOCSPRevocation(apiName, apiCfg.MTLS, r.Header)
+		if !ok {
+			s.Logger.Info("mtls: ocsp deny", "api", apiName, "cn", cn, "status", status, "err", oerr)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if oerr != nil {
+			// soft-fail path: oerr non-nil but ok=true.
+			s.Logger.Warn("mtls: ocsp soft-fail", "api", apiName, "cn", cn, "err", oerr)
+		}
+	}
+
 	if cn != "" {
 		w.Header().Set("X-Apigw-Client-CN", cn)
 	}

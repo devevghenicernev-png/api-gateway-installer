@@ -588,6 +588,24 @@ type MTLS struct {
 	AllowSANs         []string `koanf:"allow_sans" yaml:"allow_sans,omitempty"`
 	AllowFingerprints []string `koanf:"allow_fingerprints" yaml:"allow_fingerprints,omitempty"`
 	Optional          bool     `koanf:"optional" yaml:"optional,omitempty"`
+
+	// OCSPCheck turns on revocation checking against the client cert's
+	// AuthorityInfoAccess OCSP responder. Defense-in-depth on top of
+	// nginx's chain verification: catches certs that were revoked AFTER
+	// being issued (e.g. a stolen key). Off by default — most public CAs
+	// (LE in particular) no longer run OCSP responders, but corporate /
+	// Smallstep / Vault PKI usually do.
+	OCSPCheck bool `koanf:"ocsp_check" yaml:"ocsp_check,omitempty"`
+
+	// OCSPSoftFail accepts the request when the responder is unreachable
+	// or returns "unknown". Default (false) is hard-fail (403). Soft-fail
+	// is the right choice when responder uptime is worse than your traffic
+	// tolerance for spurious 403s.
+	OCSPSoftFail bool `koanf:"ocsp_soft_fail" yaml:"ocsp_soft_fail,omitempty"`
+
+	// OCSPCacheTTL caps how long a cached OCSP response is trusted, even
+	// if the responder said nextUpdate is further out. 0 = 12h default.
+	OCSPCacheTTL time.Duration `koanf:"ocsp_cache_ttl" yaml:"ocsp_cache_ttl,omitempty"`
 }
 
 // JWT configures per-API JWT validation. The dashboard daemon serves an
@@ -674,6 +692,14 @@ type TLS struct {
 	Email        string   `koanf:"email" yaml:"email"`
 	Staging      bool     `koanf:"staging" yaml:"staging"`
 	DuckDNSToken string   `koanf:"duckdns_token" yaml:"duckdns_token"`
+
+	// OCSPStapling turns on `ssl_stapling on; ssl_stapling_verify on;`
+	// for our own server cert. Off by default because Let's Encrypt
+	// killed their OCSP responders in Aug 2025 — turning stapling on
+	// for an LE cert just yields warnings. Flip on for non-LE
+	// strategies (DigiCert, Sectigo, internal CAs) where the responder
+	// is still alive.
+	OCSPStapling bool `koanf:"ocsp_stapling" yaml:"ocsp_stapling,omitempty"`
 }
 
 // Defaults returns a config preloaded with sensible defaults. Save-only fields

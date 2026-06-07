@@ -8,14 +8,19 @@ package dashboard
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devevghenicernev-png/apigw/internal/auth"
 	"github.com/devevghenicernev-png/apigw/internal/config"
+	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 )
 
 // oauth2Verifiers caches verifiers keyed by api name so we don't rebuild
@@ -100,6 +105,176 @@ func (s *Server) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 }
+
+// ---------- OCSP support for mTLS revocation checking ----------
+
+// caBundleCache memo-izes parsed CA certs from MTLS.CAFile to avoid
+// re-parsing on every request. Keyed by file path; invalidates on
+// mtime change (operator-driven CA rotation is rare but supported).
+var caBundleCache = struct {
+	mu sync.RWMutex
+	m  map[string]caBundleEntry
+}{m: map[string]caBundleEntry{}}
+
+type caBundleEntry struct {
+	mtime time.Time
+	certs []*x509.Certificate
+}
+
+// loadCABundle reads + parses MTLS.CAFile; result is cached until the
+// file mtime changes.
+func loadCABundle(path string) ([]*x509.Certificate, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	caBundleCache.mu.RLock()
+	if ent, ok := caBundleCache.m[path]; ok && ent.mtime.Equal(info.ModTime()) {
+		caBundleCache.mu.RUnlock()
+		return ent.certs, nil
+	}
+	caBundleCache.mu.RUnlock()
+
+	raw, err := os.ReadFile(path) // nolint:gosec — caller-supplied trusted config path
+	if err != nil {
+		return nil, err
+	}
+	var out []*x509.Certificate
+	rest := raw
+	for {
+		block, next := pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			c, perr := x509.ParseCertificate(block.Bytes)
+			if perr == nil {
+				out = append(out, c)
+			}
+		}
+		rest = next
+	}
+	if len(out) == 0 {
+		return nil, &noCertsErr{path: path}
+	}
+	caBundleCache.mu.Lock()
+	caBundleCache.m[path] = caBundleEntry{mtime: info.ModTime(), certs: out}
+	caBundleCache.mu.Unlock()
+	return out, nil
+}
+
+type noCertsErr struct{ path string }
+
+func (e *noCertsErr) Error() string { return "no CERTIFICATE blocks in " + e.path }
+
+// findIssuerFor returns the cert in `bundle` whose Subject matches
+// `child.Issuer`. Returns nil when not found.
+func findIssuerFor(child *x509.Certificate, bundle []*x509.Certificate) *x509.Certificate {
+	for _, c := range bundle {
+		if c.Subject.String() == child.Issuer.String() {
+			return c
+		}
+	}
+	return nil
+}
+
+// checkOCSPRevocation parses the client cert from the nginx-supplied
+// headers and verifies its revocation status via the responder URL
+// embedded in the cert's AIA extension. Returns:
+//
+//	ok=true,  err=nil     — Good (cached or fresh).
+//	ok=true,  err!=nil    — Unknown/network error AND SoftFail=true.
+//	ok=false, status set  — Revoked, or hard-fail with err.
+//
+// The cert is re-parsed (cheap) rather than threading it through from
+// VerifyMTLS — keeps the signature stable and the OCSP path optional.
+func (s *Server) checkOCSPRevocation(apiName string, m *config.MTLS, h http.Header) (bool, apitls.OCSPStatus, error) {
+	pemStr := h.Get("X-Apigw-Mtls-Cert")
+	if pemStr == "" {
+		// No cert body to inspect — we can't fetch OCSP. Trust the
+		// VerifyMTLS DN-only path (CA already vouched for chain).
+		return true, apitls.OCSPStatusUnknown, nil
+	}
+	// nginx forwards the cert URL-encoded via $ssl_client_escaped_cert.
+	// Try unescape first; fall through to raw on failure (some configs
+	// forward $ssl_client_cert which is already PEM-shaped).
+	if dec, derr := url.QueryUnescape(pemStr); derr == nil {
+		pemStr = dec
+	}
+	block, _ := pem.Decode([]byte(pemStr))
+	if block == nil {
+		return true, apitls.OCSPStatusUnknown, nil
+	}
+	cert, perr := x509.ParseCertificate(block.Bytes)
+	if perr != nil {
+		return true, apitls.OCSPStatusUnknown, perr
+	}
+
+	// Cache lookup before any network I/O.
+	cfg, _ := s.ConfigFn()
+	if err := s.ensureOCSPCache(cfg); err != nil {
+		// Cache failed to open — fall through to direct fetch (no caching).
+		s.Logger.Warn("ocsp: cache open failed, fetching live", "api", apiName, "err", err)
+	}
+	fp := apitls.CertFingerprint(cert)
+	if s.OCSPCache != nil {
+		if status, _, hit := s.OCSPCache.Lookup(fp); hit {
+			if status == apitls.OCSPStatusRevoked {
+				return false, status, nil
+			}
+			if status == apitls.OCSPStatusGood {
+				return true, status, nil
+			}
+			// Unknown in cache — soft/hard-fail decision below.
+		}
+	}
+
+	// Load issuer from MTLS.CAFile.
+	bundle, berr := loadCABundle(m.CAFile)
+	if berr != nil {
+		if m.OCSPSoftFail {
+			return true, apitls.OCSPStatusUnknown, berr
+		}
+		return false, apitls.OCSPStatusUnknown, berr
+	}
+	issuer := findIssuerFor(cert, bundle)
+	if issuer == nil {
+		err := &noIssuerErr{cn: cert.Issuer.String()}
+		if m.OCSPSoftFail {
+			return true, apitls.OCSPStatusUnknown, err
+		}
+		return false, apitls.OCSPStatusUnknown, err
+	}
+
+	status, nextUpdate, ferr := apitls.FetchOCSP(cert, issuer, s.ocspHTTP)
+	if ferr != nil {
+		if m.OCSPSoftFail {
+			return true, apitls.OCSPStatusUnknown, ferr
+		}
+		return false, apitls.OCSPStatusUnknown, ferr
+	}
+	expires := apitls.ExpiryFromResponse(nextUpdate, m.OCSPCacheTTL)
+	if s.OCSPCache != nil {
+		_ = s.OCSPCache.Store(fp, status, expires)
+	}
+	if status == apitls.OCSPStatusRevoked {
+		return false, status, nil
+	}
+	if status == apitls.OCSPStatusGood {
+		return true, status, nil
+	}
+	// Unknown — soft/hard.
+	if m.OCSPSoftFail {
+		return true, status, nil
+	}
+	return false, status, nil
+}
+
+type noIssuerErr struct{ cn string }
+
+func (e *noIssuerErr) Error() string { return "no issuer in CA bundle for " + e.cn }
+
+// ---------- end OCSP support ----------
 
 // handleHMACAuth backs nginx auth_request /auth/hmac/<api>. The
 // subrequest is always GET on /auth/hmac/<api>, so the original method
