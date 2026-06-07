@@ -114,6 +114,14 @@ type Security struct {
 	// config which the kernel `include` handles fine.
 	IPReputationFeed string `koanf:"ip_reputation_feed" yaml:"ip_reputation_feed,omitempty"`
 
+	// ChangeWindows is a list of recurring time ranges during which
+	// mutating admin actions (api.add / deploy.run / config.* writes)
+	// are rejected with HTTP 423 Locked. Read-only actions are
+	// unaffected. Operators use this for production freeze periods —
+	// e.g. block any change Friday 14:00 → Monday 09:00 unless an
+	// override flag is set on the request. Empty list = no freeze.
+	ChangeWindows []ChangeWindow `koanf:"change_windows" yaml:"change_windows,omitempty"`
+
 	// Sessions configures the cookie-based session store. Nil = sessions
 	// disabled (per-API API.Session is then ignored). State lives in
 	// StateDir/sessions.db (bbolt). Issuing happens via the
@@ -139,6 +147,29 @@ type Security struct {
 	// true (Consumer references an undefined group), so this list isn't
 	// authoritative — it's documentation + a place to hang descriptions.
 	ConsumerGroups []ConsumerGroup `koanf:"consumer_groups" yaml:"consumer_groups,omitempty"`
+}
+
+// ChangeWindow is a recurring weekly time range during which mutating
+// admin actions are rejected. Server time is used (typically UTC for
+// installs; operators set the right timezone in the systemd unit if
+// they want local).
+//
+// Days is a comma-friendly list of lowercase 3-letter day names: any
+// combination of mon/tue/wed/thu/fri/sat/sun. Empty list = every day.
+//
+// StartHour / EndHour are 0-23. The window is "[StartHour:00,
+// EndHour:00)" same-day; for windows that cross midnight (e.g.
+// Fri 14:00 → Mon 09:00), declare two ChangeWindow entries
+// (Fri 14-24 + Mon 0-9) — keeps the matcher one-liner.
+//
+// Reason is a short free-form string surfaced in the 423 response so
+// the caller knows why their write was blocked.
+type ChangeWindow struct {
+	Name      string   `koanf:"name" yaml:"name,omitempty"`
+	Days      []string `koanf:"days" yaml:"days,omitempty"`
+	StartHour int      `koanf:"start_hour" yaml:"start_hour"`
+	EndHour   int      `koanf:"end_hour" yaml:"end_hour"`
+	Reason    string   `koanf:"reason" yaml:"reason,omitempty"`
 }
 
 // Consumer is one identity in the registry. ID is the canonical

@@ -40,6 +40,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/alerts"
 	"github.com/devevghenicernev-png/apigw/internal/approvals"
 	"github.com/devevghenicernev-png/apigw/internal/audit"
+	"github.com/devevghenicernev-png/apigw/internal/changewindow"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/policy"
@@ -50,12 +51,13 @@ import (
 // Security is the integrated guard-rails layer. All fields are nil-safe —
 // nil Security means "no security configured" and Guard() short-circuits.
 type Security struct {
-	RBAC      *rbac.Engine
-	Policy    *policy.Engine
-	Audit     *audit.Logger
-	Approvals *approvals.Store
-	Tenants   *tenant.Registry
-	Alerts    *alerts.Dispatcher
+	RBAC          *rbac.Engine
+	Policy        *policy.Engine
+	Audit         *audit.Logger
+	Approvals     *approvals.Store
+	Tenants       *tenant.Registry
+	Alerts        *alerts.Dispatcher
+	ChangeWindows []changewindow.Window // freeze periods that block mutating actions
 
 	// Token table maps `Authorization: Bearer <token>` to an identity.
 	// Tokens are kept in memory (read from config on Reload()).
@@ -87,13 +89,14 @@ func NewSecurity(cfg config.Security, tenants []config.Tenant, alertsCfg config.
 		return nil, fmt.Errorf("security: state dir: %w", err)
 	}
 	s := &Security{
-		stateDir:   stateDir,
-		enforce:    cfg.RBACEnforce,
-		maxBody:    cfg.MaxRequestBytes,
-		threshold:  cfg.ApprovalsThreshold,
-		auditReads: cfg.AuditReads,
-		logger:     logger,
-		tokens:     map[string]rbac.Identity{},
+		stateDir:      stateDir,
+		enforce:       cfg.RBACEnforce,
+		maxBody:       cfg.MaxRequestBytes,
+		threshold:     cfg.ApprovalsThreshold,
+		auditReads:    cfg.AuditReads,
+		logger:        logger,
+		tokens:        map[string]rbac.Identity{},
+		ChangeWindows: configChangeWindows(cfg.ChangeWindows),
 	}
 	if s.maxBody <= 0 {
 		s.maxBody = 1 << 20 // 1 MiB
@@ -329,6 +332,23 @@ type Action struct {
 func (s *Security) Guard(r *http.Request, a Action, onCommit func() error) (uint64, error) {
 	ident := s.Identify(r)
 
+	// 0. Change windows — block mutating actions during freeze
+	// periods. Read-only actions (.list/.show/.get/.read/.status) pass.
+	if s != nil && len(s.ChangeWindows) > 0 && changewindow.IsMutating(string(a.Permission)) {
+		if w := changewindow.Active(s.ChangeWindows, time.Now()); w != nil {
+			reason := w.Reason
+			if reason == "" {
+				if w.Name != "" {
+					reason = "freeze window: " + w.Name
+				} else {
+					reason = "freeze window active"
+				}
+			}
+			_, _ = s.recordAudit(ident.User, a, "denied", reason)
+			return 0, fmt.Errorf("%w: %s", ErrChangeFrozen, reason)
+		}
+	}
+
 	// 1. RBAC.
 	if s != nil && s.RBAC != nil {
 		if err := s.RBAC.Check(ident, a.Permission, a.Resource); err != nil {
@@ -515,6 +535,7 @@ var (
 	ErrPendingApproval  = errors.New("pending approval")
 	ErrBadRequest       = errors.New("bad request")
 	ErrAuditUnavailable = errors.New("audit log unavailable")
+	ErrChangeFrozen     = errors.New("change frozen")
 )
 
 // Status maps an error returned by Guard()/ReadBody() to an HTTP status.
@@ -526,6 +547,8 @@ func Status(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, ErrPendingApproval):
 		return http.StatusAccepted
+	case errors.Is(err, ErrChangeFrozen):
+		return http.StatusLocked
 	case errors.Is(err, ErrBadRequest):
 		return http.StatusBadRequest
 	case errors.Is(err, ErrAuditUnavailable):
@@ -640,3 +663,23 @@ type slogAlertsAdapter struct{ l *slog.Logger }
 func (a slogAlertsAdapter) Info(msg string, fields ...any)  { a.l.Info(msg, fields...) }
 func (a slogAlertsAdapter) Warn(msg string, fields ...any)  { a.l.Warn(msg, fields...) }
 func (a slogAlertsAdapter) Error(msg string, fields ...any) { a.l.Error(msg, fields...) }
+
+// configChangeWindows converts the config-side ChangeWindow slice into
+// the changewindow package's Window slice (avoids dragging the config
+// package into changewindow itself).
+func configChangeWindows(in []config.ChangeWindow) []changewindow.Window {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]changewindow.Window, 0, len(in))
+	for _, w := range in {
+		out = append(out, changewindow.Window{
+			Name:      w.Name,
+			Days:      w.Days,
+			StartHour: w.StartHour,
+			EndHour:   w.EndHour,
+			Reason:    w.Reason,
+		})
+	}
+	return out
+}
