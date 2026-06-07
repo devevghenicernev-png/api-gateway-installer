@@ -366,6 +366,7 @@ type API struct {
 	Variants       []Variant       `koanf:"variants" yaml:"variants,omitempty"`
 	ConnectionPool *ConnectionPool `koanf:"connection_pool" yaml:"connection_pool,omitempty"`
 	Buffering      *Buffering      `koanf:"buffering" yaml:"buffering,omitempty"`
+	Rewrites       []RewriteRule   `koanf:"rewrites" yaml:"rewrites,omitempty"`
 	Transform      *Transform      `koanf:"transform" yaml:"transform,omitempty"`
 	Versioning     *Versioning     `koanf:"versioning" yaml:"versioning,omitempty"`
 
@@ -710,6 +711,27 @@ type Retry struct {
 //
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
+// RewriteRule maps to nginx's `rewrite <match> <replace> <flag>`
+// directive. Multiple rules are emitted in order; nginx evaluates
+// them sequentially until a `last` / `redirect` / `permanent` flag
+// short-circuits.
+//
+// Match is a regex with capture groups; Replace can reference them
+// via $1, $2, etc.
+//
+// Valid Flag values:
+//   - "last"       — re-search location after rewrite (most common)
+//   - "break"      — stop rewrite chain, keep current location
+//   - "redirect"   — 302 to Replace (Replace must be a URL)
+//   - "permanent"  — 301 to Replace
+//
+// Empty Flag defaults to "last".
+type RewriteRule struct {
+	Match   string `koanf:"match" yaml:"match"`
+	Replace string `koanf:"replace" yaml:"replace"`
+	Flag    string `koanf:"flag" yaml:"flag,omitempty"`
+}
+
 // Buffering controls nginx's request + response buffering for one
 // route. The default (nil) keeps nginx's own defaults — request body
 // buffered to memory/disk, response buffered for HTTP/1.1. Two big

@@ -247,6 +247,11 @@ type apiEntry struct {
 	// emits only when non-empty / non-default.
 	Buffering *bufferingEntry
 
+	// Rewrites — emitted in order at the top of the location block,
+	// before any auth_request / proxy_pass. Each rule becomes
+	// `rewrite <Match> <Replace> <Flag>;`.
+	Rewrites []rewriteEntry
+
 	GRPC             bool   // F9 — emit grpc_pass instead of proxy_pass
 	JWT              bool   // F12 — emit auth_request /_apigw_jwt/<api>
 	JWTDashboardPort int    // F12 — port the dashboard daemon listens on
@@ -323,6 +328,14 @@ type forwardAuthEntry struct {
 	Upstream     string // proxy_pass target (URL form)
 	SignInURL    string
 	SetHeaders   []string // auth_request_set $var $upstream_http_<header>
+}
+
+// rewriteEntry is one nginx `rewrite` directive. Flag is sanitised /
+// defaulted in the middleware layer.
+type rewriteEntry struct {
+	Match   string
+	Replace string
+	Flag    string // "last" | "break" | "redirect" | "permanent"
 }
 
 // bufferingEntry mirrors config.Buffering. Request/Response are

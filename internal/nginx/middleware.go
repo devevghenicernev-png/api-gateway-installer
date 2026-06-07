@@ -144,6 +144,26 @@ func applyMiddleware(
 		}
 	}
 
+	if rws := a.Rewrites; len(rws) > 0 {
+		out.Rewrites = make([]rewriteEntry, 0, len(rws))
+		for i, r := range rws {
+			if r.Match == "" || r.Replace == "" {
+				return fmt.Errorf("rewrites[%d]: match and replace are required", i)
+			}
+			flag := r.Flag
+			switch flag {
+			case "", "last":
+				flag = "last"
+			case "break", "redirect", "permanent":
+				// ok
+			default:
+				return fmt.Errorf("rewrites[%d]: invalid flag %q (use last/break/redirect/permanent)", i, flag)
+			}
+			out.Rewrites = append(out.Rewrites, rewriteEntry{
+				Match: r.Match, Replace: r.Replace, Flag: flag,
+			})
+		}
+	}
 	if b := a.Buffering; b != nil {
 		out.Buffering = &bufferingEntry{
 			Request:              boolToOnOff(b.Request),

@@ -104,6 +104,9 @@
     }
     {{ end -}}
     location {{ .Path }} {
+        {{ range .Rewrites -}}
+        rewrite {{ .Match }} {{ .Replace }} {{ .Flag }};
+        {{ end -}}
         {{ if .MaxBodySize }}client_max_body_size {{ .MaxBodySize }};
         {{ end -}}
         {{ range .Allow }}allow {{ . }};
@@ -316,6 +319,9 @@
     # deploy {{ .Name }} ({{ .Runtime }}, sha={{ .SHA }})
     {{ if eq .Runtime "static" -}}
     location {{ .Path }} {
+        {{ range .Rewrites -}}
+        rewrite {{ .Match }} {{ .Replace }} {{ .Flag }};
+        {{ end -}}
         {{ if .MaxBodySize }}client_max_body_size {{ .MaxBodySize }};
         {{ end -}}
         {{ range .Allow }}allow {{ . }};
@@ -357,6 +363,9 @@
     }
     {{ end -}}
     location {{ .Path }} {
+        {{ range .Rewrites -}}
+        rewrite {{ .Match }} {{ .Replace }} {{ .Flag }};
+        {{ end -}}
         {{ if .MaxBodySize }}client_max_body_size {{ .MaxBodySize }};
         {{ end -}}
         {{ range .Allow }}allow {{ . }};
