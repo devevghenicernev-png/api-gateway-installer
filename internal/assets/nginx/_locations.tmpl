@@ -52,6 +52,19 @@
         proxy_set_header X-Original-URI $request_uri;
     }
     {{ end -}}
+    {{ if .Session -}}
+    # Session-cookie auth-check for {{ .Name }} → dashboard daemon.
+    # The dashboard reads the session cookie name from
+    # Security.Sessions.CookieName (default apigw_session).
+    location = /_apigw_session_{{ .Name }} {
+        internal;
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/auth/session/{{ .Name }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+    {{ end -}}
     {{ if .HMAC -}}
     # HMAC signature auth-check for {{ .Name }} → dashboard daemon.
     # Body is NOT forwarded — integrity is enforced via signed
@@ -131,6 +144,15 @@
         proxy_set_header X-Apigw-ApiKey-ID $apigw_apikey_id;
         proxy_set_header X-Apigw-ApiKey-Owner $apigw_apikey_owner;
         proxy_set_header X-Apigw-ApiKey-Scopes $apigw_apikey_scopes;
+        {{ end -}}
+        {{ if .Session -}}
+        auth_request /_apigw_session_{{ .Name }};
+        auth_request_set $apigw_session_sub $upstream_http_x_apigw_subject;
+        auth_request_set $apigw_session_id $upstream_http_x_apigw_session_id;
+        auth_request_set $apigw_session_scopes $upstream_http_x_apigw_scopes;
+        proxy_set_header X-Apigw-Subject $apigw_session_sub;
+        proxy_set_header X-Apigw-Session-ID $apigw_session_id;
+        proxy_set_header X-Apigw-Scopes $apigw_session_scopes;
         {{ end -}}
         {{ if .HMAC -}}
         auth_request /_apigw_hmac_{{ .Name }};

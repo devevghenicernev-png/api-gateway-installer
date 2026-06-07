@@ -103,6 +103,48 @@ type Security struct {
 	// and SOX/PCI/SOC2 care about mutations and denials, not lookups.
 	// Flip to true for highest-paranoia / breach-investigation mode.
 	AuditReads bool `koanf:"audit_reads" yaml:"audit_reads,omitempty"`
+
+	// Sessions configures the cookie-based session store. Nil = sessions
+	// disabled (per-API API.Session is then ignored). State lives in
+	// StateDir/sessions.db (bbolt). Issuing happens via the
+	// /api/admin/sessions POST endpoint — there's no built-in login
+	// flow; an upstream auth proxy / OAuth2 callback / SAML callback
+	// calls that endpoint with the verified identity and gets back a
+	// cookie to set on the user's browser.
+	Sessions *Sessions `koanf:"sessions" yaml:"sessions,omitempty"`
+}
+
+// Sessions is the dashboard's cookie-based session store config.
+type Sessions struct {
+	// CookieName is the Set-Cookie name returned to the browser. Default
+	// "apigw_session".
+	CookieName string `koanf:"cookie_name" yaml:"cookie_name,omitempty"`
+
+	// TTL is how long a freshly-issued session is valid. Default 24h.
+	TTL time.Duration `koanf:"ttl" yaml:"ttl,omitempty"`
+
+	// SlidingWindow, when true, resets ExpiresAt to now+TTL on every
+	// successful Lookup — sessions never expire while the user is
+	// active. False = absolute expiry from IssuedAt.
+	SlidingWindow bool `koanf:"sliding_window" yaml:"sliding_window,omitempty"`
+
+	// Domain sets the Domain attribute on Set-Cookie. Empty = host-only
+	// cookie (the issuing host, no subdomains).
+	Domain string `koanf:"domain" yaml:"domain,omitempty"`
+
+	// SameSite picks the SameSite attribute: "lax" (default), "strict",
+	// "none". "none" requires Secure=true and is for cross-site
+	// embedded flows.
+	SameSite string `koanf:"same_site" yaml:"same_site,omitempty"`
+
+	// Secure (default true) sets the Secure attribute on Set-Cookie so
+	// browsers refuse to send the cookie over plain HTTP. Flip to false
+	// only for local dev.
+	Secure bool `koanf:"secure" yaml:"secure"`
+
+	// HTTPOnly (default true) blocks JS from reading the cookie via
+	// document.cookie. There's no good reason to disable this.
+	HTTPOnly bool `koanf:"http_only" yaml:"http_only"`
 }
 
 // AdminToken associates an opaque secret with a user identity + role set.
@@ -279,15 +321,20 @@ type API struct {
 	Versioning  *Versioning  `koanf:"versioning" yaml:"versioning,omitempty"`
 
 	// New in v0.2.0 — fills the long tail of competitive features.
-	APIKey   *APIKeyAuth `koanf:"api_key" yaml:"api_key,omitempty"`
-	HMAC     *HMACAuth   `koanf:"hmac" yaml:"hmac,omitempty"`
-	ACL      *ACL        `koanf:"acl" yaml:"acl,omitempty"`
-	OAuth2   *OAuth2     `koanf:"oauth2" yaml:"oauth2,omitempty"`
-	Cache    *Cache      `koanf:"cache" yaml:"cache,omitempty"`
-	Mock     *Mock       `koanf:"mock" yaml:"mock,omitempty"`
-	Timeouts *Timeouts   `koanf:"timeouts" yaml:"timeouts,omitempty"`
-	Mirror   *Mirror     `koanf:"mirror" yaml:"mirror,omitempty"`
-	BotGuard *BotGuard   `koanf:"bot_guard" yaml:"bot_guard,omitempty"`
+	APIKey *APIKeyAuth `koanf:"api_key" yaml:"api_key,omitempty"`
+	HMAC   *HMACAuth   `koanf:"hmac" yaml:"hmac,omitempty"`
+	ACL    *ACL        `koanf:"acl" yaml:"acl,omitempty"`
+	OAuth2 *OAuth2     `koanf:"oauth2" yaml:"oauth2,omitempty"`
+	// Session, when true, accepts the dashboard's session cookie as a
+	// valid identity proof — requires Security.Sessions to be configured.
+	// nginx auth_request /auth/session/<api> looks up the cookie value
+	// in the session store and surfaces X-Apigw-Subject on success.
+	Session  bool      `koanf:"session" yaml:"session,omitempty"`
+	Cache    *Cache    `koanf:"cache" yaml:"cache,omitempty"`
+	Mock     *Mock     `koanf:"mock" yaml:"mock,omitempty"`
+	Timeouts *Timeouts `koanf:"timeouts" yaml:"timeouts,omitempty"`
+	Mirror   *Mirror   `koanf:"mirror" yaml:"mirror,omitempty"`
+	BotGuard *BotGuard `koanf:"bot_guard" yaml:"bot_guard,omitempty"`
 	// GRPCWeb wraps standard gRPC in the grpc-web framing so browsers can
 	// call it. Mutually exclusive with non-gRPC upstreams.
 	GRPCWeb bool `koanf:"grpc_web" yaml:"grpc_web,omitempty"`

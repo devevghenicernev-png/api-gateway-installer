@@ -199,6 +199,7 @@ type apiEntry struct {
 	// v0.2.0 additions.
 	APIKey        bool           // emit auth_request /_apigw_apikey_<name>
 	HMAC          bool           // emit auth_request /_apigw_hmac_<name>
+	Session       bool           // emit auth_request /_apigw_session_<name>
 	OAuth2        bool           // emit auth_request /_apigw_oauth2_<name>
 	Mock          bool           // route hits internal mock handler instead of upstream
 	Cache         *cacheEntry    // proxy_cache directives
@@ -407,6 +408,12 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		}
 		if a.HMAC != nil && len(a.HMAC.Keys) > 0 {
 			entry.HMAC = true
+			if entry.JWTDashboardPort == 0 {
+				entry.JWTDashboardPort = cfg.Dashboard.Port
+			}
+		}
+		if a.Session {
+			entry.Session = true
 			if entry.JWTDashboardPort == 0 {
 				entry.JWTDashboardPort = cfg.Dashboard.Port
 			}

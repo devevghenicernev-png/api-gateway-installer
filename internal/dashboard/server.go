@@ -36,6 +36,10 @@ import (
 // jobs.db locations.
 const DefaultOCSPCachePath = "/var/lib/apigw/ocsp.db"
 
+// DefaultSessionsPath mirrors DefaultOCSPCachePath for the session
+// store.
+const DefaultSessionsPath = "/var/lib/apigw/sessions.db"
+
 // Server bundles the hub + HTTP mux + dependencies. One per process.
 type Server struct {
 	Addr     string
@@ -78,6 +82,11 @@ type Server struct {
 	// ocspHTTP is the outbound HTTP client used to fetch fresh OCSP
 	// responses. 5s timeout is the responder-industry norm.
 	ocspHTTP *http.Client
+
+	// SessionStore is the cookie-based session store. Lazily opened on
+	// first /auth/session/* or /api/admin/sessions* hit. Nil = not yet
+	// opened or Security.Sessions disabled.
+	SessionStore *auth.SessionStore
 }
 
 // New constructs a Server bound to `addr`.
@@ -126,6 +135,28 @@ func (s *Server) ensureOCSPCache(cfg *config.Config) error {
 	return nil
 }
 
+// sessionsPath resolves where the session bbolt DB lives.
+func sessionsPath(cfg *config.Config) string {
+	if cfg != nil && cfg.Security.StateDir != "" {
+		return cfg.Security.StateDir + "/sessions.db"
+	}
+	return DefaultSessionsPath
+}
+
+// ensureSessionStore opens the bbolt-backed session store on first
+// use. Subsequent calls are a no-op.
+func (s *Server) ensureSessionStore(cfg *config.Config) error {
+	if s.SessionStore != nil {
+		return nil
+	}
+	st, err := auth.OpenSessionStore(sessionsPath(cfg))
+	if err != nil {
+		return err
+	}
+	s.SessionStore = st
+	return nil
+}
+
 // Routes wires the mux. Split out for testability so callers can mount
 // alongside other handlers if needed (e.g. embed in webhook server later).
 func (s *Server) Routes(mux *http.ServeMux) {
@@ -138,6 +169,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/mtls/", s.handleMTLSAuth)
 	mux.HandleFunc("/auth/apikey/", s.handleAPIKeyAuth)
 	mux.HandleFunc("/auth/hmac/", s.handleHMACAuth)
+	mux.HandleFunc("/auth/session/", s.handleSessionAuth)
 	mux.HandleFunc("/auth/oauth2/", s.handleOAuth2Auth)
 	mux.HandleFunc("/mock/", s.handleMock)
 	s.adminRoutes(mux)
