@@ -104,6 +104,27 @@
     }
     {{ end -}}
     location {{ .Path }} {
+        {{ if .LifecycleDraft -}}
+        # lifecycle: draft — returns 503 until promoted to published.
+        return 503 "draft API\n";
+        {{ end -}}
+        {{ if .LifecycleRetired -}}
+        # lifecycle: retired — returns 410 Gone.
+        {{ if .LifecycleReplacementURL -}}
+        add_header Link "<{{ .LifecycleReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        return 410 "retired API\n";
+        {{ end -}}
+        {{ if .LifecycleDeprecated -}}
+        # lifecycle: deprecated — RFC 8594 Deprecation + Sunset headers.
+        add_header Deprecation "true" always;
+        {{ if .LifecycleSunsetAt -}}
+        add_header Sunset "{{ .LifecycleSunsetAt }}" always;
+        {{ end -}}
+        {{ if .LifecycleReplacementURL -}}
+        add_header Link "<{{ .LifecycleReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        {{ end -}}
         {{ range .Rewrites -}}
         rewrite {{ .Match }} {{ .Replace }} {{ .Flag }};
         {{ end -}}
@@ -327,6 +348,27 @@
     # deploy {{ .Name }} ({{ .Runtime }}, sha={{ .SHA }})
     {{ if eq .Runtime "static" -}}
     location {{ .Path }} {
+        {{ if .LifecycleDraft -}}
+        # lifecycle: draft — returns 503 until promoted to published.
+        return 503 "draft API\n";
+        {{ end -}}
+        {{ if .LifecycleRetired -}}
+        # lifecycle: retired — returns 410 Gone.
+        {{ if .LifecycleReplacementURL -}}
+        add_header Link "<{{ .LifecycleReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        return 410 "retired API\n";
+        {{ end -}}
+        {{ if .LifecycleDeprecated -}}
+        # lifecycle: deprecated — RFC 8594 Deprecation + Sunset headers.
+        add_header Deprecation "true" always;
+        {{ if .LifecycleSunsetAt -}}
+        add_header Sunset "{{ .LifecycleSunsetAt }}" always;
+        {{ end -}}
+        {{ if .LifecycleReplacementURL -}}
+        add_header Link "<{{ .LifecycleReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        {{ end -}}
         {{ range .Rewrites -}}
         rewrite {{ .Match }} {{ .Replace }} {{ .Flag }};
         {{ end -}}
@@ -371,6 +413,27 @@
     }
     {{ end -}}
     location {{ .Path }} {
+        {{ if .LifecycleDraft -}}
+        # lifecycle: draft — returns 503 until promoted to published.
+        return 503 "draft API\n";
+        {{ end -}}
+        {{ if .LifecycleRetired -}}
+        # lifecycle: retired — returns 410 Gone.
+        {{ if .LifecycleReplacementURL -}}
+        add_header Link "<{{ .LifecycleReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        return 410 "retired API\n";
+        {{ end -}}
+        {{ if .LifecycleDeprecated -}}
+        # lifecycle: deprecated — RFC 8594 Deprecation + Sunset headers.
+        add_header Deprecation "true" always;
+        {{ if .LifecycleSunsetAt -}}
+        add_header Sunset "{{ .LifecycleSunsetAt }}" always;
+        {{ end -}}
+        {{ if .LifecycleReplacementURL -}}
+        add_header Link "<{{ .LifecycleReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        {{ end -}}
         {{ range .Rewrites -}}
         rewrite {{ .Match }} {{ .Replace }} {{ .Flag }};
         {{ end -}}

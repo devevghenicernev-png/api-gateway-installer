@@ -416,6 +416,7 @@ type API struct {
 	Buffering      *Buffering      `koanf:"buffering" yaml:"buffering,omitempty"`
 	Rewrites       []RewriteRule   `koanf:"rewrites" yaml:"rewrites,omitempty"`
 	SLO            *SLO            `koanf:"slo" yaml:"slo,omitempty"`
+	Lifecycle      *Lifecycle      `koanf:"lifecycle" yaml:"lifecycle,omitempty"`
 	Transform      *Transform      `koanf:"transform" yaml:"transform,omitempty"`
 	Versioning     *Versioning     `koanf:"versioning" yaml:"versioning,omitempty"`
 
@@ -782,6 +783,26 @@ type Retry struct {
 //
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
+// Lifecycle tracks an API's state through draft → published →
+// deprecated → retired. Apigw acts on the state at request time:
+//
+//   - draft     : disabled at the router level (returns 503).
+//   - published : normal routing, no annotations.
+//   - deprecated: routing works but every response carries
+//     `Deprecation: true` + `Sunset: <SunsetAt>` (RFC 8594 + draft-
+//     deprecation-header). Clients that read these gracefully
+//     migrate before the cutover.
+//   - retired   : router returns 410 Gone with the configured
+//     ReplacementURL (when set) as a Link header.
+//
+// State changes are atomic config saves; nginx reload picks them up.
+// `apigw api promote/deprecate/retire` are the CLI verbs.
+type Lifecycle struct {
+	State          string    `koanf:"state" yaml:"state"` // draft | published | deprecated | retired
+	SunsetAt       time.Time `koanf:"sunset_at" yaml:"sunset_at,omitempty"`
+	ReplacementURL string    `koanf:"replacement_url" yaml:"replacement_url,omitempty"`
+}
+
 // SLO declares the service-level objectives for one API. The SLA
 // evaluator (internal/sla) periodically samples observed metrics and
 // classifies the API as in-bounds or breaching. Breaches fire alerts

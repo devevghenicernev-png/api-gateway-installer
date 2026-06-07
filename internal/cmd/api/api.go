@@ -16,6 +16,7 @@ import (
 	apiConnPool "github.com/devevghenicernev-png/apigw/internal/cmd/api/connpool"
 	apiDisable "github.com/devevghenicernev-png/apigw/internal/cmd/api/disable"
 	apiEnable "github.com/devevghenicernev-png/apigw/internal/cmd/api/enable"
+	apiLifecycle "github.com/devevghenicernev-png/apigw/internal/cmd/api/lifecycle"
 	apiList "github.com/devevghenicernev-png/apigw/internal/cmd/api/list"
 	apiLog "github.com/devevghenicernev-png/apigw/internal/cmd/api/log"
 	apiImport "github.com/devevghenicernev-png/apigw/internal/cmd/api/openapiimport"
@@ -58,5 +59,9 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiRewrite.NewCmdRewrite(f))
 	cmd.AddCommand(apiLog.NewCmdLog(f))
 	cmd.AddCommand(apiSLO.NewCmdSLO(f))
+	cmd.AddCommand(apiLifecycle.NewCmdLifecycle(f))
+	for _, c := range apiLifecycle.NewVerbCmds(f) {
+		cmd.AddCommand(c)
+	}
 	return cmd
 }

@@ -288,6 +288,14 @@ type apiEntry struct {
 	// emits one `http2_push <path>;` per entry.
 	EarlyHints []string
 	HTTP2Push  []string
+
+	// Lifecycle drives the state-machine response. Only one of the
+	// three booleans is ever true.
+	LifecycleDraft          bool   // emit `return 503;`
+	LifecycleDeprecated     bool   // emit Deprecation + Sunset headers
+	LifecycleSunsetAt       string // RFC1123 timestamp string for Sunset header
+	LifecycleRetired        bool   // emit `return 410;` + optional Link
+	LifecycleReplacementURL string // populated when retired or deprecated
 }
 
 type cacheEntry struct {
@@ -595,6 +603,21 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		entry.AccessLogFile = a.AccessLogFile
 		entry.EarlyHints = a.EarlyHints
 		entry.HTTP2Push = a.HTTP2Push
+		if lc := a.Lifecycle; lc != nil {
+			switch lc.State {
+			case "draft":
+				entry.LifecycleDraft = true
+			case "deprecated":
+				entry.LifecycleDeprecated = true
+				if !lc.SunsetAt.IsZero() {
+					entry.LifecycleSunsetAt = lc.SunsetAt.Format(time.RFC1123)
+				}
+				entry.LifecycleReplacementURL = lc.ReplacementURL
+			case "retired":
+				entry.LifecycleRetired = true
+				entry.LifecycleReplacementURL = lc.ReplacementURL
+			}
+		}
 
 		// BlueGreen, when set, replaces a.Upstreams as the primary pool.
 		// The non-active pool is intentionally NOT emitted as a separate
