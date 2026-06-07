@@ -83,6 +83,7 @@ type templateData struct {
 type httpData struct {
 	Banner         string
 	Gzip           gzipEntry
+	Brotli         brotliEntry
 	Upstreams      []upstreamEntry
 	RateLimitZones []rateLimitZone
 	CORSOriginMap  []string            // exact-match regex tokens (already escaped)
@@ -170,6 +171,13 @@ type variantSplit struct {
 }
 
 type gzipEntry struct {
+	Enabled   bool
+	Level     int
+	MinLength int
+	Types     []string
+}
+
+type brotliEntry struct {
 	Enabled   bool
 	Level     int
 	MinLength int
@@ -275,6 +283,11 @@ type apiEntry struct {
 	BotGuard      *botGuardEntry
 	AccessLogMode string // "" (default) | "json" | "combined" | "off"
 	AccessLogFile string // "" = nginx default path
+
+	// EarlyHints emits one `add_header Link …` per entry. HTTP2Push
+	// emits one `http2_push <path>;` per entry.
+	EarlyHints []string
+	HTTP2Push  []string
 }
 
 type cacheEntry struct {
@@ -580,6 +593,8 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		}
 		entry.AccessLogMode = a.AccessLog
 		entry.AccessLogFile = a.AccessLogFile
+		entry.EarlyHints = a.EarlyHints
+		entry.HTTP2Push = a.HTTP2Push
 
 		// BlueGreen, when set, replaces a.Upstreams as the primary pool.
 		// The non-active pool is intentionally NOT emitted as a separate
@@ -851,6 +866,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 	hd := httpData{
 		Banner:           "PLACEHOLDER",
 		Gzip:             resolveGzip(cfg),
+		Brotli:           resolveBrotli(cfg),
 		Upstreams:        upstreams,
 		RateLimitZones:   rlZones,
 		CORSOriginMap:    corsOrigins,
@@ -910,6 +926,36 @@ func resolveGzip(cfg *config.Config) gzipEntry {
 	}
 	if len(out.Types) == 0 {
 		out.Types = def.Types
+	}
+	return out
+}
+
+// resolveBrotli mirrors resolveGzip but for ngx_brotli. Disabled by
+// default (the module isn't on every nginx build). Operators flip
+// Enabled=true after installing nginx-module-brotli.
+func resolveBrotli(cfg *config.Config) brotliEntry {
+	b := cfg.Listen.Brotli
+	if !b.Enabled {
+		return brotliEntry{} // emits nothing
+	}
+	out := brotliEntry{
+		Enabled:   true,
+		Level:     b.Level,
+		MinLength: b.MinLength,
+		Types:     b.Types,
+	}
+	if out.Level == 0 {
+		out.Level = 4
+	}
+	if out.MinLength == 0 {
+		out.MinLength = 1024
+	}
+	if len(out.Types) == 0 {
+		out.Types = []string{
+			"text/plain", "text/css", "text/xml",
+			"application/json", "application/javascript", "application/xml",
+			"application/xml+rss", "image/svg+xml",
+		}
 	}
 	return out
 }

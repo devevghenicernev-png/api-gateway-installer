@@ -290,6 +290,12 @@
         {{ end -}}
         proxy_read_timeout                 {{ if .ReadTimeout }}{{ .ReadTimeout }}{{ else }}300s{{ end }};
         proxy_send_timeout                 300s;
+        {{ range .EarlyHints -}}
+        add_header Link "{{ . }}" always;
+        {{ end -}}
+        {{ range .HTTP2Push -}}
+        http2_push {{ . }};
+        {{ end -}}
         proxy_buffering                    {{ if and .Buffering .Buffering.Response }}{{ .Buffering.Response }}{{ else }}off{{ end }};
         {{ if and .Buffering .Buffering.Request -}}
         proxy_request_buffering            {{ .Buffering.Request }};
@@ -442,6 +448,12 @@
         {{ end -}}
         proxy_read_timeout                 {{ if .ReadTimeout }}{{ .ReadTimeout }}{{ else }}300s{{ end }};
         proxy_send_timeout                 300s;
+        {{ range .EarlyHints -}}
+        add_header Link "{{ . }}" always;
+        {{ end -}}
+        {{ range .HTTP2Push -}}
+        http2_push {{ . }};
+        {{ end -}}
         proxy_buffering                    {{ if and .Buffering .Buffering.Response }}{{ .Buffering.Response }}{{ else }}off{{ end }};
         {{ if and .Buffering .Buffering.Request -}}
         proxy_request_buffering            {{ .Buffering.Request }};

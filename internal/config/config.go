@@ -318,6 +318,23 @@ type Listen struct {
 	// Gzip configures the http{}-scope compression block. Defaults are
 	// production-sane (level 5, min_length 1024, common MIME types).
 	Gzip Gzip `koanf:"gzip" yaml:"gzip"`
+
+	// Brotli enables the http{}-scope `brotli on;` block. Requires the
+	// ngx_brotli module installed in nginx (`nginx-module-brotli` on
+	// Debian/Ubuntu, `nginx-mod-http-brotli` on RHEL). Without the
+	// module nginx refuses to start with "unknown directive 'brotli'" —
+	// `apigw doctor` warns. Off by default.
+	Brotli Brotli `koanf:"brotli" yaml:"brotli,omitempty"`
+}
+
+// Brotli mirrors ngx_brotli's directives. Compression level 4 is the
+// usual sweet-spot for HTTP (smaller responses than gzip-5 with
+// similar CPU cost). MinLength 1024 matches the gzip default.
+type Brotli struct {
+	Enabled   bool     `koanf:"enabled" yaml:"enabled"`
+	Level     int      `koanf:"level" yaml:"level,omitempty"`           // 0-11; default 4
+	MinLength int      `koanf:"min_length" yaml:"min_length,omitempty"` // bytes; default 1024
+	Types     []string `koanf:"types" yaml:"types,omitempty"`           // MIME list; default same as gzip
 }
 
 // Gzip mirrors nginx's gzip module directives. Empty = "use defaults"; set
@@ -404,6 +421,20 @@ type API struct {
 	// with AccessLog to control the format. Empty = use the nginx
 	// default (/var/log/nginx/access.log).
 	AccessLogFile string `koanf:"access_log_file" yaml:"access_log_file,omitempty"`
+
+	// EarlyHints emits `add_header Link "<value>" always;` per entry —
+	// a `Link: rel=preload` hint browsers consume even before the real
+	// response. Closest stock-nginx approximation of HTTP 103; true
+	// 103 needs the `early_hints` directive (nginx 1.27+).
+	// Format each entry as a complete Link value:
+	//   "</static/app.css>; rel=preload; as=style"
+	EarlyHints []string `koanf:"early_hints" yaml:"early_hints,omitempty"`
+
+	// HTTP2Push lists request paths nginx should server-push on
+	// HTTP/2 (`http2_push <path>;`). Browser support is deprecated
+	// (Chrome 106 dropped it) but Firefox + curl still consume.
+	// Empty = no push.
+	HTTP2Push []string `koanf:"http2_push" yaml:"http2_push,omitempty"`
 
 	// CustomLocation / CustomServer (F14) inject raw nginx directives into
 	// the generated config. CustomLocation lands inside the `location {…}`

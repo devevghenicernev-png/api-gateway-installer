@@ -5,13 +5,25 @@
 # and the CORS origin map — anything that can't live inside a server block.
 
 {{ if .Gzip.Enabled -}}
-# --- Compression ---
+# --- Compression (gzip) ---
 gzip                on;
 gzip_vary           on;
 gzip_proxied        any;
 gzip_comp_level     {{ .Gzip.Level }};
 gzip_min_length     {{ .Gzip.MinLength }};
 gzip_types          {{ range $i, $t := .Gzip.Types }}{{ if $i }} {{ end }}{{ $t }}{{ end }};
+{{ end }}
+
+{{ if .Brotli.Enabled -}}
+# --- Compression (brotli) ---
+# REQUIRES ngx_brotli module. On Debian/Ubuntu:
+#   apt install nginx-module-brotli
+#   load_module modules/ngx_http_brotli_filter_module.so;
+# (the load_module line must be in main nginx.conf, not here.)
+brotli              on;
+brotli_comp_level   {{ .Brotli.Level }};
+brotli_min_length   {{ .Brotli.MinLength }};
+brotli_types        {{ range $i, $t := .Brotli.Types }}{{ if $i }} {{ end }}{{ $t }}{{ end }};
 {{ end }}
 
 {{ range .Upstreams -}}
