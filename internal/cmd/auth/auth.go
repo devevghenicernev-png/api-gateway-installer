@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	admincmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/admin"
+	apikeycmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/apikey"
 	jwtcmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/jwt"
 	mtlscmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/mtls"
 	oidccmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/oidc"
@@ -36,5 +37,6 @@ func NewCmdAuth(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(oidccmd.NewCmdOIDC(f))
 	cmd.AddCommand(mtlscmd.NewCmdMTLS(f))
 	cmd.AddCommand(admincmd.NewCmdAdmin(f))
+	cmd.AddCommand(apikeycmd.NewCmdAPIKey(f))
 	return cmd
 }

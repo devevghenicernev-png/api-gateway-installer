@@ -145,6 +145,15 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 	go runTLSTicker(ctx, publish, logger, dash.Sec)
 	go runStatusTicker(ctx, publish, logger)
 	go runSecurityReloader(ctx, dash.Sec, logger)
+	if cfg, err := reloadConfig(); err == nil {
+		go metrics.RunExporter(ctx, prom, metrics.ExporterConfig{
+			DogStatsDAddr: cfg.Metrics.DogStatsDAddr,
+			StatsDAddr:    cfg.Metrics.StatsDAddr,
+			GraphiteAddr:  cfg.Metrics.GraphiteAddr,
+			Prefix:        cfg.Metrics.Prefix,
+			FlushSeconds:  cfg.Metrics.FlushSeconds,
+		}, logger)
+	}
 	if dash.Sec != nil {
 		go runGitOpsReconciler(ctx, logger, dash.Sec)
 	}

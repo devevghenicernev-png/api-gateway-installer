@@ -40,6 +40,39 @@
         proxy_set_header X-Original-URI $request_uri;
     }
     {{ end -}}
+    {{ if .APIKey -}}
+    # API key auth-check for {{ .Name }} → dashboard daemon
+    location = /_apigw_apikey_{{ .Name }} {
+        internal;
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/auth/apikey/{{ .Name }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-API-Key $http_x_api_key;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+    {{ end -}}
+    {{ if .OAuth2 -}}
+    # OAuth2 introspection auth-check for {{ .Name }} → dashboard daemon
+    location = /_apigw_oauth2_{{ .Name }} {
+        internal;
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/auth/oauth2/{{ .Name }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+    {{ end -}}
+    {{ if .Mirror -}}
+    # Shadow-traffic mirror for {{ .Name }} → {{ .Mirror.UpstreamURL }}
+    location = {{ .Mirror.Path }} {
+        internal;
+        proxy_pass {{ .Mirror.UpstreamURL }}$request_uri;
+        {{ if .Mirror.IgnoreBody }}proxy_pass_request_body off;{{ end }}
+        proxy_set_header Host $host;
+        proxy_set_header X-Apigw-Mirrored-From $request_uri;
+    }
+    {{ end -}}
     location {{ .Path }} {
         {{ if .MaxBodySize }}client_max_body_size {{ .MaxBodySize }};
         {{ end -}}
@@ -73,6 +106,62 @@
         auth_request_set $apigw_client_cn $upstream_http_x_apigw_client_cn;
         proxy_set_header X-Client-CN $apigw_client_cn;
         {{ end -}}
+        {{ if .APIKey -}}
+        auth_request /_apigw_apikey_{{ .Name }};
+        auth_request_set $apigw_apikey_id $upstream_http_x_apigw_apikey_id;
+        auth_request_set $apigw_apikey_owner $upstream_http_x_apigw_apikey_owner;
+        auth_request_set $apigw_apikey_scopes $upstream_http_x_apigw_apikey_scopes;
+        proxy_set_header X-Apigw-ApiKey-ID $apigw_apikey_id;
+        proxy_set_header X-Apigw-ApiKey-Owner $apigw_apikey_owner;
+        proxy_set_header X-Apigw-ApiKey-Scopes $apigw_apikey_scopes;
+        {{ end -}}
+        {{ if .OAuth2 -}}
+        auth_request /_apigw_oauth2_{{ .Name }};
+        auth_request_set $apigw_subject $upstream_http_x_apigw_subject;
+        auth_request_set $apigw_username $upstream_http_x_apigw_username;
+        auth_request_set $apigw_scopes $upstream_http_x_apigw_scopes;
+        proxy_set_header X-Remote-User $apigw_subject;
+        proxy_set_header X-Apigw-Username $apigw_username;
+        proxy_set_header X-Apigw-Scopes $apigw_scopes;
+        {{ end -}}
+        {{ if .BotGuard -}}
+        {{ if .BotGuard.RequireUserAgent }}if ($http_user_agent = "") { return 403; }
+        {{ end -}}
+        {{ if .BotGuard.BlockEmptyReferer }}if ($http_referer = "") { return 403; }
+        {{ end -}}
+        {{ if .BotGuard.BlockCommonScanners }}if ($http_user_agent ~* "(nikto|nmap|masscan|zgrab|sqlmap|fuzz|curl/[0-7]|wget)") { return 403; }
+        {{ end -}}
+        {{ range .BotGuard.BlockedAgents }}if ($http_user_agent ~* "{{ . }}") { return 403; }
+        {{ end -}}
+        {{ end -}}
+        {{ if .Mirror -}}
+        mirror {{ .Mirror.Path }};
+        {{ if .Mirror.IgnoreBody }}mirror_request_body off;{{ end }}
+        {{ end -}}
+        {{ if .Cache -}}
+        proxy_cache {{ .Cache.ZoneName }};
+        proxy_cache_key "{{ .Cache.Key }}";
+        proxy_cache_methods {{ range $i, $m := .Cache.Methods }}{{ if $i }} {{ end }}{{ $m }}{{ end }};
+        proxy_cache_valid 200 301 302 {{ .Cache.Duration }};
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_cache_lock on;
+        add_header X-Cache-Status $upstream_cache_status;
+        {{ if .Cache.BypassHeader }}proxy_cache_bypass $http_{{ .Cache.BypassHeader }};
+        proxy_no_cache $http_{{ .Cache.BypassHeader }};
+        {{ end -}}
+        {{ end -}}
+        {{ if .Timeouts -}}
+        {{ if .Timeouts.Connect }}proxy_connect_timeout {{ .Timeouts.Connect }};
+        {{ end -}}
+        {{ if .Timeouts.Read }}proxy_read_timeout {{ .Timeouts.Read }};
+        {{ end -}}
+        {{ if .Timeouts.Send }}proxy_send_timeout {{ .Timeouts.Send }};
+        {{ end -}}
+        {{ end -}}
+        {{ if eq .AccessLogMode "off" }}access_log off;
+        {{ else if eq .AccessLogMode "json" }}access_log /var/log/nginx/access.log apigw_json;
+        {{ end -}}
         {{ if .RateLimitZone -}}
         limit_req zone=apigw_{{ .RateLimitZone }} burst={{ .RateLimitBurst }} nodelay;
         limit_req_status 429;
@@ -89,7 +178,12 @@
         add_header Access-Control-Allow-Origin $apigw_cors_origin always;
         {{ if .CORS.Credentials }}add_header Access-Control-Allow-Credentials "true" always;{{ end }}
         {{ end -}}
-        {{ if .GRPC -}}
+        {{ if .Mock -}}
+        # Mock response — skip upstream entirely
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/mock/{{ .Name }};
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        {{ else if .GRPC -}}
         {{ if .UpstreamName }}grpc_pass grpc://{{ .UpstreamName }};
         {{ else }}grpc_pass grpc://127.0.0.1:{{ .Port }};
         {{ end -}}

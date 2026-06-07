@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/devevghenicernev-png/apigw/internal/approvals"
@@ -45,6 +46,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/deploy-rollback/", s.adminDeployRollbackHandler)
 	mux.HandleFunc("/api/admin/tls-renew/", s.adminTLSRenewHandler)
 	mux.HandleFunc("/api/admin/webhook-rotate/", s.adminWebhookRotateHandler)
+	mux.HandleFunc("/api/admin/cache-purge/", s.adminCachePurgeHandler)
 	mux.HandleFunc("/api/admin/tls", s.adminTLSHandler)
 	mux.HandleFunc("/api/admin/config", s.adminConfigHandler)
 }
@@ -804,6 +806,66 @@ func (s *Server) adminWebhookRotateHandler(w http.ResponseWriter, r *http.Reques
 		"new_secret": newSecret,
 		"note":       "Update the webhook secret in GitHub now — old secret is invalid.",
 	})
+}
+
+// adminCachePurgeHandler is POST /api/admin/cache-purge/<api>. Deletes
+// the per-API proxy_cache directory and forces nginx to refresh its
+// shared zone metadata on next request. Useful after publishing a new
+// data version that should invalidate all cached responses.
+func (s *Server) adminCachePurgeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		adminWriteJSONError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/admin/cache-purge/")
+	if name == "" || strings.ContainsAny(name, "/") {
+		adminWriteJSONError(w, http.StatusBadRequest, "api name required")
+		return
+	}
+	cfg, err := s.ConfigFn()
+	if err != nil {
+		adminWriteJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ident := s.Sec.Identify(r)
+	if err := s.ensureCSRF(r, ident); err != nil {
+		adminWriteJSONError(w, Status(err), "csrf: "+err.Error())
+		return
+	}
+	api := cfg.FindAPI(name)
+	if api == nil || api.Cache == nil {
+		adminWriteJSONError(w, http.StatusNotFound, "no cache zone for this api")
+		return
+	}
+	if _, err := s.Sec.Guard(r, Action{
+		Permission: "cache.purge",
+		Resource:   "api/" + name,
+	}, func() error {
+		// Cache lives at /var/cache/nginx/apigw_cache_<name>/. Removing
+		// the directory invalidates the in-zone keys; nginx repopulates
+		// on the next miss. A `kill -HUP $(pidof nginx)` would also
+		// work but we keep this scoped — no service interruption.
+		dir := "/var/cache/nginx/apigw_cache_" + name
+		return removeAllBestEffort(dir)
+	}); err != nil {
+		adminWriteJSONError(w, Status(err), err.Error())
+		return
+	}
+	adminWriteJSON(w, http.StatusOK, map[string]any{
+		"status": "purged",
+		"api":    name,
+	})
+}
+
+// removeAllBestEffort wraps os.RemoveAll but never returns ENOENT —
+// the goal is "directory absent", and removing something that's not
+// there already meets that.
+func removeAllBestEffort(dir string) error {
+	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("purge %s: %w", dir, err)
+	}
+	return nil
 }
 
 // ---------- helpers ----------

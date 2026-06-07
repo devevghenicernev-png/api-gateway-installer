@@ -47,6 +47,11 @@ type Config struct {
 	GitOps   GitOps   `koanf:"gitops" yaml:"gitops,omitempty"`
 	Cluster  Cluster  `koanf:"cluster" yaml:"cluster,omitempty"`
 
+	// v0.2.0 — beyond-HTTP and shared infra.
+	Streams []Stream      `koanf:"streams" yaml:"streams,omitempty"`
+	Logging Logging       `koanf:"logging" yaml:"logging,omitempty"`
+	Metrics MetricsExport `koanf:"metrics" yaml:"metrics,omitempty"`
+
 	// path is where this config was loaded from / will be saved to. Not in yaml.
 	path string `koanf:"-" yaml:"-"`
 }
@@ -190,6 +195,29 @@ type Peer struct {
 	Address string `koanf:"address" yaml:"address"`
 }
 
+// Logging configures the nginx access log format + sampling. JSON logs
+// are SIEM-friendly out of the box; sampling tames byte-volume on
+// high-traffic gateways without losing security signal (denials are
+// always logged regardless of sample rate).
+type Logging struct {
+	Format        string `koanf:"format" yaml:"format,omitempty"`                 // "" (combined) | "json"
+	SamplePercent int    `koanf:"sample_percent" yaml:"sample_percent,omitempty"` // 1-100; default 100
+	S3Bucket      string `koanf:"s3_bucket" yaml:"s3_bucket,omitempty"`
+	S3Region      string `koanf:"s3_region" yaml:"s3_region,omitempty"`
+	S3AccessKey   string `koanf:"s3_access_key" yaml:"s3_access_key,omitempty"`
+	S3SecretKey   string `koanf:"s3_secret_key" yaml:"s3_secret_key,omitempty"`
+}
+
+// MetricsExport wires the in-process Prometheus registry to external
+// time-series databases. Zero value = Prometheus pull only.
+type MetricsExport struct {
+	DogStatsDAddr string `koanf:"dogstatsd_addr" yaml:"dogstatsd_addr,omitempty"`
+	StatsDAddr    string `koanf:"statsd_addr" yaml:"statsd_addr,omitempty"`
+	GraphiteAddr  string `koanf:"graphite_addr" yaml:"graphite_addr,omitempty"`
+	Prefix        string `koanf:"prefix" yaml:"prefix,omitempty"`
+	FlushSeconds  int    `koanf:"flush_seconds" yaml:"flush_seconds,omitempty"`
+}
+
 // Listen describes the public-facing nginx listener.
 type Listen struct {
 	HTTPPort   int    `koanf:"http_port" yaml:"http_port"`
@@ -250,6 +278,26 @@ type API struct {
 	Transform   *Transform   `koanf:"transform" yaml:"transform,omitempty"`
 	Versioning  *Versioning  `koanf:"versioning" yaml:"versioning,omitempty"`
 
+	// New in v0.2.0 — fills the long tail of competitive features.
+	APIKey   *APIKeyAuth `koanf:"api_key" yaml:"api_key,omitempty"`
+	OAuth2   *OAuth2     `koanf:"oauth2" yaml:"oauth2,omitempty"`
+	Cache    *Cache      `koanf:"cache" yaml:"cache,omitempty"`
+	Mock     *Mock       `koanf:"mock" yaml:"mock,omitempty"`
+	Timeouts *Timeouts   `koanf:"timeouts" yaml:"timeouts,omitempty"`
+	Mirror   *Mirror     `koanf:"mirror" yaml:"mirror,omitempty"`
+	BotGuard *BotGuard   `koanf:"bot_guard" yaml:"bot_guard,omitempty"`
+	// GRPCWeb wraps standard gRPC in the grpc-web framing so browsers can
+	// call it. Mutually exclusive with non-gRPC upstreams.
+	GRPCWeb bool `koanf:"grpc_web" yaml:"grpc_web,omitempty"`
+	// StickySession picks one of: "" (none), "ip_hash", "cookie:<name>".
+	StickySession string `koanf:"sticky_session" yaml:"sticky_session,omitempty"`
+	// HashKey is consumed when LoadBalance == "consistent_hash". Usually
+	// "$remote_addr" or "$http_x_session_id".
+	HashKey string `koanf:"hash_key" yaml:"hash_key,omitempty"`
+	// AccessLog overrides global behaviour for this route. "json" emits
+	// the structured log_format; "off" disables logging for the route.
+	AccessLog string `koanf:"access_log" yaml:"access_log,omitempty"`
+
 	// CustomLocation / CustomServer (F14) inject raw nginx directives into
 	// the generated config. CustomLocation lands inside the `location {…}`
 	// block; CustomServer lands at server scope (after listen, before
@@ -261,6 +309,99 @@ type API struct {
 	// syntax errors at apply time.
 	CustomLocation string `koanf:"custom_location" yaml:"custom_location,omitempty"`
 	CustomServer   string `koanf:"custom_server" yaml:"custom_server,omitempty"`
+}
+
+// APIKeyAuth turns the route into key-gated. Clients send the secret in
+// the header named by Header (default `X-API-Key`). Each key may carry
+// its own per-second rate limit and an expiry; revoked or expired keys
+// are rejected by the dashboard's /auth/apikey/<api> auth_request.
+type APIKeyAuth struct {
+	Header       string   `koanf:"header" yaml:"header,omitempty"`
+	QueryParam   string   `koanf:"query_param" yaml:"query_param,omitempty"`
+	Keys         []APIKey `koanf:"keys" yaml:"keys"`
+	HashedAtRest bool     `koanf:"hashed_at_rest" yaml:"hashed_at_rest,omitempty"`
+}
+
+// APIKey is one credential. The secret is stored verbatim today;
+// HashedAtRest is reserved for a v0.3 migration to argon2id at rest.
+type APIKey struct {
+	ID        string    `koanf:"id" yaml:"id"`
+	Secret    string    `koanf:"secret" yaml:"secret"`
+	Owner     string    `koanf:"owner" yaml:"owner,omitempty"`
+	RPS       int       `koanf:"rps" yaml:"rps,omitempty"`
+	ExpiresAt time.Time `koanf:"expires_at" yaml:"expires_at,omitempty"`
+	Disabled  bool      `koanf:"disabled" yaml:"disabled,omitempty"`
+	Scopes    []string  `koanf:"scopes" yaml:"scopes,omitempty"`
+}
+
+// OAuth2 turns on RFC 7662 token introspection — opaque bearer tokens
+// (the common case for confidential clients) are validated against the
+// IdP on every request, with results cached per token for CacheSeconds.
+type OAuth2 struct {
+	IntrospectionURL string   `koanf:"introspection_url" yaml:"introspection_url"`
+	ClientID         string   `koanf:"client_id" yaml:"client_id"`
+	ClientSecret     string   `koanf:"client_secret" yaml:"client_secret"`
+	RequiredScopes   []string `koanf:"required_scopes" yaml:"required_scopes,omitempty"`
+	CacheSeconds     int      `koanf:"cache_seconds" yaml:"cache_seconds,omitempty"`
+}
+
+// Cache turns on nginx proxy_cache for the route. Operators can purge
+// keys via POST /api/admin/cache/purge with a header pattern.
+type Cache struct {
+	Duration     string   `koanf:"duration" yaml:"duration,omitempty"`           // 1m, 1h — nginx proxy_cache_valid 200
+	Methods      []string `koanf:"methods" yaml:"methods,omitempty"`             // default GET, HEAD
+	Key          string   `koanf:"key" yaml:"key,omitempty"`                     // nginx proxy_cache_key; default scheme$request_method$host$request_uri
+	BypassHeader string   `koanf:"bypass_header" yaml:"bypass_header,omitempty"` // request bypasses cache if this header is non-empty
+	MaxSizeMB    int      `koanf:"max_size_mb" yaml:"max_size_mb,omitempty"`     // shared zone size; default 256
+	VaryHeaders  []string `koanf:"vary_headers" yaml:"vary_headers,omitempty"`
+}
+
+// Mock returns a canned response without calling any upstream. Useful
+// for development, contract tests, and "API not ready yet" staging.
+type Mock struct {
+	StatusCode int               `koanf:"status_code" yaml:"status_code,omitempty"`
+	Body       string            `koanf:"body" yaml:"body,omitempty"`
+	Headers    map[string]string `koanf:"headers" yaml:"headers,omitempty"`
+	DelayMS    int               `koanf:"delay_ms" yaml:"delay_ms,omitempty"`
+}
+
+// Timeouts overrides nginx defaults at route scope. Empty values fall
+// back to global; the strings accept the standard nginx suffix (s, ms).
+type Timeouts struct {
+	Connect string `koanf:"connect" yaml:"connect,omitempty"`
+	Read    string `koanf:"read" yaml:"read,omitempty"`
+	Send    string `koanf:"send" yaml:"send,omitempty"`
+}
+
+// Mirror sends a copy of every Nth request to a secondary upstream for
+// shadow testing — nginx `mirror` directive. The mirrored request does
+// NOT block the primary response and its body is silently consumed.
+type Mirror struct {
+	Target        string `koanf:"target" yaml:"target"`                           // host:port of mirror
+	SamplePercent int    `koanf:"sample_percent" yaml:"sample_percent,omitempty"` // 1–100; default 100
+	IgnoreBody    bool   `koanf:"ignore_body" yaml:"ignore_body,omitempty"`       // skip request_body on the mirror
+}
+
+// BotGuard is a quick allow/deny based on common signals. For real
+// production protection operators should still front apigw with a WAF.
+type BotGuard struct {
+	BlockUserAgents     []string `koanf:"block_user_agents" yaml:"block_user_agents,omitempty"`
+	AllowUserAgents     []string `koanf:"allow_user_agents" yaml:"allow_user_agents,omitempty"`
+	RequireUserAgent    bool     `koanf:"require_user_agent" yaml:"require_user_agent,omitempty"`
+	BlockEmptyReferer   bool     `koanf:"block_empty_referer" yaml:"block_empty_referer,omitempty"`
+	BlockCommonScanners bool     `koanf:"block_common_scanners" yaml:"block_common_scanners,omitempty"`
+}
+
+// Stream is a TCP or UDP proxy entry, served via nginx stream {}.
+// Multiplexed via SNI (TCP) or by listening port (UDP).
+type Stream struct {
+	Name         string     `koanf:"name" yaml:"name"`
+	Protocol     string     `koanf:"protocol" yaml:"protocol"` // "tcp" | "udp"
+	ListenPort   int        `koanf:"listen_port" yaml:"listen_port"`
+	Upstreams    []Upstream `koanf:"upstreams" yaml:"upstreams"`
+	ProxyTimeout string     `koanf:"proxy_timeout" yaml:"proxy_timeout,omitempty"`
+	Enabled      bool       `koanf:"enabled" yaml:"enabled"`
+	Description  string     `koanf:"description" yaml:"description,omitempty"`
 }
 
 // Upstream is one server in the API/Deploy upstream pool. Weight, Backup,

@@ -92,6 +92,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/logs/", s.handleLogs)
 	mux.HandleFunc("/auth/jwt/", s.handleJWTAuth)
 	mux.HandleFunc("/auth/mtls/", s.handleMTLSAuth)
+	mux.HandleFunc("/auth/apikey/", s.handleAPIKeyAuth)
+	mux.HandleFunc("/auth/oauth2/", s.handleOAuth2Auth)
+	mux.HandleFunc("/mock/", s.handleMock)
 	s.adminRoutes(mux)
 	s.securityRoutes(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {

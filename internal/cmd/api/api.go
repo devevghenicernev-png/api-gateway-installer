@@ -12,6 +12,7 @@ import (
 	apiDisable "github.com/devevghenicernev-png/apigw/internal/cmd/api/disable"
 	apiEnable "github.com/devevghenicernev-png/apigw/internal/cmd/api/enable"
 	apiList "github.com/devevghenicernev-png/apigw/internal/cmd/api/list"
+	apiImport "github.com/devevghenicernev-png/apigw/internal/cmd/api/openapiimport"
 	apiReload "github.com/devevghenicernev-png/apigw/internal/cmd/api/reload"
 	apiRemove "github.com/devevghenicernev-png/apigw/internal/cmd/api/remove"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
@@ -36,5 +37,6 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiEnable.NewCmdEnable(f))
 	cmd.AddCommand(apiDisable.NewCmdDisable(f))
 	cmd.AddCommand(apiReload.NewCmdReload(f))
+	cmd.AddCommand(apiImport.NewCmdImport(f))
 	return cmd
 }

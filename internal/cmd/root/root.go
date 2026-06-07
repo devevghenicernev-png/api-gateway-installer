@@ -27,6 +27,7 @@ import (
 	migratecmd "github.com/devevghenicernev-png/apigw/internal/cmd/migrate"
 	restorecmd "github.com/devevghenicernev-png/apigw/internal/cmd/restore"
 	statuscmd "github.com/devevghenicernev-png/apigw/internal/cmd/status"
+	streamcmd "github.com/devevghenicernev-png/apigw/internal/cmd/stream"
 	tlscmd "github.com/devevghenicernev-png/apigw/internal/cmd/tls"
 	uninstallcmd "github.com/devevghenicernev-png/apigw/internal/cmd/uninstall"
 	upgradecmd "github.com/devevghenicernev-png/apigw/internal/cmd/upgrade"
@@ -142,6 +143,10 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	apiCmd := apicmd.NewCmdAPI(f)
 	apiCmd.GroupID = "manage"
 	cmd.AddCommand(apiCmd)
+
+	streamCmd := streamcmd.NewCmdStream(f)
+	streamCmd.GroupID = "manage"
+	cmd.AddCommand(streamCmd)
 
 	tlsCmd := tlscmd.NewCmdTLS(f)
 	tlsCmd.GroupID = "manage"

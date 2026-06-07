@@ -48,3 +48,42 @@ split_clients "{{ .HashSource }}" ${{ .Name }} {
     *                {{ .PrimaryName }};
 }
 {{ end }}
+
+{{ range .CacheZones -}}
+# --- Response cache zone: {{ .Name }} ---
+proxy_cache_path {{ .Path }} levels=1:2 keys_zone={{ .Name }}:10m max_size={{ .MaxSize }} inactive=60m use_temp_path=off;
+{{ end }}
+
+{{ if .JSONLogFormat -}}
+# --- Structured JSON access log (SIEM-friendly) ---
+log_format apigw_json escape=json '{'
+    '"ts":"$time_iso8601",'
+    '"remote":"$remote_addr",'
+    '"host":"$host",'
+    '"method":"$request_method",'
+    '"uri":"$request_uri",'
+    '"status":$status,'
+    '"bytes":$body_bytes_sent,'
+    '"referer":"$http_referer",'
+    '"ua":"$http_user_agent",'
+    '"forwarded":"$http_x_forwarded_for",'
+    '"rtime":$request_time,'
+    '"upstream":"$upstream_addr",'
+    '"upstream_status":"$upstream_status",'
+    '"upstream_rtime":"$upstream_response_time",'
+    '"cache":"$upstream_cache_status",'
+    '"apigw_subject":"$sent_http_x_apigw_subject"'
+'}';
+{{ end }}
+
+{{ if and (ne .LogSampleRate 100) (gt .LogSampleRate 0) -}}
+# --- Log sampling: only log {{ .LogSampleRate }}% of requests ---
+split_clients "$request_id" $apigw_log_sample {
+    {{ .LogSampleRate }}% 1;
+    *                     0;
+}
+map $apigw_log_sample $apigw_log_skip {
+    1 0;
+    default 1;
+}
+{{ end }}

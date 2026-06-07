@@ -1,0 +1,27 @@
+{{ define "stream" -}}
+# {{ .Banner }}
+#
+# MANAGED BY apigw — TCP/UDP proxy entries. Loaded into nginx via
+# `stream { include /etc/nginx/conf.d/apigw-stream.conf; }` — apigw's
+# install step wires the include line in /etc/nginx/nginx.conf so this
+# file just declares servers and upstreams.
+
+{{ range .StreamUpstreams }}
+upstream apigw_stream_{{ .Name }} {
+    {{ range .Servers -}}
+    server {{ . }};
+    {{ end -}}
+}
+{{ end }}
+
+{{ range .Streams }}
+{{ if .Enabled -}}
+server {
+    listen {{ .ListenPort }}{{ if eq .Protocol "udp" }} udp{{ end }};
+    proxy_pass apigw_stream_{{ .Name }};
+    {{ if .ProxyTimeout }}proxy_timeout {{ .ProxyTimeout }};{{ end }}
+    {{ if eq .Protocol "tcp" }}proxy_connect_timeout 5s;{{ end }}
+}
+{{ end -}}
+{{ end }}
+{{- end }}

@@ -29,6 +29,19 @@ type Generator struct{}
 
 func NewGenerator() *Generator { return &Generator{} }
 
+// resolveSampleRate clamps the operator's sample percent into the
+// 1-100 range nginx's split_clients can handle. 0 means "default", which
+// for log sampling means "no sampling = 100%".
+func resolveSampleRate(pct int) int {
+	if pct <= 0 {
+		return 100
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
+}
+
 // templateData is the struct the templates dereference. Keep field names
 // stable — they appear in template source under assets/nginx/.
 type templateData struct {
@@ -67,6 +80,39 @@ type httpData struct {
 	RateLimitZones []rateLimitZone
 	CORSOriginMap  []string            // exact-match regex tokens (already escaped)
 	SplitClients   []splitClientsEntry // E13 — % traffic distribution
+
+	// v0.2.0
+	CacheZones    []cacheZoneEntry
+	JSONLogFormat bool
+	LogSampleRate int // 1-100
+}
+
+type cacheZoneEntry struct {
+	Name    string
+	Path    string
+	MaxSize string // "256m"
+}
+
+// streamData drives the stream{} fragment: TCP/UDP servers + their
+// upstreams. Lives in a separate include file so operators who don't
+// use any TCP/UDP forwarding don't get a stream{} block at all.
+type streamData struct {
+	Banner          string
+	Streams         []streamEntry
+	StreamUpstreams []streamUpstream
+}
+
+type streamEntry struct {
+	Name         string
+	Protocol     string // "tcp" | "udp"
+	ListenPort   int
+	ProxyTimeout string
+	Enabled      bool
+}
+
+type streamUpstream struct {
+	Name    string
+	Servers []string // "host:port"
 }
 
 // splitClientsEntry renders one nginx split_clients block.
@@ -142,6 +188,48 @@ type apiEntry struct {
 	MTLS             bool              // E1 — emit ssl_verify_client + auth_request /_apigw_mtls/<api>
 	MTLSCAFile       string            // E1 — path to the CA bundle nginx loads
 	MTLSOptional     bool              // E1 — ssl_verify_client optional vs on
+
+	// v0.2.0 additions.
+	APIKey        bool           // emit auth_request /_apigw_apikey_<name>
+	OAuth2        bool           // emit auth_request /_apigw_oauth2_<name>
+	Mock          bool           // route hits internal mock handler instead of upstream
+	Cache         *cacheEntry    // proxy_cache directives
+	Timeouts      *timeoutsEntry // per-route timeouts
+	Mirror        *mirrorEntry   // shadow traffic copy
+	GRPCWeb       bool           // wraps gRPC for browsers via grpc_web_proxy_*
+	StickyMode    string         // "ip_hash" or "cookie:<name>"
+	BotGuard      *botGuardEntry
+	AccessLogMode string // "" (default) | "json" | "off"
+}
+
+type cacheEntry struct {
+	Duration     string
+	Methods      []string
+	Key          string
+	BypassHeader string
+	VaryHeaders  []string
+	ZoneName     string
+}
+
+type timeoutsEntry struct {
+	Connect string
+	Read    string
+	Send    string
+}
+
+type mirrorEntry struct {
+	Path          string // internal location name we proxy_pass to
+	UpstreamURL   string
+	SamplePercent int
+	IgnoreBody    bool
+}
+
+type botGuardEntry struct {
+	BlockedAgents       []string
+	AllowedAgents       []string
+	RequireUserAgent    bool
+	BlockEmptyReferer   bool
+	BlockCommonScanners bool
 }
 
 type corsEntry struct {
@@ -187,6 +275,42 @@ type deployEntry struct {
 	JWTDashboardPort int
 	CustomLocation   string
 	CustomServer     string
+}
+
+// RenderStream produces the TCP/UDP stream{} include. Empty when no
+// streams are configured — caller writes "" to the file so the include
+// directive parses but yields no servers.
+func (g *Generator) RenderStream(cfg *config.Config) ([]byte, error) {
+	if len(cfg.Streams) == 0 {
+		return nil, nil
+	}
+	tmpl, err := template.New("stream").ParseFS(assets.Nginx(), "nginx/stream.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("parse stream template: %w", err)
+	}
+	sd := streamData{Banner: "MANAGED BY apigw — stream{} scope"}
+	for _, s := range cfg.Streams {
+		if !s.Enabled {
+			continue
+		}
+		sd.Streams = append(sd.Streams, streamEntry{
+			Name:         s.Name,
+			Protocol:     s.Protocol,
+			ListenPort:   s.ListenPort,
+			ProxyTimeout: s.ProxyTimeout,
+			Enabled:      true,
+		})
+		su := streamUpstream{Name: s.Name}
+		for _, u := range s.Upstreams {
+			su.Servers = append(su.Servers, u.Address)
+		}
+		sd.StreamUpstreams = append(sd.StreamUpstreams, su)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "stream", sd); err != nil {
+		return nil, fmt.Errorf("execute stream: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // Render produces both nginx config files apigw owns: the server-block
@@ -265,7 +389,86 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		}
 		entry.CustomLocation = a.CustomLocation
 		entry.CustomServer = a.CustomServer
+
+		// v0.2.0 — populate the new middleware fields.
+		if a.APIKey != nil && len(a.APIKey.Keys) > 0 {
+			entry.APIKey = true
+			if entry.JWTDashboardPort == 0 {
+				entry.JWTDashboardPort = cfg.Dashboard.Port
+			}
+		}
+		if a.OAuth2 != nil && a.OAuth2.IntrospectionURL != "" {
+			entry.OAuth2 = true
+			if entry.JWTDashboardPort == 0 {
+				entry.JWTDashboardPort = cfg.Dashboard.Port
+			}
+		}
+		if a.Mock != nil {
+			entry.Mock = true
+			if entry.JWTDashboardPort == 0 {
+				entry.JWTDashboardPort = cfg.Dashboard.Port
+			}
+		}
+		if a.Cache != nil && a.Cache.Duration != "" {
+			methods := a.Cache.Methods
+			if len(methods) == 0 {
+				methods = []string{"GET", "HEAD"}
+			}
+			key := a.Cache.Key
+			if key == "" {
+				key = "$scheme$request_method$host$request_uri"
+			}
+			entry.Cache = &cacheEntry{
+				Duration: a.Cache.Duration, Methods: methods, Key: key,
+				BypassHeader: a.Cache.BypassHeader,
+				VaryHeaders:  a.Cache.VaryHeaders,
+				ZoneName:     "apigw_cache_" + a.Name,
+			}
+		}
+		if a.Timeouts != nil {
+			entry.Timeouts = &timeoutsEntry{
+				Connect: a.Timeouts.Connect,
+				Read:    a.Timeouts.Read,
+				Send:    a.Timeouts.Send,
+			}
+		}
+		if a.Mirror != nil && a.Mirror.Target != "" {
+			pct := a.Mirror.SamplePercent
+			if pct <= 0 || pct > 100 {
+				pct = 100
+			}
+			entry.Mirror = &mirrorEntry{
+				Path:          "/_apigw_mirror_" + a.Name,
+				UpstreamURL:   "http://" + a.Mirror.Target,
+				SamplePercent: pct,
+				IgnoreBody:    a.Mirror.IgnoreBody,
+			}
+		}
+		entry.GRPCWeb = a.GRPCWeb
+		entry.StickyMode = a.StickySession
+		if a.BotGuard != nil {
+			entry.BotGuard = &botGuardEntry{
+				BlockedAgents:       a.BotGuard.BlockUserAgents,
+				AllowedAgents:       a.BotGuard.AllowUserAgents,
+				RequireUserAgent:    a.BotGuard.RequireUserAgent,
+				BlockEmptyReferer:   a.BotGuard.BlockEmptyReferer,
+				BlockCommonScanners: a.BotGuard.BlockCommonScanners,
+			}
+		}
+		entry.AccessLogMode = a.AccessLog
+
 		if up, ok := buildUpstream(a.Name, a.Port, a.Upstreams, a.LoadBalance, a.HealthCheck); ok {
+			// Wire LB strategy extensions: consistent_hash + sticky cookie
+			// override the basic least_conn/ip_hash/random returned by
+			// buildUpstream.
+			if a.LoadBalance == "consistent_hash" && a.HashKey != "" {
+				up.LoadBalance = "hash " + a.HashKey + " consistent"
+			} else if strings.HasPrefix(a.StickySession, "cookie:") {
+				up.LoadBalance = "hash $cookie_" +
+					strings.TrimPrefix(a.StickySession, "cookie:") + " consistent"
+			} else if a.StickySession == "ip_hash" {
+				up.LoadBalance = "ip_hash"
+			}
 			entry.UpstreamName = "apigw_" + a.Name
 			upstreams = append(upstreams, up)
 		}
@@ -421,6 +624,19 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		})
 	}
 
+	// Collect cache zones from any API with response caching configured.
+	var cacheZones []cacheZoneEntry
+	for _, a := range apis {
+		if a.Cache != nil {
+			cacheZones = append(cacheZones, cacheZoneEntry{
+				Name: a.Cache.ZoneName,
+				Path: "/var/cache/nginx/" + a.Cache.ZoneName,
+				MaxSize: func() string {
+					return "256m"
+				}(),
+			})
+		}
+	}
 	hd := httpData{
 		Banner:         "PLACEHOLDER",
 		Gzip:           resolveGzip(cfg),
@@ -428,6 +644,9 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		RateLimitZones: rlZones,
 		CORSOriginMap:  corsOrigins,
 		SplitClients:   splits,
+		CacheZones:     cacheZones,
+		JSONLogFormat:  cfg.Logging.Format == "json",
+		LogSampleRate:  resolveSampleRate(cfg.Logging.SamplePercent),
 	}
 	var httpBuf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&httpBuf, "_http.tmpl", hd); err != nil {
