@@ -362,6 +362,7 @@ type API struct {
 	JWT         *JWT         `koanf:"jwt" yaml:"jwt,omitempty"`
 	MTLS        *MTLS        `koanf:"mtls" yaml:"mtls,omitempty"`
 	Canary      *Canary      `koanf:"canary" yaml:"canary,omitempty"`
+	BlueGreen   *BlueGreen   `koanf:"blue_green" yaml:"blue_green,omitempty"`
 	Transform   *Transform   `koanf:"transform" yaml:"transform,omitempty"`
 	Versioning  *Versioning  `koanf:"versioning" yaml:"versioning,omitempty"`
 
@@ -680,6 +681,41 @@ type Retry struct {
 //
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
+// BlueGreen describes an atomic two-pool deployment. Unlike Canary,
+// both pools live in config simultaneously; Active picks which one
+// receives 100% of traffic. The other pool is staging — operators
+// deploy + smoke-test against it, then `apigw api blue-green swap`
+// to flip Active and reload nginx.
+//
+// Rollback after a swap is one more swap. Both pools remain
+// declared, so reverting takes zero re-config.
+//
+// When BlueGreen is set, the active pool replaces API.Upstreams as
+// the primary apigw_<name> upstream block — i.e. BlueGreen is
+// mutually exclusive with the legacy Upstreams field. Canary still
+// works on top: Canary.Weight% siphoned from the BlueGreen-active
+// pool to Canary.Upstreams.
+type BlueGreen struct {
+	Blue   []Upstream `koanf:"blue" yaml:"blue"`
+	Green  []Upstream `koanf:"green" yaml:"green"`
+	Active string     `koanf:"active" yaml:"active"` // "blue" | "green"
+}
+
+// ActivePool returns the slice currently serving traffic, or nil if
+// Active is unset/invalid (caller treats as misconfiguration).
+func (b *BlueGreen) ActivePool() []Upstream {
+	if b == nil {
+		return nil
+	}
+	switch b.Active {
+	case "blue":
+		return b.Blue
+	case "green":
+		return b.Green
+	}
+	return nil
+}
+
 type Canary struct {
 	// Weight is the percentage (0-100) of traffic that hits Upstreams
 	// (the canary pool). Rest goes to API.Upstreams (the primary).

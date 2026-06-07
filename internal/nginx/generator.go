@@ -514,7 +514,21 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		}
 		entry.AccessLogMode = a.AccessLog
 
-		if up, ok := buildUpstream(a.Name, a.Port, a.Upstreams, a.LoadBalance, a.HealthCheck); ok {
+		// BlueGreen, when set, replaces a.Upstreams as the primary pool.
+		// The non-active pool is intentionally NOT emitted as a separate
+		// upstream block — keeping the nginx config minimal AND making
+		// rollback a one-line swap rather than an upstream/proxy_pass
+		// re-rewrite. The other pool lives only in our config.yaml.
+		primaryUpstreams := a.Upstreams
+		primaryPort := a.Port
+		if bg := a.BlueGreen; bg != nil {
+			if active := bg.ActivePool(); len(active) > 0 {
+				primaryUpstreams = active
+				primaryPort = 0 // legacy single-port unused when BG drives the pool
+			}
+		}
+
+		if up, ok := buildUpstream(a.Name, primaryPort, primaryUpstreams, a.LoadBalance, a.HealthCheck); ok {
 			// Wire LB strategy extensions: consistent_hash + sticky cookie
 			// override the basic least_conn/ip_hash/random returned by
 			// buildUpstream.
