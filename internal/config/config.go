@@ -681,8 +681,25 @@ type Retry struct {
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
 type Canary struct {
-	Weight    int        `koanf:"weight" yaml:"weight"`                   // 0-100, percent to canary
-	PinHeader string     `koanf:"pin_header" yaml:"pin_header,omitempty"` // e.g. "X-Canary"
+	// Weight is the percentage (0-100) of traffic that hits Upstreams
+	// (the canary pool). Rest goes to API.Upstreams (the primary).
+	Weight int `koanf:"weight" yaml:"weight"`
+
+	// PinHeader, when set, names a request header (e.g. "X-Canary").
+	// When a client sends that header with value "1", the request
+	// pins to the canary pool regardless of Weight — operators use
+	// this for forced QA traffic.
+	PinHeader string `koanf:"pin_header" yaml:"pin_header,omitempty"`
+
+	// Sticky, when true, hashes the routing decision on $remote_addr
+	// so the same client consistently sees the same pool across
+	// requests. False (default) hashes on $request_id — every request
+	// is independently distributed, which is what you want for
+	// load tests and what you DON'T want for real users (cart on
+	// canary, checkout on primary → bug reports).
+	Sticky bool `koanf:"sticky" yaml:"sticky,omitempty"`
+
+	// Upstreams is the canary pool. Same shape as API.Upstreams.
 	Upstreams []Upstream `koanf:"upstreams" yaml:"upstreams"`
 }
 

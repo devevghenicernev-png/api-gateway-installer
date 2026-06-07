@@ -131,13 +131,27 @@ type streamUpstream struct {
 	Servers []string // "host:port"
 }
 
-// splitClientsEntry renders one nginx split_clients block.
+// splitClientsEntry renders one nginx split_clients block AND, when
+// Pin is set, an accompanying map that lets clients with
+// `$http_<pin_header>: 1` bypass the split and go straight to the
+// canary. The combined output is the per-API "target" variable used
+// by proxy_pass.
 type splitClientsEntry struct {
-	Name        string // e.g. "apigw_billing_split"
-	HashSource  string // typically $request_id or $remote_addr — uniform distribution
+	Name        string // split-output var; e.g. "apigw_billing_split"
+	HashSource  string // typically $request_id (random) or $remote_addr (sticky)
 	CanaryPct   int    // 0-100; rest goes to primary
 	CanaryName  string // upstream name for canary
 	PrimaryName string // upstream name for primary
+
+	// TargetName is the final variable referenced by `proxy_pass
+	// http://$<TargetName>`. Equals Name when no Pin is set, or a
+	// distinct combined variable when Pin overrides the split.
+	TargetName string
+
+	// PinHeader (lowercased, dashes→underscores) names the nginx var
+	// the map keys on — e.g. "x_canary" for header "X-Canary". Empty =
+	// no pin map emitted.
+	PinHeader string
 }
 
 type gzipEntry struct {
@@ -584,6 +598,48 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		deploys = append(deploys, entry)
 	}
 
+	// Pre-pass for canary splits — runs BEFORE the server template
+	// renders so the location's proxy_pass uses the rewritten
+	// UpstreamName (target variable) when canary is configured. Both
+	// the canary upstream block and the split_clients map are read by
+	// the http template later; their order doesn't matter to nginx.
+	splits := []splitClientsEntry{}
+	for ai, a := range cfg.APIs {
+		if a.Canary == nil || a.Canary.Weight <= 0 {
+			continue
+		}
+		canaryUp := "apigw_" + a.Name + "_canary"
+		if up, ok := buildUpstream(a.Name+"_canary", 0, a.Canary.Upstreams, a.LoadBalance, a.HealthCheck); ok {
+			upstreams = append(upstreams, up)
+		}
+		// Sticky → hash by IP (consistent per-client); non-sticky → hash
+		// by request ID (uniform per-request distribution, what you want
+		// for canary load-balancing experiments).
+		hashSource := "$request_id"
+		if a.Canary.Sticky {
+			hashSource = "$remote_addr"
+		}
+		splitName := "apigw_" + a.Name + "_split"
+		targetName := splitName
+		pinHeader := ""
+		if a.Canary.PinHeader != "" {
+			// Override target via the combined map; the pin header value
+			// "1" pins to canary, "0"/missing falls through to the split.
+			targetName = "apigw_" + a.Name + "_target"
+			pinHeader = strings.ToLower(strings.ReplaceAll(a.Canary.PinHeader, "-", "_"))
+		}
+		splits = append(splits, splitClientsEntry{
+			Name:        splitName,
+			HashSource:  hashSource,
+			CanaryPct:   a.Canary.Weight,
+			CanaryName:  canaryUp,
+			PrimaryName: "apigw_" + a.Name,
+			TargetName:  targetName,
+			PinHeader:   pinHeader,
+		})
+		apis[ai].UpstreamName = "$" + targetName
+	}
+
 	serverName := nonEmpty(cfg.Listen.ServerName, "_")
 	// Validate each token (space-separated) — accepts hostnames, `_` catch-all,
 	// and `*` wildcards. Anything else aborts the render.
@@ -648,25 +704,9 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		1,
 	)
 
-	// Now render the http-scope payload.
-	// E13 — build split_clients blocks for each API with canary set.
-	splits := []splitClientsEntry{}
-	for _, a := range cfg.APIs {
-		if a.Canary == nil || a.Canary.Weight <= 0 {
-			continue
-		}
-		canaryUp := "apigw_" + a.Name + "_canary"
-		if up, ok := buildUpstream(a.Name+"_canary", 0, a.Canary.Upstreams, a.LoadBalance, a.HealthCheck); ok {
-			upstreams = append(upstreams, up)
-		}
-		splits = append(splits, splitClientsEntry{
-			Name:        "apigw_" + a.Name + "_split",
-			HashSource:  "$request_id",
-			CanaryPct:   a.Canary.Weight,
-			CanaryName:  canaryUp,
-			PrimaryName: "apigw_" + a.Name,
-		})
-	}
+	// Now render the http-scope payload — splits/canary upstreams/
+	// UpstreamName rewrites happen earlier (around the apis pre-pass)
+	// so both server and http templates see the same view.
 
 	// Collect cache zones from any API with response caching configured.
 	var cacheZones []cacheZoneEntry

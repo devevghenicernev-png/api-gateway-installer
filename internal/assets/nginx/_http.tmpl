@@ -47,6 +47,13 @@ split_clients "{{ .HashSource }}" ${{ .Name }} {
     {{ .CanaryPct }}% {{ .CanaryName }};
     *                {{ .PrimaryName }};
 }
+{{ if .PinHeader -}}
+# Pin override: clients sending the header pin to canary regardless of split.
+map $http_{{ .PinHeader }} ${{ .TargetName }} {
+    default ${{ .Name }};
+    "1"     {{ .CanaryName }};
+}
+{{ end -}}
 {{ end }}
 
 {{ range .CacheZones -}}
