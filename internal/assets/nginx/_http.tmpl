@@ -23,6 +23,10 @@ upstream apigw_{{ .Name }} {
     server {{ .Address }}{{ if gt .Weight 0 }} weight={{ .Weight }}{{ end }}{{ if gt .MaxFails 0 }} max_fails={{ .MaxFails }}{{ end }}{{ if .FailTimeout }} fail_timeout={{ .FailTimeout }}{{ end }}{{ if .Backup }} backup{{ end }}{{ if .Down }} down{{ end }};
     {{ end -}}
     keepalive {{ .Keepalive }};
+    {{ if .KeepaliveTimeout }}keepalive_timeout {{ .KeepaliveTimeout }};
+    {{ end -}}
+    {{ if gt .KeepaliveRequests 0 }}keepalive_requests {{ .KeepaliveRequests }};
+    {{ end -}}
 }
 {{ end }}
 

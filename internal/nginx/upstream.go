@@ -120,6 +120,7 @@ func buildVariantSplit(a config.API) (*splitClientsEntry, []upstreamEntry) {
 	for i, k := range keep {
 		upName := "apigw_" + a.Name + "_" + k.name
 		if up, ok := buildUpstream(a.Name+"_"+k.name, 0, k.ups, a.LoadBalance, a.HealthCheck); ok {
+			applyConnectionPool(&up, a.ConnectionPool)
 			ups = append(ups, up)
 		}
 		// Last variant gets the wildcard so rounding leftovers don't
@@ -158,4 +159,28 @@ func variantsActive(a config.API) bool {
 		live++
 	}
 	return live >= 2
+}
+
+// applyConnectionPool overlays per-API ConnectionPool overrides onto a
+// freshly-built upstreamEntry. Empty/zero fields keep nginx defaults
+// (KeepaliveTimeout="" → no directive emitted → 60s default;
+// KeepaliveRequests=0 → no directive → 1000 default; KeepaliveConns=0
+// keeps our legacy 16).
+func applyConnectionPool(up *upstreamEntry, pool *config.ConnectionPool) {
+	if up == nil || pool == nil {
+		return
+	}
+	if pool.KeepaliveConns > 0 {
+		up.Keepalive = pool.KeepaliveConns
+	}
+	if pool.KeepaliveTimeout > 0 {
+		secs := int(pool.KeepaliveTimeout.Seconds())
+		if secs < 1 {
+			secs = 1
+		}
+		up.KeepaliveTimeout = fmt.Sprintf("%ds", secs)
+	}
+	if pool.KeepaliveRequests > 0 {
+		up.KeepaliveRequests = pool.KeepaliveRequests
+	}
 }

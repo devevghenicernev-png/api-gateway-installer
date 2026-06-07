@@ -350,22 +350,23 @@ type API struct {
 	GRPC bool `koanf:"grpc" yaml:"grpc,omitempty"`
 
 	// Middleware — all optional.
-	MaxBodySize string       `koanf:"max_body_size" yaml:"max_body_size,omitempty"` // "10m", "1g"; default = global
-	Headers     *Headers     `koanf:"headers" yaml:"headers,omitempty"`
-	IPRules     *IPRules     `koanf:"ip_rules" yaml:"ip_rules,omitempty"`
-	CORS        *CORS        `koanf:"cors" yaml:"cors,omitempty"`
-	BasicAuth   *BasicAuth   `koanf:"basic_auth" yaml:"basic_auth,omitempty"`
-	RateLimit   *RateLimit   `koanf:"rate_limit" yaml:"rate_limit,omitempty"`
-	ForwardAuth *ForwardAuth `koanf:"forward_auth" yaml:"forward_auth,omitempty"`
-	HealthCheck *HealthCheck `koanf:"health_check" yaml:"health_check,omitempty"`
-	Retry       *Retry       `koanf:"retry" yaml:"retry,omitempty"`
-	JWT         *JWT         `koanf:"jwt" yaml:"jwt,omitempty"`
-	MTLS        *MTLS        `koanf:"mtls" yaml:"mtls,omitempty"`
-	Canary      *Canary      `koanf:"canary" yaml:"canary,omitempty"`
-	BlueGreen   *BlueGreen   `koanf:"blue_green" yaml:"blue_green,omitempty"`
-	Variants    []Variant    `koanf:"variants" yaml:"variants,omitempty"`
-	Transform   *Transform   `koanf:"transform" yaml:"transform,omitempty"`
-	Versioning  *Versioning  `koanf:"versioning" yaml:"versioning,omitempty"`
+	MaxBodySize    string          `koanf:"max_body_size" yaml:"max_body_size,omitempty"` // "10m", "1g"; default = global
+	Headers        *Headers        `koanf:"headers" yaml:"headers,omitempty"`
+	IPRules        *IPRules        `koanf:"ip_rules" yaml:"ip_rules,omitempty"`
+	CORS           *CORS           `koanf:"cors" yaml:"cors,omitempty"`
+	BasicAuth      *BasicAuth      `koanf:"basic_auth" yaml:"basic_auth,omitempty"`
+	RateLimit      *RateLimit      `koanf:"rate_limit" yaml:"rate_limit,omitempty"`
+	ForwardAuth    *ForwardAuth    `koanf:"forward_auth" yaml:"forward_auth,omitempty"`
+	HealthCheck    *HealthCheck    `koanf:"health_check" yaml:"health_check,omitempty"`
+	Retry          *Retry          `koanf:"retry" yaml:"retry,omitempty"`
+	JWT            *JWT            `koanf:"jwt" yaml:"jwt,omitempty"`
+	MTLS           *MTLS           `koanf:"mtls" yaml:"mtls,omitempty"`
+	Canary         *Canary         `koanf:"canary" yaml:"canary,omitempty"`
+	BlueGreen      *BlueGreen      `koanf:"blue_green" yaml:"blue_green,omitempty"`
+	Variants       []Variant       `koanf:"variants" yaml:"variants,omitempty"`
+	ConnectionPool *ConnectionPool `koanf:"connection_pool" yaml:"connection_pool,omitempty"`
+	Transform      *Transform      `koanf:"transform" yaml:"transform,omitempty"`
+	Versioning     *Versioning     `koanf:"versioning" yaml:"versioning,omitempty"`
 
 	// New in v0.2.0 — fills the long tail of competitive features.
 	APIKey *APIKeyAuth `koanf:"api_key" yaml:"api_key,omitempty"`
@@ -708,6 +709,35 @@ type Retry struct {
 //
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
+// ConnectionPool tunes nginx's upstream keepalive — the pool of
+// idle TCP connections to upstream servers nginx maintains for
+// reuse. Defaults are fine for most workloads; bump
+// KeepaliveConns for hot-path APIs whose upstream count > 16, or
+// KeepaliveRequests for very long-lived connections.
+//
+//	upstream apigw_<name> {
+//	    server …;
+//	    keepalive          <KeepaliveConns>;
+//	    keepalive_timeout  <KeepaliveTimeout>;
+//	    keepalive_requests <KeepaliveRequests>;
+//	}
+type ConnectionPool struct {
+	// KeepaliveConns is the max number of idle connections per worker.
+	// Default (when unset): 16 (the legacy hard-coded value).
+	KeepaliveConns int `koanf:"keepalive_conns" yaml:"keepalive_conns,omitempty"`
+
+	// KeepaliveTimeout caps how long an idle connection stays in the
+	// pool. 0 = nginx default (60s). Drop below upstream's idle
+	// timeout to avoid receiving FINs on borrowed connections.
+	KeepaliveTimeout time.Duration `koanf:"keepalive_timeout" yaml:"keepalive_timeout,omitempty"`
+
+	// KeepaliveRequests caps how many requests one connection serves
+	// before nginx closes it. 0 = nginx default (1000). Lift for
+	// extremely long-lived clients (gRPC streams, websockets); lower
+	// to encourage rotation.
+	KeepaliveRequests int `koanf:"keepalive_requests" yaml:"keepalive_requests,omitempty"`
+}
+
 // Variant is one entry in an N-way weighted traffic split. Used for
 // version-based routing ("send 20% to v2, 10% to v3, rest to v1")
 // — a generalization of Canary that scales to more than two pools.

@@ -181,6 +181,14 @@ type upstreamEntry struct {
 	LoadBalance string // "" | "least_conn" | "ip_hash" | "random"
 	Servers     []upstreamServer
 	Keepalive   int
+
+	// KeepaliveTimeout / KeepaliveRequests are emitted only when set
+	// (operator-supplied via API.ConnectionPool). Empty strings inherit
+	// the nginx defaults (60s, 1000) — keeps the generated config
+	// minimal for the common case.
+	KeepaliveTimeout  string // e.g. "60s"
+	KeepaliveRequests int
+
 	// Legacy single-port view kept until every call site is migrated; unused
 	// once buildUpstream is the sole producer.
 	Port        int
@@ -574,6 +582,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 			} else if a.StickySession == "ip_hash" {
 				up.LoadBalance = "ip_hash"
 			}
+			applyConnectionPool(&up, a.ConnectionPool)
 			entry.UpstreamName = "apigw_" + a.Name
 			upstreams = append(upstreams, up)
 		}
@@ -673,6 +682,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		}
 		canaryUp := "apigw_" + a.Name + "_canary"
 		if up, ok := buildUpstream(a.Name+"_canary", 0, a.Canary.Upstreams, a.LoadBalance, a.HealthCheck); ok {
+			applyConnectionPool(&up, a.ConnectionPool)
 			upstreams = append(upstreams, up)
 		}
 		// Sticky → hash by IP (consistent per-client); non-sticky → hash

@@ -12,6 +12,7 @@ import (
 	apiAdd "github.com/devevghenicernev-png/apigw/internal/cmd/api/add"
 	apiBlueGreen "github.com/devevghenicernev-png/apigw/internal/cmd/api/bluegreen"
 	apiCanary "github.com/devevghenicernev-png/apigw/internal/cmd/api/canary"
+	apiConnPool "github.com/devevghenicernev-png/apigw/internal/cmd/api/connpool"
 	apiDisable "github.com/devevghenicernev-png/apigw/internal/cmd/api/disable"
 	apiEnable "github.com/devevghenicernev-png/apigw/internal/cmd/api/enable"
 	apiList "github.com/devevghenicernev-png/apigw/internal/cmd/api/list"
@@ -48,5 +49,6 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiBlueGreen.NewCmdBlueGreen(f))
 	cmd.AddCommand(apiVariants.NewCmdVariants(f))
 	cmd.AddCommand(apiRetry.NewCmdRetry(f))
+	cmd.AddCommand(apiConnPool.NewCmdConnPool(f))
 	return cmd
 }
