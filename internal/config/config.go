@@ -122,6 +122,12 @@ type Security struct {
 	// override flag is set on the request. Empty list = no freeze.
 	ChangeWindows []ChangeWindow `koanf:"change_windows" yaml:"change_windows,omitempty"`
 
+	// Teams group users for RBAC. After Identify resolves a user, the
+	// dashboard adds a synthetic `team:<name>` to the user's Groups
+	// list for every team they're listed in — Assignment.Group can
+	// then reference `team:ops` to grant a whole team a role at once.
+	Teams []Team `koanf:"teams" yaml:"teams,omitempty"`
+
 	// Sessions configures the cookie-based session store. Nil = sessions
 	// disabled (per-API API.Session is then ignored). State lives in
 	// StateDir/sessions.db (bbolt). Issuing happens via the
@@ -147,6 +153,15 @@ type Security struct {
 	// true (Consumer references an undefined group), so this list isn't
 	// authoritative — it's documentation + a place to hang descriptions.
 	ConsumerGroups []ConsumerGroup `koanf:"consumer_groups" yaml:"consumer_groups,omitempty"`
+}
+
+// Team groups users by name. Membership is by user identity
+// (the same string Identify uses — typically the bearer-token's
+// User field or X-Apigw-Subject).
+type Team struct {
+	Name        string   `koanf:"name" yaml:"name"`
+	Members     []string `koanf:"members" yaml:"members"`
+	Description string   `koanf:"description" yaml:"description,omitempty"`
 }
 
 // ChangeWindow is a recurring weekly time range during which mutating

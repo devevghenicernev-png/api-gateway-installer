@@ -59,6 +59,12 @@ type Security struct {
 	Alerts        *alerts.Dispatcher
 	ChangeWindows []changewindow.Window // freeze periods that block mutating actions
 
+	// teamsByUser maps a user identity to the team names they belong
+	// to. Built from Security.Teams at NewSecurity / Reload time;
+	// consulted on every Identify() to expand the user's Groups with
+	// synthetic `team:<name>` entries.
+	teamsByUser map[string][]string
+
 	// Token table maps `Authorization: Bearer <token>` to an identity.
 	// Tokens are kept in memory (read from config on Reload()).
 	tokensMu sync.RWMutex
@@ -97,6 +103,7 @@ func NewSecurity(cfg config.Security, tenants []config.Tenant, alertsCfg config.
 		logger:        logger,
 		tokens:        map[string]rbac.Identity{},
 		ChangeWindows: configChangeWindows(cfg.ChangeWindows),
+		teamsByUser:   buildTeamIndex(cfg.Teams),
 	}
 	if s.maxBody <= 0 {
 		s.maxBody = 1 << 20 // 1 MiB
@@ -294,7 +301,7 @@ func (s *Security) Identify(r *http.Request) rbac.Identity {
 		// nginx auth_request flow can also forward an X-Apigw-Subject header
 		// set by the JWT verifier. Accept it as the identity.
 		if sub := r.Header.Get("X-Apigw-Subject"); sub != "" {
-			return rbac.Identity{User: sub}
+			return s.expandTeams(rbac.Identity{User: sub})
 		}
 		return rbac.Identity{User: "anonymous"}
 	}
@@ -310,7 +317,26 @@ func (s *Security) Identify(r *http.Request) rbac.Identity {
 	if !ok {
 		return rbac.Identity{User: "anonymous"}
 	}
-	return ident
+	return s.expandTeams(ident)
+}
+
+// expandTeams appends synthetic `team:<name>` entries to the
+// identity's Groups for every team the user is in. No-op when no
+// teams are configured. Returns the (possibly extended) identity by
+// value — we never mutate the original (it lives in the token map).
+func (s *Security) expandTeams(in rbac.Identity) rbac.Identity {
+	if s == nil || len(s.teamsByUser) == 0 {
+		return in
+	}
+	teams := s.teamsByUser[in.User]
+	if len(teams) == 0 {
+		return in
+	}
+	out := rbac.Identity{User: in.User, Groups: append([]string(nil), in.Groups...)}
+	for _, t := range teams {
+		out.Groups = append(out.Groups, "team:"+t)
+	}
+	return out
 }
 
 // Action describes a guarded mutation. Subject = "deploy/foo" for resource
@@ -680,6 +706,21 @@ func configChangeWindows(in []config.ChangeWindow) []changewindow.Window {
 			EndHour:   w.EndHour,
 			Reason:    w.Reason,
 		})
+	}
+	return out
+}
+
+// buildTeamIndex inverts the user-by-team config into a team-by-user
+// map for cheap Identify-time lookup.
+func buildTeamIndex(teams []config.Team) map[string][]string {
+	if len(teams) == 0 {
+		return nil
+	}
+	out := make(map[string][]string)
+	for _, t := range teams {
+		for _, m := range t.Members {
+			out[m] = append(out[m], t.Name)
+		}
 	}
 	return out
 }
