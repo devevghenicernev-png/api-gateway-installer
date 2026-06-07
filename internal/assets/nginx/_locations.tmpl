@@ -279,9 +279,11 @@
         proxy_hide_header {{ . }};
         {{ end -}}
         {{ if .NextUpstream }}proxy_next_upstream {{ .NextUpstream }};
-        proxy_next_upstream_tries 3;
+        proxy_next_upstream_tries {{ if .NextUpstreamTries }}{{ .NextUpstreamTries }}{{ else }}3{{ end }};
+        {{ if .NextUpstreamTimeout }}proxy_next_upstream_timeout {{ .NextUpstreamTimeout }};
         {{ end -}}
-        proxy_read_timeout                 300s;
+        {{ end -}}
+        proxy_read_timeout                 {{ if .ReadTimeout }}{{ .ReadTimeout }}{{ else }}300s{{ end }};
         proxy_send_timeout                 300s;
         proxy_buffering                    off;
         {{ if .CustomLocation -}}
@@ -411,9 +413,11 @@
         proxy_hide_header {{ . }};
         {{ end -}}
         {{ if .NextUpstream }}proxy_next_upstream {{ .NextUpstream }};
-        proxy_next_upstream_tries 3;
+        proxy_next_upstream_tries {{ if .NextUpstreamTries }}{{ .NextUpstreamTries }}{{ else }}3{{ end }};
+        {{ if .NextUpstreamTimeout }}proxy_next_upstream_timeout {{ .NextUpstreamTimeout }};
         {{ end -}}
-        proxy_read_timeout                 300s;
+        {{ end -}}
+        proxy_read_timeout                 {{ if .ReadTimeout }}{{ .ReadTimeout }}{{ else }}300s{{ end }};
         proxy_send_timeout                 300s;
         proxy_buffering                    off;
         {{ if .CustomLocation -}}

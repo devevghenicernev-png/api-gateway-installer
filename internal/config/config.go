@@ -667,10 +667,36 @@ type HealthCheck struct {
 	FailTimeout string `koanf:"fail_timeout" yaml:"fail_timeout,omitempty"` // nginx default 10s
 }
 
-// Retry maps to nginx `proxy_next_upstream`. The default set retries on
-// connect/read errors + 502/503/504; users can extend.
+// Retry maps to nginx `proxy_next_upstream` + `proxy_next_upstream_tries`
+// + `proxy_next_upstream_timeout` + `proxy_read_timeout`. Default set
+// (when Retry is non-nil but Conditions empty): retries on connect/read
+// errors + 502/503/504. Attempts defaults to 3 when unset.
+//
+// Backoff and Jitter knobs aren't here on purpose — stock nginx
+// retries the next upstream immediately, without inter-attempt
+// sleep. Real exponential backoff would require Lua / njs or an
+// out-of-process retry sidecar; documenting it as a separate
+// future feature when we add the plugin runtime.
 type Retry struct {
-	Conditions []string `koanf:"conditions" yaml:"conditions,omitempty"` // e.g. ["error", "timeout", "http_502", "http_503", "http_504"]
+	// Conditions is the raw proxy_next_upstream list. Overrides the
+	// safe default when set.
+	Conditions []string `koanf:"conditions" yaml:"conditions,omitempty"`
+
+	// OnStatus extends Conditions with `http_NNN` entries — operator-
+	// friendly shorthand for "retry on these HTTP statuses". Merged
+	// (de-duplicated) with Conditions at render time.
+	OnStatus []int `koanf:"on_status" yaml:"on_status,omitempty"`
+
+	// Attempts is the number of upstreams to try per request, including
+	// the first. 0 = nginx default (1 = no retry); apigw forces ≥1.
+	// Most APIs want 3 — one primary + two retries.
+	Attempts int `koanf:"attempts" yaml:"attempts,omitempty"`
+
+	// PerTry caps the time spent on each upstream attempt
+	// (proxy_read_timeout). 0 = inherit the generator default (300s).
+	// proxy_next_upstream_timeout (total wall-clock budget for all
+	// tries) is derived as PerTry × Attempts when both are set.
+	PerTry time.Duration `koanf:"per_try" yaml:"per_try,omitempty"`
 }
 
 // Canary describes a percentage-based traffic split — N% of requests go

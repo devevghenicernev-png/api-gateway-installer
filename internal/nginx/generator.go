@@ -212,27 +212,37 @@ type apiEntry struct {
 	UpstreamName string // "" = no upstream block; we fall back to proxy_pass http://127.0.0.1:port
 
 	// Per-API middleware (F2-F6 fields). Empty values render no extra directives.
-	MaxBodySize      string            // F2
-	RequestHeaders   map[string]string // F2
-	ResponseHeaders  map[string]string // F2
-	ResponseHide     []string          // F2
-	Allow            []string          // F2 (IP rules)
-	Deny             []string          // F2
-	CORS             *corsEntry        // F2
-	BasicAuthRealm   string            // F2 (empty = no basic auth)
-	BasicAuthFile    string            // F2 — path to htpasswd file
-	RateLimitZone    string            // F4 — zone name
-	RateLimitBurst   int               // F4
-	ForwardAuth      *forwardAuthEntry // F6
-	NextUpstream     string            // F5 — proxy_next_upstream conditions
-	GRPC             bool              // F9 — emit grpc_pass instead of proxy_pass
-	JWT              bool              // F12 — emit auth_request /_apigw_jwt/<api>
-	JWTDashboardPort int               // F12 — port the dashboard daemon listens on
-	CustomLocation   string            // F14 — raw nginx directives, location-scoped
-	CustomServer     string            // F14 — raw nginx directives, server-scoped (rendered server.tmpl)
-	MTLS             bool              // E1 — emit ssl_verify_client + auth_request /_apigw_mtls/<api>
-	MTLSCAFile       string            // E1 — path to the CA bundle nginx loads
-	MTLSOptional     bool              // E1 — ssl_verify_client optional vs on
+	MaxBodySize     string            // F2
+	RequestHeaders  map[string]string // F2
+	ResponseHeaders map[string]string // F2
+	ResponseHide    []string          // F2
+	Allow           []string          // F2 (IP rules)
+	Deny            []string          // F2
+	CORS            *corsEntry        // F2
+	BasicAuthRealm  string            // F2 (empty = no basic auth)
+	BasicAuthFile   string            // F2 — path to htpasswd file
+	RateLimitZone   string            // F4 — zone name
+	RateLimitBurst  int               // F4
+	ForwardAuth     *forwardAuthEntry // F6
+	NextUpstream    string            // F5 — proxy_next_upstream conditions
+
+	// NextUpstreamTries → proxy_next_upstream_tries. 0 = inherit
+	// template default (3). NextUpstreamTimeout (in seconds, "0" = no
+	// limit) becomes proxy_next_upstream_timeout; ReadTimeout (in
+	// seconds) becomes proxy_read_timeout. Empty strings inherit the
+	// template defaults.
+	NextUpstreamTries   int
+	NextUpstreamTimeout string
+	ReadTimeout         string
+
+	GRPC             bool   // F9 — emit grpc_pass instead of proxy_pass
+	JWT              bool   // F12 — emit auth_request /_apigw_jwt/<api>
+	JWTDashboardPort int    // F12 — port the dashboard daemon listens on
+	CustomLocation   string // F14 — raw nginx directives, location-scoped
+	CustomServer     string // F14 — raw nginx directives, server-scoped (rendered server.tmpl)
+	MTLS             bool   // E1 — emit ssl_verify_client + auth_request /_apigw_mtls/<api>
+	MTLSCAFile       string // E1 — path to the CA bundle nginx loads
+	MTLSOptional     bool   // E1 — ssl_verify_client optional vs on
 
 	// v0.2.0 additions.
 	APIKey        bool           // emit auth_request /_apigw_apikey_<name>
@@ -313,25 +323,29 @@ type deployEntry struct {
 	Enabled    bool
 
 	// Mirrors of apiEntry middleware so deploys share the same surface.
-	MaxBodySize      string
-	RequestHeaders   map[string]string
-	ResponseHeaders  map[string]string
-	ResponseHide     []string
-	Allow            []string
-	Deny             []string
-	CORS             *corsEntry
-	BasicAuthRealm   string
-	BasicAuthFile    string
-	RateLimitZone    string
-	RateLimitBurst   int
-	ForwardAuth      *forwardAuthEntry
-	UpstreamName     string
-	NextUpstream     string
-	GRPC             bool
-	JWT              bool
-	JWTDashboardPort int
-	CustomLocation   string
-	CustomServer     string
+	MaxBodySize     string
+	RequestHeaders  map[string]string
+	ResponseHeaders map[string]string
+	ResponseHide    []string
+	Allow           []string
+	Deny            []string
+	CORS            *corsEntry
+	BasicAuthRealm  string
+	BasicAuthFile   string
+	RateLimitZone   string
+	RateLimitBurst  int
+	ForwardAuth     *forwardAuthEntry
+	UpstreamName    string
+	NextUpstream    string
+
+	NextUpstreamTries   int
+	NextUpstreamTimeout string
+	ReadTimeout         string
+	GRPC                bool
+	JWT                 bool
+	JWTDashboardPort    int
+	CustomLocation      string
+	CustomServer        string
 }
 
 // RenderStream produces the TCP/UDP stream{} include. Empty when no

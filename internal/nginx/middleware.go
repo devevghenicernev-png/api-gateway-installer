@@ -144,13 +144,62 @@ func applyMiddleware(
 		}
 	}
 
-	if r := a.Retry; r != nil && len(r.Conditions) > 0 {
-		out.NextUpstream = strings.Join(r.Conditions, " ")
+	if r := a.Retry; r != nil {
+		applyRetry(out, r)
 	} else if a.HealthCheck != nil {
 		// Sensible default when a health check is configured.
 		out.NextUpstream = "error timeout http_502 http_503 http_504"
 	}
 	return nil
+}
+
+// applyRetry merges Retry.Conditions + Retry.OnStatus into the
+// proxy_next_upstream line, and sets the per-route tries / timeouts.
+// Called with a non-nil Retry.
+func applyRetry(out *apiEntry, r *config.Retry) {
+	// Merge conditions + on_status (de-duped, stable order).
+	seen := map[string]struct{}{}
+	var conds []string
+	for _, c := range r.Conditions {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if _, dup := seen[c]; dup {
+			continue
+		}
+		seen[c] = struct{}{}
+		conds = append(conds, c)
+	}
+	for _, code := range r.OnStatus {
+		c := fmt.Sprintf("http_%d", code)
+		if _, dup := seen[c]; dup {
+			continue
+		}
+		seen[c] = struct{}{}
+		conds = append(conds, c)
+	}
+	if len(conds) == 0 {
+		// Retry block present but empty → enable the safe default set.
+		conds = []string{"error", "timeout", "http_502", "http_503", "http_504"}
+	}
+	out.NextUpstream = strings.Join(conds, " ")
+
+	if r.Attempts > 0 {
+		out.NextUpstreamTries = r.Attempts
+	}
+	if r.PerTry > 0 {
+		secs := int(r.PerTry.Seconds())
+		if secs < 1 {
+			secs = 1
+		}
+		out.ReadTimeout = fmt.Sprintf("%ds", secs)
+		// Total budget across all tries = per-try × attempts when both
+		// are set; otherwise no overall cap.
+		if r.Attempts > 0 {
+			out.NextUpstreamTimeout = fmt.Sprintf("%ds", secs*r.Attempts)
+		}
+	}
 }
 
 // applyMiddlewareDeploy is the Deploy variant — same shape, different
@@ -194,6 +243,9 @@ func applyMiddlewareDeploy(
 	out.RateLimitBurst = tmp.RateLimitBurst
 	out.ForwardAuth = tmp.ForwardAuth
 	out.NextUpstream = tmp.NextUpstream
+	out.NextUpstreamTries = tmp.NextUpstreamTries
+	out.NextUpstreamTimeout = tmp.NextUpstreamTimeout
+	out.ReadTimeout = tmp.ReadTimeout
 	return nil
 }
 
