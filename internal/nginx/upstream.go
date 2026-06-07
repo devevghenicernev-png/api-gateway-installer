@@ -87,3 +87,75 @@ func buildUpstream(name string, legacyPort int, pool []config.Upstream, lb strin
 		Keepalive:   16,
 	}, true
 }
+
+// buildVariantSplit builds the upstreams + split_clients entry for an
+// API with Variants. Returns nil split when no variant has a positive
+// weight (no traffic to split) — caller treats as "no-op, fall back to
+// primary upstream".
+//
+// Variants are emitted in declaration order. The LAST one with a
+// non-zero weight becomes the wildcard (`*`) so rounding errors and
+// drift don't drop requests. Variants with zero weight are skipped
+// entirely.
+func buildVariantSplit(a config.API) (*splitClientsEntry, []upstreamEntry) {
+	type kept struct {
+		name   string
+		weight int
+		ups    []config.Upstream
+	}
+	var keep []kept
+	for _, v := range a.Variants {
+		if v.Name == "" || v.Weight <= 0 || len(v.Upstreams) == 0 {
+			continue
+		}
+		keep = append(keep, kept{name: v.Name, weight: v.Weight, ups: v.Upstreams})
+	}
+	if len(keep) < 2 {
+		// Need at least two variants to mean anything as a split.
+		return nil, nil
+	}
+
+	var ups []upstreamEntry
+	splits := make([]variantSplit, 0, len(keep))
+	for i, k := range keep {
+		upName := "apigw_" + a.Name + "_" + k.name
+		if up, ok := buildUpstream(a.Name+"_"+k.name, 0, k.ups, a.LoadBalance, a.HealthCheck); ok {
+			ups = append(ups, up)
+		}
+		// Last variant gets the wildcard so rounding leftovers don't
+		// vanish into nginx's default-empty bucket.
+		isLast := i == len(keep)-1
+		splits = append(splits, variantSplit{
+			Pct:          k.weight,
+			UpstreamName: upName,
+			Wildcard:     isLast,
+		})
+	}
+
+	splitName := "apigw_" + a.Name + "_variant"
+	return &splitClientsEntry{
+		Name:       splitName,
+		HashSource: "$request_id",
+		TargetName: splitName,
+		Variants:   splits,
+	}, ups
+}
+
+// variantsActive reports whether the API will be served via a Variants
+// split — i.e. at least two variants have positive weight + non-empty
+// upstream pool. Mirrors the guard in buildVariantSplit. The apis loop
+// uses it to skip the primary upstream block (dead config when variants
+// drive routing).
+func variantsActive(a config.API) bool {
+	if len(a.Variants) < 2 {
+		return false
+	}
+	live := 0
+	for _, v := range a.Variants {
+		if v.Name == "" || v.Weight <= 0 || len(v.Upstreams) == 0 {
+			continue
+		}
+		live++
+	}
+	return live >= 2
+}

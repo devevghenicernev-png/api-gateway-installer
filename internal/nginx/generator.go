@@ -152,6 +152,21 @@ type splitClientsEntry struct {
 	// the map keys on — e.g. "x_canary" for header "X-Canary". Empty =
 	// no pin map emitted.
 	PinHeader string
+
+	// Variants holds the N-way pool split when this entry represents
+	// API.Variants rather than canary. Empty for canary entries.
+	// The last variant gets the "*" wildcard so rounding errors don't
+	// drop traffic.
+	Variants []variantSplit
+}
+
+// variantSplit is one entry in an N-way variant split. The generator
+// orders these so the last one (after stable sort by Weight desc) is
+// the wildcard catch.
+type variantSplit struct {
+	Pct          int    // 0-100; 0 for the wildcard entry
+	UpstreamName string // e.g. apigw_billing_v2
+	Wildcard     bool   // true → emit `*` instead of `N%`
 }
 
 type gzipEntry struct {
@@ -519,6 +534,10 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		// upstream block — keeping the nginx config minimal AND making
 		// rollback a one-line swap rather than an upstream/proxy_pass
 		// re-rewrite. The other pool lives only in our config.yaml.
+		//
+		// Variants override entirely: every variant gets its own upstream
+		// block and proxy_pass routes through the split var, so the
+		// primary apigw_<name> upstream would be dead config. Skip it.
 		primaryUpstreams := a.Upstreams
 		primaryPort := a.Port
 		if bg := a.BlueGreen; bg != nil {
@@ -527,8 +546,9 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 				primaryPort = 0 // legacy single-port unused when BG drives the pool
 			}
 		}
+		skipPrimaryUpstream := variantsActive(a)
 
-		if up, ok := buildUpstream(a.Name, primaryPort, primaryUpstreams, a.LoadBalance, a.HealthCheck); ok {
+		if up, ok := buildUpstream(a.Name, primaryPort, primaryUpstreams, a.LoadBalance, a.HealthCheck); ok && !skipPrimaryUpstream {
 			// Wire LB strategy extensions: consistent_hash + sticky cookie
 			// override the basic least_conn/ip_hash/random returned by
 			// buildUpstream.
@@ -612,13 +632,28 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		deploys = append(deploys, entry)
 	}
 
-	// Pre-pass for canary splits — runs BEFORE the server template
-	// renders so the location's proxy_pass uses the rewritten
-	// UpstreamName (target variable) when canary is configured. Both
-	// the canary upstream block and the split_clients map are read by
-	// the http template later; their order doesn't matter to nginx.
+	// Pre-pass for variants / canary splits — runs BEFORE the server
+	// template renders so the location's proxy_pass uses the rewritten
+	// UpstreamName (target variable). Both the side upstream blocks and
+	// the split_clients map are read by the http template later; their
+	// order doesn't matter to nginx.
+	//
+	// Precedence when multiple traffic-splitting strategies are set on
+	// one API: Variants > BlueGreen > Canary. (BlueGreen runs inline in
+	// the apis loop above; this pre-pass handles Variants and Canary.)
 	splits := []splitClientsEntry{}
 	for ai, a := range cfg.APIs {
+		// Variants take precedence over Canary on the same API.
+		if len(a.Variants) > 0 {
+			vSplit, vUpstreams := buildVariantSplit(a)
+			if vSplit != nil {
+				splits = append(splits, *vSplit)
+				upstreams = append(upstreams, vUpstreams...)
+				apis[ai].UpstreamName = "$" + vSplit.TargetName
+			}
+			continue
+		}
+
 		if a.Canary == nil || a.Canary.Weight <= 0 {
 			continue
 		}

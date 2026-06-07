@@ -42,6 +42,14 @@ map $http_origin $apigw_cors_origin {
 {{ end }}
 
 {{ range .SplitClients -}}
+{{ if .Variants -}}
+# --- N-way variant split for {{ .Name }} ({{ len .Variants }} variants) ---
+split_clients "{{ .HashSource }}" ${{ .Name }} {
+    {{ range .Variants -}}
+    {{ if .Wildcard }}*{{ else }}{{ .Pct }}%{{ end }} {{ .UpstreamName }};
+    {{ end -}}
+}
+{{ else -}}
 # --- Canary split for {{ .Name }} ({{ .CanaryPct }}% to canary) ---
 split_clients "{{ .HashSource }}" ${{ .Name }} {
     {{ .CanaryPct }}% {{ .CanaryName }};
@@ -53,6 +61,7 @@ map $http_{{ .PinHeader }} ${{ .TargetName }} {
     default ${{ .Name }};
     "1"     {{ .CanaryName }};
 }
+{{ end -}}
 {{ end -}}
 {{ end }}
 

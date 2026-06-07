@@ -18,6 +18,7 @@ import (
 	apiImport "github.com/devevghenicernev-png/apigw/internal/cmd/api/openapiimport"
 	apiReload "github.com/devevghenicernev-png/apigw/internal/cmd/api/reload"
 	apiRemove "github.com/devevghenicernev-png/apigw/internal/cmd/api/remove"
+	apiVariants "github.com/devevghenicernev-png/apigw/internal/cmd/api/variants"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 )
 
@@ -44,5 +45,6 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiACL.NewCmdACL(f))
 	cmd.AddCommand(apiCanary.NewCmdCanary(f))
 	cmd.AddCommand(apiBlueGreen.NewCmdBlueGreen(f))
+	cmd.AddCommand(apiVariants.NewCmdVariants(f))
 	return cmd
 }

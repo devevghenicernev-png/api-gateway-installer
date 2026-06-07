@@ -363,6 +363,7 @@ type API struct {
 	MTLS        *MTLS        `koanf:"mtls" yaml:"mtls,omitempty"`
 	Canary      *Canary      `koanf:"canary" yaml:"canary,omitempty"`
 	BlueGreen   *BlueGreen   `koanf:"blue_green" yaml:"blue_green,omitempty"`
+	Variants    []Variant    `koanf:"variants" yaml:"variants,omitempty"`
 	Transform   *Transform   `koanf:"transform" yaml:"transform,omitempty"`
 	Versioning  *Versioning  `koanf:"versioning" yaml:"versioning,omitempty"`
 
@@ -681,6 +682,23 @@ type Retry struct {
 //
 // nginx implementation: split_clients $client_id $upstream_pick — the
 // generator emits a split_clients map + uses $upstream_pick in proxy_pass.
+// Variant is one entry in an N-way weighted traffic split. Used for
+// version-based routing ("send 20% to v2, 10% to v3, rest to v1")
+// — a generalization of Canary that scales to more than two pools.
+// Mutually exclusive with Canary and BlueGreen on the same API: if
+// any is set, the others are ignored (generator picks Variants > BG
+// > Canary in priority).
+//
+// Weights are percentages 0-100; sum SHOULD equal 100 but isn't
+// enforced — the last variant catches whatever's left via the nginx
+// `split_clients "*"` wildcard, so rounding errors don't drop
+// traffic.
+type Variant struct {
+	Name      string     `koanf:"name" yaml:"name"`
+	Weight    int        `koanf:"weight" yaml:"weight"`
+	Upstreams []Upstream `koanf:"upstreams" yaml:"upstreams"`
+}
+
 // BlueGreen describes an atomic two-pool deployment. Unlike Canary,
 // both pools live in config simultaneously; Active picks which one
 // receives 100% of traffic. The other pool is staging — operators
