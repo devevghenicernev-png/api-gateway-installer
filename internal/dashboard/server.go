@@ -60,6 +60,10 @@ type Server struct {
 	// deliveries picks the job up. nil = run-via-UI disabled, CLI still
 	// works (it uses an in-process deploy.JobQueue).
 	Queue *webhook.Queue
+
+	// hmacNonces holds the per-API nonce LRU for HMAC replay protection.
+	// Lazily inited in New(); never nil after construction.
+	hmacNonces *auth.HMACNonces
 }
 
 // New constructs a Server bound to `addr`.
@@ -73,12 +77,13 @@ func New(addr string, hub *events.Hub, cfgFn func() (*config.Config, error), log
 		logger = slog.Default()
 	}
 	return &Server{
-		Addr:     addr,
-		Hub:      hub,
-		Logger:   logger,
-		ConfigFn: cfgFn,
-		started:  time.Now(),
-		Metrics:  m,
+		Addr:       addr,
+		Hub:        hub,
+		Logger:     logger,
+		ConfigFn:   cfgFn,
+		started:    time.Now(),
+		Metrics:    m,
+		hmacNonces: auth.NewHMACNonces(),
 	}
 }
 
@@ -93,6 +98,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/jwt/", s.handleJWTAuth)
 	mux.HandleFunc("/auth/mtls/", s.handleMTLSAuth)
 	mux.HandleFunc("/auth/apikey/", s.handleAPIKeyAuth)
+	mux.HandleFunc("/auth/hmac/", s.handleHMACAuth)
 	mux.HandleFunc("/auth/oauth2/", s.handleOAuth2Auth)
 	mux.HandleFunc("/mock/", s.handleMock)
 	s.adminRoutes(mux)

@@ -52,6 +52,23 @@
         proxy_set_header X-Original-URI $request_uri;
     }
     {{ end -}}
+    {{ if .HMAC -}}
+    # HMAC signature auth-check for {{ .Name }} → dashboard daemon.
+    # Body is NOT forwarded — integrity is enforced via signed
+    # X-Apigw-Content-SHA256 header (computed by the client).
+    location = /_apigw_hmac_{{ .Name }} {
+        internal;
+        proxy_pass http://127.0.0.1:{{ .JWTDashboardPort }}/auth/hmac/{{ .Name }};
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Apigw-Date $http_x_apigw_date;
+        proxy_set_header X-Apigw-Nonce $http_x_apigw_nonce;
+        proxy_set_header X-Apigw-Content-SHA256 $http_x_apigw_content_sha256;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+    {{ end -}}
     {{ if .OAuth2 -}}
     # OAuth2 introspection auth-check for {{ .Name }} → dashboard daemon
     location = /_apigw_oauth2_{{ .Name }} {
@@ -114,6 +131,15 @@
         proxy_set_header X-Apigw-ApiKey-ID $apigw_apikey_id;
         proxy_set_header X-Apigw-ApiKey-Owner $apigw_apikey_owner;
         proxy_set_header X-Apigw-ApiKey-Scopes $apigw_apikey_scopes;
+        {{ end -}}
+        {{ if .HMAC -}}
+        auth_request /_apigw_hmac_{{ .Name }};
+        auth_request_set $apigw_hmac_id $upstream_http_x_apigw_hmac_key_id;
+        auth_request_set $apigw_hmac_owner $upstream_http_x_apigw_hmac_owner;
+        auth_request_set $apigw_hmac_scopes $upstream_http_x_apigw_hmac_scopes;
+        proxy_set_header X-Apigw-HMAC-Key-ID $apigw_hmac_id;
+        proxy_set_header X-Apigw-HMAC-Owner $apigw_hmac_owner;
+        proxy_set_header X-Apigw-HMAC-Scopes $apigw_hmac_scopes;
         {{ end -}}
         {{ if .OAuth2 -}}
         auth_request /_apigw_oauth2_{{ .Name }};

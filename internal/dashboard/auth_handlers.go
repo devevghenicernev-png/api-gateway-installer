@@ -9,6 +9,7 @@ package dashboard
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,102 @@ func (s *Server) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(entry.Scopes) > 0 {
 			w.Header().Set("X-Apigw-ApiKey-Scopes", strings.Join(entry.Scopes, " "))
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleHMACAuth backs nginx auth_request /auth/hmac/<api>. The
+// subrequest is always GET on /auth/hmac/<api>, so the original method
+// and URI are passed via X-Original-Method and X-Original-URI headers
+// (set in the _locations.tmpl HMAC block).
+func (s *Server) handleHMACAuth(w http.ResponseWriter, r *http.Request) {
+	apiName := strings.TrimPrefix(r.URL.Path, "/auth/hmac/")
+	apiName = strings.TrimSuffix(apiName, "/")
+	if apiName == "" {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+	cfg, err := s.ConfigFn()
+	if err != nil {
+		s.Logger.Error("hmac: load config", "err", err)
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+	var apiCfg *config.API
+	for i := range cfg.APIs {
+		if cfg.APIs[i].Name == apiName {
+			apiCfg = &cfg.APIs[i]
+			break
+		}
+	}
+	if apiCfg == nil || apiCfg.HMAC == nil {
+		s.Logger.Warn("hmac: no config for api", "api", apiName)
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+	keys := make([]auth.HMACKeyEntry, len(apiCfg.HMAC.Keys))
+	for i, k := range apiCfg.HMAC.Keys {
+		keys[i] = auth.HMACKeyEntry{
+			ID:        k.ID,
+			Secret:    k.Secret,
+			Algorithm: k.Algorithm,
+			Owner:     k.Owner,
+			ExpiresAt: k.ExpiresAt,
+			Disabled:  k.Disabled,
+			Scopes:    k.Scopes,
+		}
+	}
+	verifier := auth.HMACConfig{
+		Algorithms:      apiCfg.HMAC.Algorithms,
+		ClockSkew:       apiCfg.HMAC.ClockSkew,
+		RequireBodyHash: apiCfg.HMAC.RequireBodyHash,
+		NonceCacheSize:  apiCfg.HMAC.NonceCacheSize,
+		Keys:            keys,
+	}
+
+	method := r.Header.Get("X-Original-Method")
+	if method == "" {
+		method = "GET"
+	}
+	var path, query string
+	if rawURI := r.Header.Get("X-Original-URI"); rawURI != "" {
+		if u, perr := url.ParseRequestURI(rawURI); perr == nil {
+			path = u.Path
+			query = u.RawQuery
+		} else {
+			// fall back: best-effort split
+			if i := strings.IndexByte(rawURI, '?'); i >= 0 {
+				path, query = rawURI[:i], rawURI[i+1:]
+			} else {
+				path = rawURI
+			}
+		}
+	}
+
+	hreq := auth.HMACRequest{
+		Method:        method,
+		Path:          path,
+		Query:         query,
+		Authorization: r.Header.Get("Authorization"),
+		Date:          r.Header.Get("X-Apigw-Date"),
+		Nonce:         r.Header.Get("X-Apigw-Nonce"),
+		ContentSHA256: r.Header.Get("X-Apigw-Content-SHA256"),
+	}
+	nonces := s.hmacNonces.For(apiName, apiCfg.HMAC.NonceCacheSize)
+	res, entry, why := auth.VerifyHMAC(verifier, hreq, nonces)
+	if res != auth.HMACOK {
+		s.Logger.Info("hmac: reject", "api", apiName, "result", int(res), "reason", why)
+		w.WriteHeader(res.HTTPStatus())
+		return
+	}
+	if entry != nil {
+		w.Header().Set("X-Apigw-HMAC-Key-ID", entry.ID)
+		if entry.Owner != "" {
+			w.Header().Set("X-Apigw-HMAC-Owner", entry.Owner)
+		}
+		if len(entry.Scopes) > 0 {
+			w.Header().Set("X-Apigw-HMAC-Scopes", strings.Join(entry.Scopes, " "))
 		}
 	}
 	w.WriteHeader(http.StatusOK)

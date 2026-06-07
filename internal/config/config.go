@@ -280,6 +280,7 @@ type API struct {
 
 	// New in v0.2.0 — fills the long tail of competitive features.
 	APIKey   *APIKeyAuth `koanf:"api_key" yaml:"api_key,omitempty"`
+	HMAC     *HMACAuth   `koanf:"hmac" yaml:"hmac,omitempty"`
 	OAuth2   *OAuth2     `koanf:"oauth2" yaml:"oauth2,omitempty"`
 	Cache    *Cache      `koanf:"cache" yaml:"cache,omitempty"`
 	Mock     *Mock       `koanf:"mock" yaml:"mock,omitempty"`
@@ -329,6 +330,47 @@ type APIKey struct {
 	Secret    string    `koanf:"secret" yaml:"secret"`
 	Owner     string    `koanf:"owner" yaml:"owner,omitempty"`
 	RPS       int       `koanf:"rps" yaml:"rps,omitempty"`
+	ExpiresAt time.Time `koanf:"expires_at" yaml:"expires_at,omitempty"`
+	Disabled  bool      `koanf:"disabled" yaml:"disabled,omitempty"`
+	Scopes    []string  `koanf:"scopes" yaml:"scopes,omitempty"`
+}
+
+// HMACAuth turns the route into HMAC-signed. Each request must carry
+// `Authorization: HMAC <key-id>:<base64-sig>` plus `X-Apigw-Date` and
+// `X-Apigw-Nonce`. The signature covers method, path, query, date,
+// nonce, and an optional client-supplied SHA-256 of the body — so a
+// MITM can't tamper without the shared secret. Replay is blocked by an
+// in-memory nonce cache (window = 2 × ClockSkew).
+//
+// Body integrity is enforced by the client-supplied content hash
+// (signed into the signature). The auth subrequest does *not* read the
+// body — fast path. Set RequireBodyHash=true on write endpoints to
+// force clients to include the hash.
+type HMACAuth struct {
+	// Algorithms is the allow-list of HMAC hash functions. Each key may
+	// override; otherwise the first algorithm wins.
+	// Default: ["hmac-sha256", "hmac-sha512"].
+	Algorithms []string `koanf:"algorithms" yaml:"algorithms,omitempty"`
+	// ClockSkew is the maximum tolerated drift between the X-Apigw-Date
+	// header and server time. Default: 5m.
+	ClockSkew time.Duration `koanf:"clock_skew" yaml:"clock_skew,omitempty"`
+	// RequireBodyHash makes X-Apigw-Content-SHA256 mandatory and rejects
+	// the UNSIGNED-PAYLOAD sentinel. Use on write endpoints.
+	RequireBodyHash bool `koanf:"require_body_hash" yaml:"require_body_hash,omitempty"`
+	// NonceCacheSize is the LRU capacity for nonce replay protection.
+	// Default: 10000.
+	NonceCacheSize int       `koanf:"nonce_cache_size" yaml:"nonce_cache_size,omitempty"`
+	Keys           []HMACKey `koanf:"keys" yaml:"keys"`
+}
+
+// HMACKey is one HMAC-signing credential. The Secret is stored verbatim
+// in config.yaml (mode 0o600 enforced by the atomic save). Algorithm
+// overrides HMACAuth.Algorithms[0] for this key only.
+type HMACKey struct {
+	ID        string    `koanf:"id" yaml:"id"`
+	Secret    string    `koanf:"secret" yaml:"secret"`
+	Algorithm string    `koanf:"algorithm" yaml:"algorithm,omitempty"`
+	Owner     string    `koanf:"owner" yaml:"owner,omitempty"`
 	ExpiresAt time.Time `koanf:"expires_at" yaml:"expires_at,omitempty"`
 	Disabled  bool      `koanf:"disabled" yaml:"disabled,omitempty"`
 	Scopes    []string  `koanf:"scopes" yaml:"scopes,omitempty"`

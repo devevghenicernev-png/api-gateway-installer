@@ -191,6 +191,7 @@ type apiEntry struct {
 
 	// v0.2.0 additions.
 	APIKey        bool           // emit auth_request /_apigw_apikey_<name>
+	HMAC          bool           // emit auth_request /_apigw_hmac_<name>
 	OAuth2        bool           // emit auth_request /_apigw_oauth2_<name>
 	Mock          bool           // route hits internal mock handler instead of upstream
 	Cache         *cacheEntry    // proxy_cache directives
@@ -393,6 +394,12 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		// v0.2.0 — populate the new middleware fields.
 		if a.APIKey != nil && len(a.APIKey.Keys) > 0 {
 			entry.APIKey = true
+			if entry.JWTDashboardPort == 0 {
+				entry.JWTDashboardPort = cfg.Dashboard.Port
+			}
+		}
+		if a.HMAC != nil && len(a.HMAC.Keys) > 0 {
+			entry.HMAC = true
 			if entry.JWTDashboardPort == 0 {
 				entry.JWTDashboardPort = cfg.Dashboard.Port
 			}

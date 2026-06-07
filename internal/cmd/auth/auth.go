@@ -17,6 +17,7 @@ import (
 
 	admincmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/admin"
 	apikeycmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/apikey"
+	hmaccmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/hmac"
 	jwtcmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/jwt"
 	mtlscmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/mtls"
 	oidccmd "github.com/devevghenicernev-png/apigw/internal/cmd/auth/oidc"
@@ -38,5 +39,6 @@ func NewCmdAuth(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(mtlscmd.NewCmdMTLS(f))
 	cmd.AddCommand(admincmd.NewCmdAdmin(f))
 	cmd.AddCommand(apikeycmd.NewCmdAPIKey(f))
+	cmd.AddCommand(hmaccmd.NewCmdHMAC(f))
 	return cmd
 }
