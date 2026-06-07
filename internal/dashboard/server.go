@@ -225,9 +225,13 @@ func (s *Server) handleJWTAuth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(res.HTTPStatus())
 		return
 	}
+	sub, _ := claims["sub"].(string)
+	if !s.runACL(w, apiCfg, apiName, auth.ACLMatchSubject, sub, "jwt") {
+		return
+	}
 	// On success, surface the subject as a response header so nginx can
 	// `auth_request_set` and forward to the upstream (X-Remote-User pattern).
-	if sub, ok := claims["sub"].(string); ok {
+	if sub != "" {
 		w.Header().Set("X-Apigw-Subject", sub)
 	}
 	w.WriteHeader(http.StatusOK)
@@ -276,6 +280,10 @@ func (s *Server) handleMTLSAuth(w http.ResponseWriter, r *http.Request) {
 	if res != auth.MTLSOK {
 		s.Logger.Info("mtls: reject", "api", apiName, "result", res, "reason", why, "cn", cn)
 		w.WriteHeader(res.HTTPStatus())
+		return
+	}
+
+	if !s.runACL(w, apiCfg, apiName, auth.ACLMatchMTLSCN, cn, "mtls") {
 		return
 	}
 

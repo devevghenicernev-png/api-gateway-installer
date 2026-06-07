@@ -92,6 +92,9 @@ func (s *Server) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(res.HTTPStatus())
 		return
 	}
+	if entry != nil && !s.runACL(w, apiCfg, apiName, auth.ACLMatchAPIKeyID, entry.ID, "apikey") {
+		return
+	}
 	// Surface identity for the upstream via headers auth_request_set
 	// can copy forward. Useful for app-level audit + per-user analytics.
 	if entry != nil {
@@ -135,7 +138,7 @@ func loadCABundle(path string) ([]*x509.Certificate, error) {
 	}
 	caBundleCache.mu.RUnlock()
 
-	raw, err := os.ReadFile(path) // nolint:gosec — caller-supplied trusted config path
+	raw, err := os.ReadFile(path) //nolint:gosec // caller-supplied trusted config path
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +279,27 @@ func (e *noIssuerErr) Error() string { return "no issuer in CA bundle for " + e.
 
 // ---------- end OCSP support ----------
 
+// runACL applies the per-route ACL gate. Returns true when the
+// request should proceed (or no ACL is configured / Match doesn't
+// align). On deny it logs and writes 403 — caller returns immediately.
+func (s *Server) runACL(w http.ResponseWriter, apiCfg *config.API, apiName, wantMatch, identity, kind string) bool {
+	if apiCfg.ACL == nil {
+		return true
+	}
+	aclCfg := &auth.ACL{
+		Match: apiCfg.ACL.Match,
+		Allow: apiCfg.ACL.Allow,
+		Deny:  apiCfg.ACL.Deny,
+	}
+	ok, why := auth.MatchACL(aclCfg, wantMatch, identity)
+	if !ok {
+		s.Logger.Info("acl: deny", "api", apiName, "auth", kind, "identity", identity, "reason", why)
+		w.WriteHeader(http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // handleHMACAuth backs nginx auth_request /auth/hmac/<api>. The
 // subrequest is always GET on /auth/hmac/<api>, so the original method
 // and URI are passed via X-Original-Method and X-Original-URI headers
@@ -360,6 +384,9 @@ func (s *Server) handleHMACAuth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(res.HTTPStatus())
 		return
 	}
+	if entry != nil && !s.runACL(w, apiCfg, apiName, auth.ACLMatchHMACID, entry.ID, "hmac") {
+		return
+	}
 	if entry != nil {
 		w.Header().Set("X-Apigw-HMAC-Key-ID", entry.ID)
 		if entry.Owner != "" {
@@ -414,6 +441,9 @@ func (s *Server) handleOAuth2Auth(w http.ResponseWriter, r *http.Request) {
 	if res != auth.OK {
 		s.Logger.Info("oauth2: reject", "api", apiName, "result", int(res), "reason", why)
 		w.WriteHeader(res.HTTPStatus())
+		return
+	}
+	if ir != nil && !s.runACL(w, apiCfg, apiName, auth.ACLMatchSubject, ir.Subject, "oauth2") {
 		return
 	}
 	if ir != nil {

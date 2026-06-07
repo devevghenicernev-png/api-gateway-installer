@@ -281,6 +281,7 @@ type API struct {
 	// New in v0.2.0 — fills the long tail of competitive features.
 	APIKey   *APIKeyAuth `koanf:"api_key" yaml:"api_key,omitempty"`
 	HMAC     *HMACAuth   `koanf:"hmac" yaml:"hmac,omitempty"`
+	ACL      *ACL        `koanf:"acl" yaml:"acl,omitempty"`
 	OAuth2   *OAuth2     `koanf:"oauth2" yaml:"oauth2,omitempty"`
 	Cache    *Cache      `koanf:"cache" yaml:"cache,omitempty"`
 	Mock     *Mock       `koanf:"mock" yaml:"mock,omitempty"`
@@ -361,6 +362,27 @@ type HMACAuth struct {
 	// Default: 10000.
 	NonceCacheSize int       `koanf:"nonce_cache_size" yaml:"nonce_cache_size,omitempty"`
 	Keys           []HMACKey `koanf:"keys" yaml:"keys"`
+}
+
+// ACL is a per-route allow / deny gate that runs AFTER authentication
+// succeeds. The authenticated identity (key ID, JWT subject, mTLS CN,
+// etc.) is matched against Allow / Deny lists; precedence is
+// deny-wins. Empty Allow = no allow constraint (default allow). Empty
+// Deny = no explicit blocks.
+//
+// Match selects which identity field this ACL applies to. The
+// corresponding auth handler is the only one that runs the check; if
+// the API uses a different auth method, the ACL is silently no-op.
+// Valid values:
+//
+//	"apikey-id" — matches against APIKey.Keys[].ID
+//	"hmac-id"   — matches against HMAC.Keys[].ID
+//	"subject"   — matches against the JWT/OAuth2 subject claim (sub)
+//	"mtls-cn"   — matches against the mTLS client cert Common Name
+type ACL struct {
+	Match string   `koanf:"match" yaml:"match"`
+	Allow []string `koanf:"allow" yaml:"allow,omitempty"`
+	Deny  []string `koanf:"deny" yaml:"deny,omitempty"`
 }
 
 // HMACKey is one HMAC-signing credential. The Secret is stored verbatim

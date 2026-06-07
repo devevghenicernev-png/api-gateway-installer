@@ -8,6 +8,7 @@ package api
 import (
 	"github.com/spf13/cobra"
 
+	apiACL "github.com/devevghenicernev-png/apigw/internal/cmd/api/acl"
 	apiAdd "github.com/devevghenicernev-png/apigw/internal/cmd/api/add"
 	apiDisable "github.com/devevghenicernev-png/apigw/internal/cmd/api/disable"
 	apiEnable "github.com/devevghenicernev-png/apigw/internal/cmd/api/enable"
@@ -38,5 +39,6 @@ func NewCmdAPI(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(apiDisable.NewCmdDisable(f))
 	cmd.AddCommand(apiReload.NewCmdReload(f))
 	cmd.AddCommand(apiImport.NewCmdImport(f))
+	cmd.AddCommand(apiACL.NewCmdACL(f))
 	return cmd
 }
