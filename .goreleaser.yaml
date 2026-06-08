@@ -39,10 +39,10 @@ archives:
   - id: default
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
-    format: tar.gz
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - LICENSE
       - README.md
@@ -111,6 +111,11 @@ nfpms:
 release:
   draft: false
   prerelease: auto
+  # If a re-tag (e.g. after a history rewrite) re-runs the workflow,
+  # goreleaser otherwise hard-fails on `422 already_exists` for every
+  # asset that was uploaded by the previous run. Replacing the existing
+  # artifacts keeps the recovery path simple.
+  replace_existing_artifacts: true
   github:
     owner: devevghenicernev-png
     name: apigw
