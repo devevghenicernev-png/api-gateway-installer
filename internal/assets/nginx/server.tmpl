@@ -9,6 +9,25 @@ server {
     listen      [::]:{{ .HTTPPort }};
     server_name {{ .ServerName }};
 
+    {{ if .Gzip.Enabled -}}
+    # Compression (gzip) — server-scope so we don't double-up with the
+    # `gzip on;` the stock Debian/Ubuntu nginx.conf declares at http-scope.
+    gzip                on;
+    gzip_vary           on;
+    gzip_proxied        any;
+    gzip_comp_level     {{ .Gzip.Level }};
+    gzip_min_length     {{ .Gzip.MinLength }};
+    gzip_types          {{ range $i, $t := .Gzip.Types }}{{ if $i }} {{ end }}{{ $t }}{{ end }};
+    {{ end -}}
+    {{ if .Brotli.Enabled -}}
+    # Compression (brotli) — REQUIRES ngx_brotli module loaded in main
+    # nginx.conf (apt install nginx-module-brotli; load_module …).
+    brotli              on;
+    brotli_comp_level   {{ .Brotli.Level }};
+    brotli_min_length   {{ .Brotli.MinLength }};
+    brotli_types        {{ range $i, $t := .Brotli.Types }}{{ if $i }} {{ end }}{{ $t }}{{ end }};
+    {{ end }}
+
     # ACME HTTP-01 webroot. Kept here so `apigw tls enable letsencrypt`
     # works without taking nginx down — apigw drops the token file at
     # {{ .AcmeWebroot }}/.well-known/acme-challenge/<token>.

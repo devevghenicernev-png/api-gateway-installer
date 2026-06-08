@@ -70,6 +70,25 @@ server {
     {{- end }}
     add_header X-Content-Type-Options "nosniff" always;
 
+    {{ if .Gzip.Enabled -}}
+    # Compression (gzip) — server-scope so we don't double-up with the
+    # `gzip on;` the stock nginx.conf declares at http-scope.
+    gzip                on;
+    gzip_vary           on;
+    gzip_proxied        any;
+    gzip_comp_level     {{ .Gzip.Level }};
+    gzip_min_length     {{ .Gzip.MinLength }};
+    gzip_types          {{ range $i, $t := .Gzip.Types }}{{ if $i }} {{ end }}{{ $t }}{{ end }};
+    {{ end -}}
+    {{ if .Brotli.Enabled -}}
+    # Compression (brotli) — REQUIRES ngx_brotli module loaded in main
+    # nginx.conf (apt install nginx-module-brotli; load_module …).
+    brotli              on;
+    brotli_comp_level   {{ .Brotli.Level }};
+    brotli_min_length   {{ .Brotli.MinLength }};
+    brotli_types        {{ range $i, $t := .Brotli.Types }}{{ if $i }} {{ end }}{{ $t }}{{ end }};
+    {{ end }}
+
     # ACME webroot — kept on the HTTPS server too so renewals work either way.
     location /.well-known/acme-challenge/ {
         root {{ .AcmeWebroot }};

@@ -75,15 +75,25 @@ type templateData struct {
 	// certs is worse than useless. Operators with non-LE certs
 	// (DigiCert, Sectigo, internal CA) opt in via `apigw tls ocsp enable`.
 	OCSPStapling bool
+
+	// Gzip / Brotli at SERVER scope. Stock Debian/Ubuntu nginx.conf
+	// already declares `gzip on;` in http{}, so emitting again at http
+	// scope causes a duplicate-directive error. Server-scope is valid
+	// for both directives and overrides http-scope cleanly, which is
+	// what operators expect anyway. We render the same struct as
+	// httpData.Gzip / .Brotli — the templates differ only in where the
+	// block lives.
+	Gzip   gzipEntry
+	Brotli brotliEntry
 }
 
 // httpData drives the new _http.tmpl that renders into
 // /etc/nginx/conf.d/apigw-http.conf — anything that has to live at http{}
-// scope (named upstreams, rate-limit zones, gzip settings, CORS origin map).
+// scope (named upstreams, rate-limit zones, CORS origin map). Gzip/Brotli
+// used to live here too but moved to server-scope after BUG-1b — see the
+// comment block at the top of _http.tmpl.
 type httpData struct {
 	Banner         string
-	Gzip           gzipEntry
-	Brotli         brotliEntry
 	Upstreams      []upstreamEntry
 	RateLimitZones []rateLimitZone
 	CORSOriginMap  []string            // exact-match regex tokens (already escaped)
@@ -803,6 +813,8 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		MTLSAnyEnabled: mtlsAny,
 		MTLSCAFile:     mtlsCAFile,
 		OCSPStapling:   cfg.TLS.OCSPStapling,
+		Gzip:           resolveGzip(cfg),
+		Brotli:         resolveBrotli(cfg),
 	}
 
 	templateName := "server.tmpl"
@@ -888,8 +900,6 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 
 	hd := httpData{
 		Banner:           "PLACEHOLDER",
-		Gzip:             resolveGzip(cfg),
-		Brotli:           resolveBrotli(cfg),
 		Upstreams:        upstreams,
 		RateLimitZones:   rlZones,
 		CORSOriginMap:    corsOrigins,
