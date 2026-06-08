@@ -20,6 +20,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	apideploy "github.com/devevghenicernev-png/apigw/internal/deploy"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/shim"
 	"github.com/devevghenicernev-png/apigw/internal/system"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
@@ -172,6 +173,19 @@ func run(opts *options) error {
 	// ----- nginx site -----
 	for _, p := range []string{nginx.SitePath, nginx.EnabledLink, nginx.SitePath + nginx.BackupExtension} {
 		_ = os.Remove(p)
+	}
+	// Restore the stock default site we disabled on install (BUG-6). The
+	// re-symlink covers the common case; if a real file was backed up to
+	// .apigw-prev we rename it back. Both are best-effort.
+	defaultLink := paths.NginxSitesEnabled() + "/default"
+	defaultSrc := paths.NginxSitesAvailable() + "/default"
+	if _, err := os.Lstat(defaultLink); errors.Is(err, os.ErrNotExist) {
+		if _, srcErr := os.Stat(defaultSrc); srcErr == nil {
+			_ = os.Symlink(defaultSrc, defaultLink)
+		}
+		if _, bakErr := os.Stat(defaultLink + ".apigw-prev"); bakErr == nil {
+			_ = os.Rename(defaultLink+".apigw-prev", defaultLink)
+		}
 	}
 	if err := system.Run("systemctl", "reload", "nginx"); err == nil {
 		fmt.Fprintf(ios.Out, "%s nginx site removed + reloaded\n",

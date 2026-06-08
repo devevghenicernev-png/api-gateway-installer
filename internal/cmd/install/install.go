@@ -280,6 +280,20 @@ func apply(opts *options, a Answers) error {
 		printBootstrapToken(opts.f.IOStreams.Out, freshUser, freshToken)
 	}
 
+	// Disable Debian/Ubuntu's stock default site if present. Without this,
+	// `listen 80 default_server;` in sites-enabled/default takes precedence
+	// over our `listen 80;` for any Host: that doesn't match a server_name —
+	// hitting `curl http://<ip>/` lands on nginx-welcome 404 even though
+	// apigw is healthy. Backed up to .apigw-prev (or just unlinked when it
+	// was a symlink). `apigw uninstall` restores it.
+	if disabled, err := disableNginxDefaultSite(); err != nil {
+		fmt.Fprintf(opts.f.IOStreams.Out, "%s default site untouched (%v)\n",
+			tui.Styles.Warn.Render(tui.GlyphBullet), err)
+	} else if disabled {
+		fmt.Fprintf(opts.f.IOStreams.Out, "%s disabled stock nginx default site\n",
+			tui.Styles.Success.Render(tui.GlyphCheck))
+	}
+
 	mgr := nginx.NewManager()
 	if err := mgr.WriteAndReload(&cfg); err != nil {
 		return tui.NewError("nginx setup failed", err.Error()).
