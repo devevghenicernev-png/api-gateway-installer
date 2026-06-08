@@ -23,6 +23,7 @@ import (
 	"github.com/knadh/koanf/v2"
 
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 )
 
 // SchemaVersion is bumped on every breaking change to the on-disk format.
@@ -1325,14 +1326,20 @@ func Defaults() Config {
 // SearchPaths is the ordered list of locations Load() probes. First hit wins.
 // XDG first (per-user), then system-wide /etc.
 func SearchPaths() []string {
-	paths := []string{}
+	out := []string{}
+	// APIGW_CONFIG_DIR (via paths.ConfigDir) wins so a custom layout — set in
+	// the systemd unit, a CI sandbox, or a rootless install — is honored
+	// consistently with every other APIGW_* override. Without this, Load()
+	// silently fell back to defaults (empty security!) whenever the operator
+	// pointed APIGW_CONFIG_DIR somewhere other than /etc/apigw.
+	out = append(out, filepath.Join(paths.ConfigDir(), "config.yaml"))
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		paths = append(paths, filepath.Join(xdg, "apigw", "config.yaml"))
+		out = append(out, filepath.Join(xdg, "apigw", "config.yaml"))
 	} else if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, ".config", "apigw", "config.yaml"))
+		out = append(out, filepath.Join(home, ".config", "apigw", "config.yaml"))
 	}
-	paths = append(paths, "/etc/apigw/config.yaml")
-	return paths
+	out = append(out, "/etc/apigw/config.yaml")
+	return out
 }
 
 // Load reads config from the first SearchPaths() entry that exists, applies
