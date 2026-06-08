@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -311,5 +310,3 @@ func TestAudienceContains(t *testing.T) {
 // later end-to-end test that asserts cookie + session issuance through a
 // proper httptest IdP with /token.
 var _ = setupSSOServer
-
-func ctxBackground() context.Context { return context.Background() }

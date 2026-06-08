@@ -146,7 +146,7 @@ func (s *Server) handleSSOLogin(w http.ResponseWriter, r *http.Request) {
 	} else {
 		target += "?" + q.Encode()
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows Sessions config; SameSite=Lax + HttpOnly set
 		Name:     ssoStateCookie,
 		Value:    state,
 		Path:     "/",
@@ -272,7 +272,7 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 	// Clear the transient state cookie.
-	http.SetCookie(w, &http.Cookie{Name: ssoStateCookie, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: ssoStateCookie, Value: "", Path: "/", MaxAge: -1}) //nolint:gosec // expiring cookie — value is empty, Secure/SameSite don't apply on deletion
 
 	target := saved.RedirectBack
 	if target == "" {

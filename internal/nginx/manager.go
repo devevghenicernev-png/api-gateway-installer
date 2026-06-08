@@ -28,8 +28,8 @@ import (
 //
 // These are var, not const, because the values are os-dependent.
 var (
-	SitePath    = paths.NginxSitesAvailable() + "/apigw.conf"
-	EnabledLink = paths.NginxSitesEnabled() + "/apigw.conf"
+	SitePath     = paths.NginxSitesAvailable() + "/apigw.conf"
+	EnabledLink  = paths.NginxSitesEnabled() + "/apigw.conf"
 	HTTPConfPath = paths.NginxConfD() + "/apigw-http.conf"
 	// Stream block lives OUTSIDE conf.d/ because nginx auto-includes
 	// conf.d/*.conf inside http{}, and stream{} content can't sit there.
@@ -150,7 +150,7 @@ func (m *Manager) WriteAndReload(cfg *config.Config) error {
 	// nginx loads it via a `stream { include /etc/nginx/conf.d/apigw-stream.conf; }`
 	// block injected into nginx.conf by ensureStreamInclude (idempotent;
 	// removed by Uninstall + when the streams list goes back to empty).
-	if streamBody != nil && len(streamBody) > 0 {
+	if len(streamBody) > 0 {
 		if err := afero.WriteFile(m.fs, StreamConfPath, streamBody, 0o640); err != nil {
 			return fmt.Errorf("write stream: %w", err)
 		}
