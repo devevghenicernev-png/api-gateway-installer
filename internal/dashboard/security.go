@@ -579,6 +579,8 @@ func Status(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, ErrAuditUnavailable):
 		return http.StatusServiceUnavailable
+	case errors.Is(err, ErrPreconditionFailed):
+		return http.StatusPreconditionFailed
 	default:
 		return http.StatusInternalServerError
 	}

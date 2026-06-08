@@ -55,6 +55,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/streams/", s.adminStreamHandler)
 	mux.HandleFunc("/api/admin/consumers", s.adminConsumersHandler)
 	mux.HandleFunc("/api/admin/consumers/", s.adminConsumerHandler)
+	mux.HandleFunc("/api/admin/gitops", s.adminGitOpsHandler)
 }
 
 // ensureCSRF rejects write methods when the X-CSRF-Token header is missing
@@ -114,7 +115,9 @@ func (s *Server) adminAPIsHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		adminWriteJSON(w, http.StatusOK, filterByTenant(cfg.APIs, ident, s))
+		items := filterByTenant(cfg.APIs, ident, s)
+		items = applyPage(w, items, parsePage(r))
+		adminWriteJSON(w, http.StatusOK, items)
 	case http.MethodPost:
 		var api config.API
 		if err := s.Sec.ReadBody(r, &api); err != nil {
@@ -157,8 +160,29 @@ func (s *Server) adminAPIsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // /api/admin/apis/<name>
+//
+// Nested-resource dispatcher: when the path contains a slash after the
+// API name (e.g. /api/admin/apis/<name>/keys[/<id>]) we hand off to the
+// per-resource handler. Single-level paths fall through to the API CRUD
+// below.
 func (s *Server) adminAPIHandler(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/api/admin/apis/")
+	rest := strings.TrimPrefix(r.URL.Path, "/api/admin/apis/")
+	if i := strings.Index(rest, "/"); i >= 0 {
+		// /<name>/keys[/<id>] → apikeys handlers.
+		nested := rest[i+1:]
+		switch {
+		case nested == "keys":
+			s.adminAPIKeysHandler(w, r)
+			return
+		case strings.HasPrefix(nested, "keys/"):
+			s.adminAPIKeyHandler(w, r)
+			return
+		default:
+			adminWriteJSONError(w, http.StatusNotFound, "unknown nested resource: "+nested)
+			return
+		}
+	}
+	name := rest
 	if name == "" {
 		adminWriteJSONError(w, http.StatusBadRequest, "api name required")
 		return
@@ -194,8 +218,12 @@ func (s *Server) adminAPIHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
-		adminWriteJSON(w, http.StatusOK, cfg.APIs[idx])
+		writeJSONWithETag(w, http.StatusOK, cfg.APIs[idx])
 	case http.MethodPut:
+		if err := checkIfMatch(r, cfg.APIs[idx]); err != nil {
+			adminWriteJSONError(w, Status(err), err.Error())
+			return
+		}
 		var updated config.API
 		if err := s.Sec.ReadBody(r, &updated); err != nil {
 			adminWriteJSONError(w, http.StatusBadRequest, "invalid json: "+err.Error())
@@ -217,8 +245,12 @@ func (s *Server) adminAPIHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
-		adminWriteJSON(w, http.StatusOK, updated)
+		writeJSONWithETag(w, http.StatusOK, updated)
 	case http.MethodDelete:
+		if err := checkIfMatch(r, cfg.APIs[idx]); err != nil {
+			adminWriteJSONError(w, Status(err), err.Error())
+			return
+		}
 		before := apiToMap(cfg.APIs[idx])
 		action := Action{
 			Permission: "api.remove",
