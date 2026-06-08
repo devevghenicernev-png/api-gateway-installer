@@ -306,6 +306,24 @@ type apiEntry struct {
 	LifecycleSunsetAt       string // RFC1123 timestamp string for Sunset header
 	LifecycleRetired        bool   // emit `return 410;` + optional Link
 	LifecycleReplacementURL string // populated when retired or deprecated
+
+	// Versions, when non-nil, emits one sub-location per entry BEFORE
+	// the main API location. nginx's longest-prefix-match guarantees
+	// requests to /<Path>/<Name>/… hit the version-specific block.
+	// Strategy is currently always "path" — header/query require map
+	// plumbing on top and are accepted in config for forward-compat.
+	Versions []versionRoute
+}
+
+// versionRoute is one rendered API version. See config.APIVersion for
+// the source-of-truth fields.
+type versionRoute struct {
+	Name           string // "v1"
+	FullPath       string // "/api/foo/v1/"
+	Upstream       string // host:port — empty means inherit api primary
+	State          string // "active" | "deprecated" | "retired"
+	SunsetAt       string // RFC1123 (Sunset header format)
+	ReplacementURL string // populated when retired
 }
 
 type cacheEntry struct {
@@ -626,6 +644,44 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 			case "retired":
 				entry.LifecycleRetired = true
 				entry.LifecycleReplacementURL = lc.ReplacementURL
+			}
+		}
+		// Multi-version routing — emit one location per version BEFORE the
+		// main API location. nginx longest-prefix-match guarantees these
+		// take precedence over the parent <Path>/.
+		if v := a.Versioning; v != nil && len(v.Versions) > 0 {
+			base := strings.TrimRight(entry.Path, "/")
+			// Fallback upstream when a version doesn't set its own — use
+			// the API's primary upstream-name if there's a pool, else
+			// 127.0.0.1:<port>. Matches the main-location convention so
+			// versions inherit the parent route's destination by default.
+			fallback := ""
+			if entry.UpstreamName != "" {
+				fallback = entry.UpstreamName
+			} else if entry.Port > 0 {
+				fallback = fmt.Sprintf("127.0.0.1:%d", entry.Port)
+			}
+			entry.Versions = make([]versionRoute, 0, len(v.Versions))
+			for _, ver := range v.Versions {
+				state := strings.ToLower(ver.State)
+				if state == "" {
+					state = "active"
+				}
+				up := ver.Upstream
+				if up == "" {
+					up = fallback
+				}
+				route := versionRoute{
+					Name:           ver.Name,
+					FullPath:       base + "/" + ver.Name + "/",
+					Upstream:       up,
+					State:          state,
+					ReplacementURL: ver.ReplacementURL,
+				}
+				if !ver.SunsetAt.IsZero() {
+					route.SunsetAt = ver.SunsetAt.Format(time.RFC1123)
+				}
+				entry.Versions = append(entry.Versions, route)
 			}
 		}
 

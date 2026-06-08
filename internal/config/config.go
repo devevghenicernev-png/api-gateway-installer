@@ -1072,6 +1072,43 @@ type Transform struct {
 type Versioning struct {
 	Strategy   string `koanf:"strategy" yaml:"strategy"`                 // path | header | query
 	SunsetDate string `koanf:"sunset_date" yaml:"sunset_date,omitempty"` // RFC 3339
+
+	// Versions is the per-version routing table. When non-empty, the
+	// gateway emits one sub-location per entry under <API.Path>/<Name>/
+	// (path strategy — header/query require additional map plumbing and
+	// are accepted as data but only path-strategy renders today).
+	// Active versions proxy to Upstream normally; deprecated versions
+	// add `Sunset` + `Deprecation: true` headers; retired versions
+	// short-circuit with 410 and a `Link: <ReplacementURL>;
+	// rel="successor-version"` header for clients that follow the
+	// RFC 8594 / draft-deprecation-header dance.
+	Versions []APIVersion `koanf:"versions" yaml:"versions,omitempty"`
+}
+
+// APIVersion is one entry in Versioning.Versions.
+type APIVersion struct {
+	// Name is the URL-safe identifier ("v1", "v2", "2025-01"). Used as
+	// the path suffix when Strategy == "path".
+	Name string `koanf:"name" yaml:"name"`
+
+	// Upstream is the host:port (or named upstream) this version routes
+	// to. Empty = inherit the API's primary upstream (matches behaviour
+	// before multi-version was wired).
+	Upstream string `koanf:"upstream" yaml:"upstream,omitempty"`
+
+	// State — "active" (default), "deprecated", "retired". Empty means
+	// active. Mirrors Lifecycle.State semantics but per-version.
+	State string `koanf:"state" yaml:"state,omitempty"`
+
+	// SunsetAt is the cutover date. Emitted as the Sunset response
+	// header (RFC 8594) on deprecated versions, and embedded in the
+	// retired-version Link header.
+	SunsetAt time.Time `koanf:"sunset_at" yaml:"sunset_at,omitempty"`
+
+	// ReplacementURL is the URL of the successor — sent as
+	// `Link: <url>; rel="successor-version"` when this version is
+	// retired or (optionally) deprecated.
+	ReplacementURL string `koanf:"replacement_url" yaml:"replacement_url,omitempty"`
 }
 
 // MTLS configures per-API mutual TLS (client cert auth). nginx terminates

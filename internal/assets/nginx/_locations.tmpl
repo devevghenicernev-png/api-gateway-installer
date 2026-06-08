@@ -103,6 +103,36 @@
         proxy_set_header X-Apigw-Mirrored-From $request_uri;
     }
     {{ end -}}
+    {{ range .Versions -}}
+    # version: {{ .Name }} ({{ .State }})
+    location {{ .FullPath }} {
+        {{ if eq .State "retired" -}}
+        # retired — 410 Gone + successor-version Link header (RFC 8594).
+        {{ if .ReplacementURL -}}
+        add_header Link "<{{ .ReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        return 410 "version {{ .Name }} retired\n";
+        {{ else -}}
+        {{ if eq .State "deprecated" -}}
+        # deprecated — RFC 8594 Sunset + Deprecation headers.
+        add_header Deprecation "true" always;
+        {{ if .SunsetAt -}}
+        add_header Sunset "{{ .SunsetAt }}" always;
+        {{ end -}}
+        {{ if .ReplacementURL -}}
+        add_header Link "<{{ .ReplacementURL }}>; rel=\"successor-version\"" always;
+        {{ end -}}
+        {{ end -}}
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Apigw-Version   "{{ .Name }}";
+        proxy_pass http://{{ .Upstream }};
+        {{ end -}}
+    }
+    {{ end -}}
     location {{ .Path }} {
         {{ if .LifecycleDraft -}}
         # lifecycle: draft — returns 503 until promoted to published.
