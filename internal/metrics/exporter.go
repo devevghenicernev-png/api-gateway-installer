@@ -17,13 +17,14 @@ type ExporterConfig struct {
 	DogStatsDAddr string
 	StatsDAddr    string
 	GraphiteAddr  string
+	InfluxDBAddr  string // host:port for line-protocol UDP
 	Prefix        string
 	FlushSeconds  int
 }
 
 // Empty reports whether any export target is configured.
 func (c ExporterConfig) Empty() bool {
-	return c.DogStatsDAddr == "" && c.StatsDAddr == "" && c.GraphiteAddr == ""
+	return c.DogStatsDAddr == "" && c.StatsDAddr == "" && c.GraphiteAddr == "" && c.InfluxDBAddr == ""
 }
 
 // RunExporter polls the metrics registry every Flush seconds and ships
@@ -55,6 +56,7 @@ func RunExporter(ctx context.Context, m *Metrics, cfg ExporterConfig, logger *sl
 	dog, _ := dial(cfg.DogStatsDAddr)
 	std, _ := dial(cfg.StatsDAddr)
 	gph, _ := dial(cfg.GraphiteAddr)
+	influx, _ := dial(cfg.InfluxDBAddr)
 	defer func() {
 		if dog != nil {
 			_ = dog.Close()
@@ -64,6 +66,9 @@ func RunExporter(ctx context.Context, m *Metrics, cfg ExporterConfig, logger *sl
 		}
 		if gph != nil {
 			_ = gph.Close()
+		}
+		if influx != nil {
+			_ = influx.Close()
 		}
 	}()
 
@@ -92,6 +97,9 @@ func RunExporter(ctx context.Context, m *Metrics, cfg ExporterConfig, logger *sl
 					}
 					if gph != nil {
 						emitGraphite(gph, prefix+metric, value, ts)
+					}
+					if influx != nil {
+						emitInflux(influx, prefix+metric, value, labels, ts)
 					}
 				}
 			}
@@ -144,4 +152,36 @@ func emitStatsD(c net.Conn, name string, value float64) {
 
 func emitGraphite(c net.Conn, name string, value float64, ts int64) {
 	_, _ = fmt.Fprintf(c, "%s %g %d\n", name, value, ts)
+}
+
+// emitInflux writes one InfluxDB line-protocol record:
+//
+//	<measurement>[,tag=value,...] value=<num> <timestamp_ns>
+//
+// Tag keys/values are escaped per InfluxDB rules (commas + spaces +
+// equals signs in tag values would break the parser; we strip them).
+func emitInflux(c net.Conn, name string, value float64, labels []*dto.LabelPair, tsSec int64) {
+	var b strings.Builder
+	b.WriteString(name)
+	for _, l := range labels {
+		k := influxEscape(l.GetName())
+		v := influxEscape(l.GetValue())
+		if k == "" || v == "" {
+			continue
+		}
+		b.WriteByte(',')
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(v)
+	}
+	fmt.Fprintf(&b, " value=%g %d\n", value, tsSec*int64(time.Second))
+	_, _ = c.Write([]byte(b.String()))
+}
+
+// influxEscape strips characters the InfluxDB line-protocol parser
+// treats as delimiters. Replacing rather than backslash-escaping is
+// fine for our use case (Prometheus label values).
+func influxEscape(s string) string {
+	r := strings.NewReplacer(",", "_", " ", "_", "=", "_")
+	return r.Replace(s)
 }

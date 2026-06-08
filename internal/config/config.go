@@ -347,8 +347,11 @@ type MetricsExport struct {
 	DogStatsDAddr string `koanf:"dogstatsd_addr" yaml:"dogstatsd_addr,omitempty"`
 	StatsDAddr    string `koanf:"statsd_addr" yaml:"statsd_addr,omitempty"`
 	GraphiteAddr  string `koanf:"graphite_addr" yaml:"graphite_addr,omitempty"`
-	Prefix        string `koanf:"prefix" yaml:"prefix,omitempty"`
-	FlushSeconds  int    `koanf:"flush_seconds" yaml:"flush_seconds,omitempty"`
+	// InfluxDBAddr is a UDP `host:port` for InfluxDB line-protocol
+	// fire-and-forget shipping. Empty = off.
+	InfluxDBAddr string `koanf:"influxdb_addr" yaml:"influxdb_addr,omitempty"`
+	Prefix       string `koanf:"prefix" yaml:"prefix,omitempty"`
+	FlushSeconds int    `koanf:"flush_seconds" yaml:"flush_seconds,omitempty"`
 }
 
 // Listen describes the public-facing nginx listener.
