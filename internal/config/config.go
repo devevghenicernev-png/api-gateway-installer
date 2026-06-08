@@ -412,7 +412,7 @@ type API struct {
 	Upstreams   []Upstream `koanf:"upstreams" yaml:"upstreams,omitempty"`
 	LoadBalance string     `koanf:"load_balance" yaml:"load_balance,omitempty"` // round_robin (default) | least_conn | ip_hash | random
 	// GRPC switches the location to grpc_pass instead of proxy_pass. Requires
-	// HTTP/2 on the listener — apigw's tls-server.tmpl already sets `http2 on;`.
+	// HTTP/2 on the listener — apigw's tls-server.tmpl sets `listen ... ssl http2;`.
 	GRPC bool `koanf:"grpc" yaml:"grpc,omitempty"`
 
 	// Middleware — all optional.

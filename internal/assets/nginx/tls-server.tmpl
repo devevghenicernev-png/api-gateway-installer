@@ -21,9 +21,13 @@ server {
 
 # Main HTTPS server.
 server {
-    listen      {{ .HTTPSPort }} ssl;
-    listen      [::]:{{ .HTTPSPort }} ssl;
-    http2       on;
+    # http2 as a `listen` parameter works on every nginx since 1.9.5 (all
+    # current LTS distros). The standalone `http2 on;` directive was added
+    # in 1.25.1 — Debian 12 (1.22), Ubuntu 22.04 (1.18), Ubuntu 24.04 (1.24)
+    # all reject it. Sticking with the listen-param form means TLS works
+    # out of the box on every supported host.
+    listen      {{ .HTTPSPort }} ssl http2;
+    listen      [::]:{{ .HTTPSPort }} ssl http2;
     server_name {{ range .TLSDomains }}{{ . }} {{ end }};
 
     ssl_certificate     {{ .CertFile }};
