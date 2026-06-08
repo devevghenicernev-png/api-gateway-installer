@@ -87,6 +87,16 @@ type Server struct {
 	// first /auth/session/* or /api/admin/sessions* hit. Nil = not yet
 	// opened or Security.Sessions disabled.
 	SessionStore *auth.SessionStore
+
+	// OIDCFetcher / SSOHTTPClient are injectable for the SSO login flow.
+	// Tests stub these out; production uses sensible defaults
+	// (NewOIDCFetcher + 10s-timeout client).
+	OIDCFetcher   *auth.OIDCFetcher
+	SSOHTTPClient *http.Client
+
+	// ssoStateStoreInst tracks in-flight OIDC login attempts (state +
+	// nonce). Lazily created on first /sso/login hit.
+	ssoStateStoreInst *ssoStateStore
 }
 
 // New constructs a Server bound to `addr`.
@@ -165,6 +175,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/events", s.sseWithCounter())
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/logs/", s.handleLogs)
+	mux.HandleFunc("/api/admin/sso/login", s.handleSSOLogin)
+	mux.HandleFunc("/api/admin/sso/callback", s.handleSSOCallback)
 	mux.HandleFunc("/auth/jwt/", s.handleJWTAuth)
 	mux.HandleFunc("/auth/mtls/", s.handleMTLSAuth)
 	mux.HandleFunc("/auth/apikey/", s.handleAPIKeyAuth)

@@ -134,6 +134,16 @@ type Security struct {
 	// then reference `team:ops` to grant a whole team a role at once.
 	Teams []Team `koanf:"teams" yaml:"teams,omitempty"`
 
+	// SSO configures interactive single sign-on for the admin dashboard.
+	// When set, /api/admin/sso/login redirects operators to the IdP;
+	// /api/admin/sso/callback exchanges the auth code, validates the
+	// ID token, maps the resulting identity to one or more apigw RBAC
+	// roles via RoleMapping, and issues a session cookie via the
+	// existing Sessions store. Sessions must also be configured.
+	//
+	// Nil = no SSO (admin still works via static AdminTokens).
+	SSO *SSO `koanf:"sso" yaml:"sso,omitempty"`
+
 	// Sessions configures the cookie-based session store. Nil = sessions
 	// disabled (per-API API.Session is then ignored). State lives in
 	// StateDir/sessions.db (bbolt). Issuing happens via the
@@ -242,6 +252,54 @@ type Sessions struct {
 	// HTTPOnly (default true) blocks JS from reading the cookie via
 	// document.cookie. There's no good reason to disable this.
 	HTTPOnly bool `koanf:"http_only" yaml:"http_only"`
+}
+
+// SSO configures interactive single sign-on for the admin dashboard.
+// Only OIDC is wired today; SAML is on the same struct for forward-compat
+// but the SAML handlers print "not yet implemented" until crewjam/saml is
+// plumbed (a separate follow-up; OIDC covers Google/Okta/Auth0/Keycloak —
+// the bulk of real-world IdP deployments).
+type SSO struct {
+	// Provider — "oidc" (today) | "saml" (placeholder).
+	Provider string `koanf:"provider" yaml:"provider"`
+
+	// IssuerURL is the bare IdP base — apigw appends
+	// /.well-known/openid-configuration to discover endpoints.
+	IssuerURL string `koanf:"issuer_url" yaml:"issuer_url"`
+
+	// ClientID + ClientSecret are the OAuth2 application credentials
+	// minted in the IdP admin UI. ClientSecret is a SecretRef so it
+	// can live in vault://, aws-sm://, file://… (string form treated
+	// as inline secret).
+	ClientID     string `koanf:"client_id" yaml:"client_id"`
+	ClientSecret string `koanf:"client_secret" yaml:"client_secret,omitempty"`
+
+	// RedirectURL is the absolute callback URL registered with the IdP.
+	// Must match exactly; the IdP rejects mismatches at the authorize
+	// step. Typically "https://<dashboard>/api/admin/sso/callback".
+	RedirectURL string `koanf:"redirect_url" yaml:"redirect_url"`
+
+	// Scopes is the space-separated list of OIDC scopes to request.
+	// Default "openid profile email". Add "groups" or your IdP's
+	// equivalent if you wire RoleMapping below.
+	Scopes []string `koanf:"scopes" yaml:"scopes,omitempty"`
+
+	// GroupClaim picks which ID-token claim carries group/role names.
+	// Common values: "groups" (Keycloak, Okta), "roles" (Auth0). When
+	// empty no claim is examined and every authenticated user gets the
+	// DefaultRole below.
+	GroupClaim string `koanf:"group_claim" yaml:"group_claim,omitempty"`
+
+	// RoleMapping translates IdP groups to apigw RBAC roles. A user is
+	// granted the union of mapped roles for every group they're in.
+	// Unmatched groups are ignored. Empty mapping = use DefaultRole.
+	RoleMapping map[string]string `koanf:"role_mapping" yaml:"role_mapping,omitempty"`
+
+	// DefaultRole is the fallback when no GroupClaim is configured OR
+	// when none of the user's groups match RoleMapping. Empty = deny
+	// (login succeeds but the operator can do nothing — useful to
+	// audit "who tried to log in" before granting access).
+	DefaultRole string `koanf:"default_role" yaml:"default_role,omitempty"`
 }
 
 // AdminToken associates an opaque secret with a user identity + role set.

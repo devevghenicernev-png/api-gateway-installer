@@ -21,10 +21,15 @@ import (
 )
 
 // OIDCDiscovery exposes the subset of the discovery document we need.
+// authorization_endpoint + token_endpoint are filled when present —
+// JWT-only setups skip them, but interactive login flows (admin SSO)
+// need them to know where to redirect / exchange codes.
 type OIDCDiscovery struct {
-	Issuer  string   `json:"issuer"`
-	JWKSURI string   `json:"jwks_uri"`
-	Algos   []string `json:"id_token_signing_alg_values_supported"`
+	Issuer           string   `json:"issuer"`
+	JWKSURI          string   `json:"jwks_uri"`
+	AuthorizationURL string   `json:"authorization_endpoint"`
+	TokenURL         string   `json:"token_endpoint"`
+	Algos            []string `json:"id_token_signing_alg_values_supported"`
 }
 
 // OIDCFetcher caches discovery docs per issuer URL.
