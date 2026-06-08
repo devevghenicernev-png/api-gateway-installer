@@ -52,6 +52,12 @@ type Config struct {
 	Logging Logging       `koanf:"logging" yaml:"logging,omitempty"`
 	Metrics MetricsExport `koanf:"metrics" yaml:"metrics,omitempty"`
 
+	// v0.3 — main-context nginx tuning. Rendered via `apigw tuning apply`
+	// into /etc/nginx/nginx.conf inside a marker block (`# >>> apigw tuning >>>`).
+	// Not auto-emitted on `WriteAndReload` because main-context directives
+	// can't live in conf.d/* — see internal/cmd/tuning for the surface.
+	Tuning Tuning `koanf:"tuning" yaml:"tuning,omitempty"`
+
 	// path is where this config was loaded from / will be saved to. Not in yaml.
 	path string `koanf:"-" yaml:"-"`
 }
@@ -339,6 +345,32 @@ type Logging struct {
 	S3Region      string `koanf:"s3_region" yaml:"s3_region,omitempty"`
 	S3AccessKey   string `koanf:"s3_access_key" yaml:"s3_access_key,omitempty"`
 	S3SecretKey   string `koanf:"s3_secret_key" yaml:"s3_secret_key,omitempty"`
+}
+
+// Tuning controls nginx's MAIN-context directives — the ones that live at
+// the top of /etc/nginx/nginx.conf, before any http {} block. Because
+// apigw can't legally include these from conf.d/* (that include lives
+// INSIDE http {}), the snippet is rendered to a marker-delimited region of
+// nginx.conf by `apigw tuning apply`. The wrap-with-markers approach lets
+// re-runs replace the block idempotently and `apigw tuning revert` strip
+// it cleanly.
+//
+// Defaults are conservative: WorkerProcesses == "" emits `auto`, which
+// is also nginx's own default — so an empty Tuning struct is a true no-op.
+type Tuning struct {
+	// WorkerProcesses — "" (=auto) | "auto" | a positive integer string.
+	WorkerProcesses string `koanf:"worker_processes" yaml:"worker_processes,omitempty"`
+
+	// CPUAffinity — "" (omit) | "auto" | one or more CPU masks separated
+	// by whitespace (e.g. "0001 0010 0100 1000" for a 4-core split).
+	// "auto" lets nginx pin one worker per available core; mask form
+	// is for fine-tuning (e.g. reserve socket 0 for kernel networking).
+	CPUAffinity string `koanf:"cpu_affinity" yaml:"cpu_affinity,omitempty"`
+
+	// WorkerRLimitNofile — 0 (omit) | positive int. Raises the FD limit
+	// per worker process. 65535 is the common production value;
+	// proxy_pass with thousands of upstream sockets needs the headroom.
+	WorkerRLimitNofile int `koanf:"worker_rlimit_nofile" yaml:"worker_rlimit_nofile,omitempty"`
 }
 
 // MetricsExport wires the in-process Prometheus registry to external

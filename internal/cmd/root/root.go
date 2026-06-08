@@ -31,6 +31,7 @@ import (
 	statuscmd "github.com/devevghenicernev-png/apigw/internal/cmd/status"
 	streamcmd "github.com/devevghenicernev-png/apigw/internal/cmd/stream"
 	tlscmd "github.com/devevghenicernev-png/apigw/internal/cmd/tls"
+	tuningcmd "github.com/devevghenicernev-png/apigw/internal/cmd/tuning"
 	uninstallcmd "github.com/devevghenicernev-png/apigw/internal/cmd/uninstall"
 	upgradecmd "github.com/devevghenicernev-png/apigw/internal/cmd/upgrade"
 	versioncmd "github.com/devevghenicernev-png/apigw/internal/cmd/version"
@@ -209,6 +210,10 @@ func NewCmdRoot(f *cmdutil.Factory) *cobra.Command {
 	migrateCmd := migratecmd.NewCmdMigrate(f)
 	migrateCmd.GroupID = "system"
 	cmd.AddCommand(migrateCmd)
+
+	tuningCmd := tuningcmd.NewCmdTuning(f)
+	tuningCmd.GroupID = "system"
+	cmd.AddCommand(tuningCmd)
 
 	upgradeCmd := upgradecmd.NewCmdUpgrade(f)
 	upgradeCmd.GroupID = "system"
