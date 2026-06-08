@@ -171,6 +171,10 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 	if err := nginx.TailAccessLog(ctx, publish, logger); err != nil {
 		logger.Warn("start nginx access tail", slog.String("err", err.Error()))
 	}
+	// Live aggregate ticker — 1s rps/p50/p95/p99/err_rate on topic
+	// "metrics.tick", consumed by the dashboard UI and `apigw events --topic
+	// metrics.tick` from CLI. Empty when no access log activity flows.
+	go metrics.RunLiveTicker(ctx, hub, logger)
 
 	select {
 	case <-ctx.Done():
