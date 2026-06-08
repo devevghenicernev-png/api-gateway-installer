@@ -36,7 +36,20 @@ const (
 
 	// BackupExtension matches the convention used by internal/nginx.Manager.
 	BackupExtension = ".apigw-prev"
+
+	// disabledPrefix is prepended to pre-existing main-context worker_*
+	// directives so they don't conflict with the apigw tuning block.
+	// Revert strips the prefix to restore the original line.
+	disabledPrefix = "# apigw-tuning-disabled: "
 )
+
+// neutralizeRE matches non-commented top-level worker_processes /
+// worker_cpu_affinity / worker_rlimit_nofile lines. Anchored to the
+// start of a line; allows leading whitespace.
+var neutralizeRE = regexp.MustCompile(`(?m)^([\t ]*)(worker_processes|worker_cpu_affinity|worker_rlimit_nofile)\b`)
+
+// reEnableRE matches lines we previously neutralized.
+var reEnableRE = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(disabledPrefix))
 
 // NginxConfPath is the location of the main nginx config. Override via
 // the env var (matching paths.NginxConfPath()) — kept as a function so
@@ -87,6 +100,13 @@ var blockRE = regexp.MustCompile(`(?ms)^` + regexp.QuoteMeta(markerStart) + `\n.
 // no-op. Returns (changed, error) — `changed` is true only when the file
 // content actually moved.
 //
+// Pre-existing top-level worker_processes / worker_cpu_affinity /
+// worker_rlimit_nofile lines (Debian/Ubuntu ship with worker_processes
+// auto; at the top of nginx.conf) are commented out with the
+// `# apigw-tuning-disabled: ` prefix so nginx doesn't see two
+// declarations and fail with `"worker_processes" directive is duplicate`.
+// Revert puts them back.
+//
 // On first edit a snapshot is written to <path>.apigw-prev so operators
 // can `cp` it back if they want their original nginx.conf.
 func Apply(spec Spec) (bool, error) {
@@ -100,11 +120,18 @@ func Apply(spec Spec) (bool, error) {
 	}
 	wanted := markerStart + "\n" + spec.Render() + markerEnd + "\n"
 
+	// Step 1: neutralize any pre-existing main-context worker_* lines
+	// that aren't already inside our marker block.
+	repl := []byte(disabledPrefix + "$1$2")
 	var out []byte
 	if blockRE.Match(body) {
-		out = blockRE.ReplaceAll(body, []byte(wanted))
+		// Replace the old block at its current location, but use a
+		// neutralized body where the old block was elided.
+		out = neutralizeRE.ReplaceAll(body, repl)
+		out = blockRE.ReplaceAll(out, []byte(wanted))
 	} else {
-		out = insertAtTop(body, []byte(wanted))
+		neutralized := neutralizeRE.ReplaceAll(body, repl)
+		out = insertAtTop(neutralized, []byte(wanted))
 	}
 	if bytes.Equal(out, body) {
 		return false, nil
@@ -123,17 +150,45 @@ func Apply(spec Spec) (bool, error) {
 	return true, nil
 }
 
-// Revert removes the tuning block. Returns (changed, error). Idempotent.
+// RestoreBackup atomically copies <path>.apigw-prev back over the live
+// nginx.conf. Used by the CLI as the rollback step when `nginx -t`
+// rejects what Apply just wrote. No-op if no backup exists.
+func RestoreBackup() error {
+	path := NginxConfPath()
+	bak := path + BackupExtension
+	body, err := os.ReadFile(bak)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read backup %s: %w", bak, err)
+	}
+	return writeAtomic(path, body)
+}
+
+// Revert removes the tuning block AND restores any `# apigw-tuning-disabled: `
+// lines we commented out during Apply. Returns (changed, error). Idempotent.
 func Revert() (bool, error) {
 	path := NginxConfPath()
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return false, fmt.Errorf("read %s: %w", path, err)
 	}
-	if !blockRE.Match(body) {
+	hadBlock := blockRE.Match(body)
+	hadDisabled := reEnableRE.Match(body)
+	if !hadBlock && !hadDisabled {
 		return false, nil
 	}
-	out := blockRE.ReplaceAll(body, nil)
+	out := body
+	if hadBlock {
+		out = blockRE.ReplaceAll(out, nil)
+	}
+	if hadDisabled {
+		out = reEnableRE.ReplaceAll(out, nil)
+	}
+	if bytes.Equal(out, body) {
+		return false, nil
+	}
 	if err := writeAtomic(path, out); err != nil {
 		return false, err
 	}

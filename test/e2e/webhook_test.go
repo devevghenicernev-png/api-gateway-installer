@@ -46,8 +46,12 @@ func TestWebhook(t *testing.T) {
 			c.MustExec(30*time.Second, "apigw", "dashboard", "start")
 			waitForListen(t, c, 9000, 10*time.Second)
 
+			// "copy it now" is unique to the secret banner; the next line is
+			// the hex secret. Earlier match (`grep -A1 'Secret'`) tripped on
+			// the help text's "3. paste Payload URL and Secret from above"
+			// section and printed the wrong line as the "secret".
 			secret := c.MustExec(10*time.Second, "/bin/sh", "-c",
-				"apigw webhook setup hello --yes | grep -A1 'Secret' | tail -1 | awk '{print $1}'")
+				"apigw webhook setup hello --yes | grep -A1 'copy it now' | tail -1 | awk '{print $1}'")
 			secret = strings.TrimSpace(secret)
 			if len(secret) < 16 {
 				t.Fatalf("secret looks bogus: %q", secret)

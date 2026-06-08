@@ -157,6 +157,62 @@ func TestCurrentBlock(t *testing.T) {
 	}
 }
 
+func TestApply_NeutralizesPreExistingWorkerProcesses(t *testing.T) {
+	// L-2 fix: stock Debian/Ubuntu nginx.conf already has `worker_processes
+	// auto;` at the top, which clashes with our marker-block declaration.
+	// Apply must comment it out so `nginx -t` doesn't fail with
+	// `"worker_processes" directive is duplicate`.
+	path, restore := patchPath(t, seedDefault)
+	defer restore()
+	if _, err := Apply(Spec{WorkerProcesses: "auto", WorkerRLimitNofile: 65535}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if strings.Contains(s, "\nworker_processes auto;\n") {
+		t.Fatalf("pre-existing worker_processes still active (not commented):\n%s", s)
+	}
+	if !strings.Contains(s, disabledPrefix+"worker_processes auto;") {
+		t.Fatalf("expected pre-existing line commented out with %q prefix:\n%s", disabledPrefix, s)
+	}
+}
+
+func TestRevert_RestoresNeutralizedLines(t *testing.T) {
+	// L-2 follow-up: Revert must put neutralized worker_* lines back so
+	// the operator's original nginx.conf is whole again.
+	path, restore := patchPath(t, seedDefault)
+	defer restore()
+	if _, err := Apply(Spec{WorkerProcesses: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Revert(); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if strings.Contains(s, disabledPrefix) {
+		t.Fatalf("revert left disabled prefix behind:\n%s", s)
+	}
+	if !strings.Contains(s, "\nworker_processes auto;\n") {
+		t.Fatalf("revert didn't restore original worker_processes line:\n%s", s)
+	}
+}
+
+func TestRestoreBackup_OverwritesLive(t *testing.T) {
+	path, restore := patchPath(t, seedDefault)
+	defer restore()
+	if _, err := Apply(Spec{WorkerProcesses: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreBackup(); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(path)
+	if string(out) != seedDefault {
+		t.Fatalf("RestoreBackup should make file byte-identical to seed:\n%s", out)
+	}
+}
+
 func TestApply_NoEventsOrHttp(t *testing.T) {
 	// Bare-bones nginx.conf with no events/http (synthetic edge case).
 	path, restore := patchPath(t, "# weird config\n")

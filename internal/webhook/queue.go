@@ -49,6 +49,12 @@ type Job struct {
 	NotBefore  time.Time `json:"not_before,omitempty"` // backoff hint
 }
 
+// ErrQueueLocked is returned by OpenQueue* when another apigw process
+// (typically the running dashboard) holds the bbolt exclusive flock.
+// Callers like `doctor` / `status` open with a short timeout and report
+// "busy — held by running dashboard" instead of a generic "timeout".
+var ErrQueueLocked = errors.New("queue locked by another apigw process (the running dashboard/webhook holds it)")
+
 // Queue is the bbolt-backed persistent job queue.
 //
 // Lifecycle: NewQueue → Enqueue from server, Peek/Claim/Ack/Fail from worker,
@@ -69,13 +75,31 @@ func OpenQueue() (*Queue, error) {
 
 // OpenQueueAt is the explicit-path variant for tests.
 func OpenQueueAt(path string) (*Queue, error) {
+	return openQueueAt(path, 5*time.Second)
+}
+
+// OpenQueueTimeout is the short-timeout variant for diag/status callers.
+// On timeout (another process holds the flock) returns ErrQueueLocked so
+// callers can render a clear "busy" message in <300 ms instead of
+// stalling on the default 5 s.
+func OpenQueueTimeout(timeout time.Duration) (*Queue, error) {
+	return openQueueAt(paths.QueueDB(), timeout)
+}
+
+// OpenQueueAtTimeout is the explicit-path + short-timeout variant.
+func OpenQueueAtTimeout(path string, timeout time.Duration) (*Queue, error) {
+	return openQueueAt(path, timeout)
+}
+
+func openQueueAt(path string, timeout time.Duration) (*Queue, error) {
 	if err := mkParent(path); err != nil {
 		return nil, err
 	}
-	// 5 s timeout — if another apigw instance holds the lock we want a clear
-	// error, not an indefinite hang.
-	db, err := bbolt.Open(path, 0o600, &bbolt.Options{Timeout: 5 * time.Second})
+	db, err := bbolt.Open(path, 0o600, &bbolt.Options{Timeout: timeout})
 	if err != nil {
+		if errors.Is(err, bbolt.ErrTimeout) {
+			return nil, ErrQueueLocked
+		}
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	if err := db.Update(func(tx *bbolt.Tx) error {

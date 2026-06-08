@@ -149,6 +149,13 @@ body {
   border-color: var(--success);
   color: var(--success);
 }
+/* SSO sign-in link sits next to the bearer-token button; same chrome. */
+.sso-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+}
 .token-btn.authed::before {
   content: '';
   display: inline-block;

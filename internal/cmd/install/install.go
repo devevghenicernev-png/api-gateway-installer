@@ -84,9 +84,9 @@ func NewCmdInstall(f *cmdutil.Factory) *cobra.Command {
 		Use:   "install",
 		Short: "Set up apigw on this host (interactive wizard)",
 		Args:  cobra.NoArgs,
-		Example: `  $ apigw install                        # interactive
-  $ apigw install --plan                 # show what would happen, exit
-  $ apigw install --config install.yml   # unattended
+		Example: `  $ apigw install                             # interactive
+  $ apigw install --plan                      # show what would happen, exit
+  $ apigw install --config-file install.yml   # unattended (note: --config-file, not --config)
   $ apigw install --print-config > install.yml`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			opts.yes, _ = c.Flags().GetBool("yes")
@@ -308,6 +308,26 @@ func apply(opts *options, a Answers) error {
 	// Optional TLS step.
 	if err := applyTLS(opts, &cfg, a); err != nil {
 		return err
+	}
+
+	// L-4: when the operator opted into the dashboard, install + start the
+	// systemd unit as part of install — best-effort. Without this, the
+	// nginx mount at /dashboard 502s until the operator discovers
+	// `apigw dashboard start` themselves. We never fail install on this
+	// step: launchd / OpenRC / unprivileged runs all surface here, and
+	// the gateway works either way.
+	if a.DashboardEnabled {
+		addr := fmt.Sprintf(":%d", a.DashboardPort)
+		whAddr := fmt.Sprintf(":%d", a.WebhookPort)
+		if err := system.InstallDashboardUnit(system.ResolveSelfBinary(), addr, whAddr); err != nil {
+			fmt.Fprintf(opts.f.IOStreams.Out, "%s dashboard unit not started (%v)\n",
+				tui.Styles.Warn.Render(tui.GlyphBullet), err)
+			fmt.Fprintf(opts.f.IOStreams.Out, "  %s apigw dashboard start\n",
+				tui.Styles.Accent.Render("Try:"))
+		} else {
+			fmt.Fprintf(opts.f.IOStreams.Out, "%s dashboard service started on %s\n",
+				tui.Styles.Success.Render(tui.GlyphCheck), addr)
+		}
 	}
 
 	fmt.Fprintln(opts.f.IOStreams.Out)

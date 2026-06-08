@@ -178,6 +178,27 @@ func (c *Container) HTTPGet(t *testing.T, path string) (string, int) {
 	return body, code
 }
 
+// HTTPGetUntil polls HTTPGet until the response code matches `want` or
+// `timeout` elapses. Real clients retry transient mismatches across the
+// sub-second nginx graceful-reload window; this lets tests do the same
+// without flaking on L-6 timing. Returns the last (body, code).
+func (c *Container) HTTPGetUntil(t *testing.T, path string, want int, timeout time.Duration) (string, int) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var (
+		body string
+		code int
+	)
+	for time.Now().Before(deadline) {
+		body, code = c.HTTPGet(t, path)
+		if code == want {
+			return body, code
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return body, code
+}
+
 // CopyIn drops `src` from the host at `dst` inside the container. Used to
 // seed install.yml + migrate fixtures.
 func (c *Container) CopyIn(t *testing.T, src, dst string) {

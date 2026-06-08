@@ -241,10 +241,18 @@ func (m *Manager) ensureEnabled() bool {
 	return true
 }
 
-// defaultReload triggers an nginx reload. Tries `nginx -s reload` first
-// (cross-platform: works on systemd, launchd, OpenRC, and bare init) and
-// falls back to `systemctl reload nginx` if signalling the master directly
-// requires extra privileges or a missing pid file.
+// defaultReload triggers an nginx reload. On the most common fresh-host
+// state (nginx installed by the package manager but never started),
+// `nginx -s reload` fails with `invalid PID number "" in /run/nginx.pid`
+// because there's no master process to signal. In that case we promote
+// to `systemctl start nginx` rather than reload, so `apigw install` on
+// a clean box doesn't fail at the very last step (L-3 in
+// DOCKER_TEST_REPORT.md).
+//
+// Order:
+//  1. `nginx -s reload` (the common, fast path on a running gateway)
+//  2. if nginx is inactive → `systemctl start nginx` (or `enable --now`)
+//  3. else `systemctl reload nginx` (privilege/PID-file fallback)
 func defaultReload() error {
 	cmd := exec.Command("nginx", "-s", "reload")
 	var stderr bytes.Buffer
@@ -253,6 +261,18 @@ func defaultReload() error {
 		return nil
 	} else {
 		nginxStderr := stderr.String()
+		// Distinguish "master isn't running" from other reload failures.
+		// `systemctl is-active --quiet nginx` returns 0 only when active.
+		inactive := exec.Command("systemctl", "is-active", "--quiet", "nginx").Run() != nil
+		if inactive {
+			stderr.Reset()
+			start := exec.Command("systemctl", "start", "nginx")
+			start.Stderr = &stderr
+			if startErr := start.Run(); startErr != nil {
+				return fmt.Errorf("nginx start: %w (nginx -s: %s) (systemctl start: %s)", startErr, nginxStderr, stderr.String())
+			}
+			return nil
+		}
 		stderr.Reset()
 		cmd2 := exec.Command("systemctl", "reload", "nginx")
 		cmd2.Stderr = &stderr

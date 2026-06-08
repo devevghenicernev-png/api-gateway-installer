@@ -77,6 +77,14 @@ type Security struct {
 	enforce    bool
 	auditReads bool // when true, even successful read-only operations land in audit.db
 	logger     *slog.Logger
+
+	// SessionResolver, when set, fallback-resolves an identity from a
+	// session cookie (the apigw_session cookie SSO/login flows mint).
+	// Without this, Identify() that finds no Bearer/X-Apigw-Subject
+	// header returns "anonymous" — which made SSO-logged-in users see
+	// "Sign in to view…" panels on the dashboard (D-2b). Wired from
+	// dashboard/serve once SessionStore is open.
+	SessionResolver func(r *http.Request) (rbac.Identity, bool)
 }
 
 // NewSecurity constructs the integrated security layer from a Config block.
@@ -291,7 +299,14 @@ func (s *Security) ReloadTokens(cfg config.Security) {
 }
 
 // Identify extracts the caller's RBAC identity from request headers.
-// Anonymous when no token is presented OR token is unknown.
+// Resolution order (first match wins):
+//  1. `Authorization: Bearer <token>` matched against the AdminToken table.
+//  2. `X-Apigw-Subject` set by the upstream-auth (`auth_request`) flow.
+//  3. `apigw_session` cookie via SessionResolver — populated by SSO/login
+//     flows. Without this fallback an SSO-logged-in user looked
+//     anonymous to the admin API (D-2b).
+//
+// Anonymous when none match.
 func (s *Security) Identify(r *http.Request) rbac.Identity {
 	if s == nil {
 		return rbac.Identity{User: "anonymous"}
@@ -303,18 +318,33 @@ func (s *Security) Identify(r *http.Request) rbac.Identity {
 		if sub := r.Header.Get("X-Apigw-Subject"); sub != "" {
 			return s.expandTeams(rbac.Identity{User: sub})
 		}
+		if s.SessionResolver != nil {
+			if ident, ok := s.SessionResolver(r); ok {
+				return s.expandTeams(ident)
+			}
+		}
 		return rbac.Identity{User: "anonymous"}
 	}
 	tok := strings.TrimPrefix(h, "Bearer ")
 	tok = strings.TrimPrefix(tok, "bearer ")
 	tok = strings.TrimSpace(tok)
 	if tok == "" {
+		if s.SessionResolver != nil {
+			if ident, ok := s.SessionResolver(r); ok {
+				return s.expandTeams(ident)
+			}
+		}
 		return rbac.Identity{User: "anonymous"}
 	}
 	s.tokensMu.RLock()
 	ident, ok := s.tokens[hashToken(tok)]
 	s.tokensMu.RUnlock()
 	if !ok {
+		if s.SessionResolver != nil {
+			if ident, sok := s.SessionResolver(r); sok {
+				return s.expandTeams(ident)
+			}
+		}
 		return rbac.Identity{User: "anonymous"}
 	}
 	return s.expandTeams(ident)

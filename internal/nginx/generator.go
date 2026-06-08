@@ -432,6 +432,38 @@ type deployEntry struct {
 	JWTDashboardPort    int
 	CustomLocation      string
 	CustomServer        string
+
+	// Mirror fields that _locations.tmpl reads but deploys leave at zero
+	// (they fall through to plain proxy). Without these the shared
+	// template panics: `can't evaluate field LifecycleDraft in type
+	// nginx.deployEntry` — broke every `migrate` and `dashboard start`.
+	Description             string
+	MTLS                    bool
+	MTLSCAFile              string
+	MTLSOptional            bool
+	APIKey                  bool
+	HMAC                    bool
+	Session                 bool
+	OAuth2                  bool
+	Mock                    bool
+	Cache                   *cacheEntry
+	Timeouts                *timeoutsEntry
+	Mirror                  *mirrorEntry
+	GRPCWeb                 bool
+	StickyMode              string
+	BotGuard                *botGuardEntry
+	AccessLogMode           string
+	AccessLogFile           string
+	EarlyHints              []string
+	HTTP2Push               []string
+	LifecycleDraft          bool
+	LifecycleDeprecated     bool
+	LifecycleSunsetAt       string
+	LifecycleRetired        bool
+	LifecycleReplacementURL string
+	Versions                []versionRoute
+	Buffering               *bufferingEntry
+	Rewrites                []rewriteEntry
 }
 
 // RenderStream produces the TCP/UDP stream{} include. Empty when no

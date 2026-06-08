@@ -410,8 +410,14 @@ func deployUnitsCheck(cfg *config.Config) func(context.Context) Result {
 }
 
 func queueDepthCheck(_ context.Context) Result {
-	q, err := webhook.OpenQueue()
+	// Short timeout: when the dashboard/webhook is running it holds the
+	// exclusive bbolt flock; we don't want doctor to stall for 5s on every
+	// healthy box that has the dashboard up.
+	q, err := webhook.OpenQueueTimeout(300 * time.Millisecond)
 	if err != nil {
+		if errors.Is(err, webhook.ErrQueueLocked) {
+			return Result{Level: LevelOK, Name: "queue-depth", Message: "busy — held by running dashboard"}
+		}
 		return Result{Level: LevelInfo, Name: "queue-depth", Message: "queue not opened"}
 	}
 	defer q.Close()

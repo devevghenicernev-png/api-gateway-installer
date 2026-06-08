@@ -9,6 +9,7 @@ package status
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -62,6 +63,10 @@ type SystemSummary struct {
 type ServiceStatus struct {
 	Unit   string `json:"unit"`
 	Active bool   `json:"active"`
+	// Note overrides the renderer's default "inactive → red ×" for cases
+	// where the unit is intentionally not running (webhook served in-process
+	// by the dashboard; tls-renew.timer suppressed by --no-timer).
+	Note string `json:"note,omitempty"`
 }
 
 type DeployStatus struct {
@@ -157,16 +162,26 @@ func build(ctx context.Context, f *cmdutil.Factory) (Snapshot, error) {
 	}
 
 	// Services we own: nginx + apigw-{dashboard,webhook} + tls-renew.timer.
+	dashboardActive := isActive(ctx, "apigw-dashboard.service")
 	for _, unit := range []string{
 		"nginx.service",
 		"apigw-dashboard.service",
 		"apigw-webhook.service",
 		"apigw-tls-renew.timer",
 	} {
-		snap.Services = append(snap.Services, ServiceStatus{
-			Unit:   unit,
-			Active: isActive(ctx, unit),
-		})
+		active := isActive(ctx, unit)
+		s := ServiceStatus{Unit: unit, Active: active}
+		// The dashboard hosts the webhook receiver in-process; when the
+		// dashboard is up an inactive standalone webhook unit is fine.
+		if unit == "apigw-webhook.service" && !active && dashboardActive {
+			s.Note = "served by dashboard"
+		}
+		// A timer that the operator turned off (apigw tls enable --no-timer
+		// or apigw tls disable) shouldn't render as a failure.
+		if unit == "apigw-tls-renew.timer" && !active && len(snap.TLS) == 0 {
+			s.Note = "disabled"
+		}
+		snap.Services = append(snap.Services, s)
 	}
 
 	// TLS
@@ -186,11 +201,17 @@ func build(ctx context.Context, f *cmdutil.Factory) (Snapshot, error) {
 		})
 	}
 
-	// Webhook queue
+	// Webhook queue. Short timeout: when the dashboard is running it holds
+	// the bbolt flock; status should return fast with empty queue stats
+	// rather than stall 5s on every healthy box.
 	snap.Webhook = WebhookSummary{Enabled: cfg.Webhook.Enabled, Port: cfg.Webhook.Port}
-	if q, err := webhook.OpenQueue(); err == nil {
+	if q, err := webhook.OpenQueueTimeout(300 * time.Millisecond); err == nil {
 		snap.Webhook.QueueDepth, snap.Webhook.DeadLetter, _ = q.Depth()
 		_ = q.Close()
+	} else if !errors.Is(err, webhook.ErrQueueLocked) {
+		// Locked is expected (dashboard holds it); other errors are silent
+		// at status-level — `apigw doctor` reports them in detail.
+		_ = err
 	}
 
 	return snap, nil
@@ -223,11 +244,20 @@ func renderCounted(f *cmdutil.Factory, s Snapshot) int {
 	fmt.Fprintln(ios.Out, tui.Styles.Muted.Render("Services"))
 	n++
 	for _, svc := range s.Services {
-		mark := tui.Styles.Danger.Render(tui.GlyphCross)
-		state := "inactive"
-		if svc.Active {
+		var mark string
+		var state string
+		switch {
+		case svc.Active:
 			mark = tui.Styles.Success.Render(tui.GlyphCheck)
 			state = "active"
+		case svc.Note != "":
+			// Intentionally-inactive unit (webhook in dashboard, timer
+			// disabled by operator). Render neutral, not danger-red.
+			mark = tui.Styles.Muted.Render("·")
+			state = svc.Note
+		default:
+			mark = tui.Styles.Danger.Render(tui.GlyphCross)
+			state = "inactive"
 		}
 		fmt.Fprintf(ios.Out, "  %s %s  %s\n", mark,
 			tui.Styles.Identifier.Render(svc.Unit),

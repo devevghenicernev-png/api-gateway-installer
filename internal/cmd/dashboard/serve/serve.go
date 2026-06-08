@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -74,6 +75,10 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 	if cfg, err := reloadConfig(); err == nil {
 		if sec, err := dashboard.NewSecurity(cfg.Security, cfg.Tenants, cfg.Alerts, logger); err == nil {
 			dash.Sec = sec
+			// D-2b: let Identify() fall back to the session cookie that
+			// SSO mints, so an SSO-logged-in user is no longer "anonymous"
+			// to the admin API.
+			sec.SessionResolver = dash.SessionIdentity
 			defer sec.Close()
 		} else {
 			logger.Warn("security init failed; running in legacy mode", "err", err)
@@ -123,6 +128,14 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 		whSrv.Metrics = prom
 	}
 
+	// Startup banner — prints regardless of log level so manual `apigw
+	// dashboard serve` runs aren't silent at the default WARN level.
+	// Under systemd this lands in journald with stderr, same as logger output.
+	if o.skipWebhook {
+		fmt.Fprintf(os.Stderr, "apigw dashboard listening on %s (webhook disabled)\n", o.addr)
+	} else {
+		fmt.Fprintf(os.Stderr, "apigw dashboard listening on %s (webhook on %s)\n", o.addr, o.webhookAddr)
+	}
 	logger.Info("apigw dashboard starting",
 		slog.String("dashboard", o.addr),
 		slog.String("webhook", o.webhookAddr),

@@ -6,6 +6,7 @@ package tuning
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -86,10 +87,25 @@ func newApply(f *cmdutil.Factory) *cobra.Command {
 				fmt.Fprintln(out, "ok — nothing to change")
 				return nil
 			}
+			// Validate the rendered file BEFORE we tell the operator "ok".
+			// Without this, `apigw tuning apply` printed `ok` and then
+			// `nginx -s reload` failed on a duplicate worker_processes —
+			// leaving a broken config on disk that the next `systemctl
+			// restart nginx` would refuse (L-2 in DOCKER_TEST_REPORT.md).
+			if vErr := nginxValidate(); vErr != nil {
+				if rErr := tuningpkg.RestoreBackup(); rErr != nil {
+					return fmt.Errorf("nginx -t failed (%w); restore also failed: %v — fix nginx.conf by hand from %s.apigw-prev", vErr, rErr, "/etc/nginx/nginx.conf")
+				}
+				return fmt.Errorf("nginx -t rejected the rendered config — rolled back to nginx.conf.apigw-prev: %w", vErr)
+			}
 			fmt.Fprintln(out, "ok — nginx.conf updated")
 			if reload {
 				if err := nginxReload(); err != nil {
-					return fmt.Errorf("nginx reload: %w", err)
+					// Reload failed AFTER a successful validate is rare
+					// (PID file missing, permission). Restore so we don't
+					// leave the operator with an unreviewed delta.
+					_ = tuningpkg.RestoreBackup()
+					return fmt.Errorf("nginx reload: %w (changes rolled back)", err)
 				}
 				fmt.Fprintln(out, "  nginx reloaded")
 			}
@@ -190,4 +206,16 @@ func nginxReload() error {
 		return nil
 	}
 	return exec.Command("systemctl", "reload", "nginx").Run()
+}
+
+// nginxValidate runs `nginx -t` and returns the combined output as the
+// error message when it exits non-zero (so the operator can see WHY
+// validation failed without re-running by hand).
+func nginxValidate() error {
+	cmd := exec.Command("nginx", "-t")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

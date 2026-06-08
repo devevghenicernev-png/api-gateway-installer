@@ -256,6 +256,11 @@
     for (const c of certs) {
       elTLS.appendChild(renderTLS(c));
     }
+
+    // D-2a: show the SSO sign-in button only when security.sso is wired
+    // up server-side, so a stock install doesn't dangle a button that 502s.
+    const ssoBtn = document.getElementById("sso-btn");
+    if (ssoBtn) ssoBtn.hidden = !s.sso_enabled;
   }
 
   function renderDeployCard(d) {

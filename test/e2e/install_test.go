@@ -24,6 +24,7 @@ func TestScenarios(t *testing.T) {
 
 			t.Run("version", func(t *testing.T) { testVersion(t, c) })
 			t.Run("install", func(t *testing.T) { testInstall(t, c) })
+			t.Run("dashboard_service", func(t *testing.T) { testDashboardService(t, c) })
 			t.Run("api_add_curl_remove", func(t *testing.T) { testAPI(t, c) })
 			t.Run("tls_self_signed", func(t *testing.T) { testTLSSelfSigned(t, c) })
 			t.Run("doctor", func(t *testing.T) { testDoctor(t, c) })
@@ -60,6 +61,22 @@ func testInstall(t *testing.T, c *harness.Container) {
 	c.MustExec(5*time.Second, "systemctl", "is-active", "--quiet", "nginx")
 }
 
+// ----- step 2.5: dashboard systemd unit (L-1 regression guard) -----------
+
+func testDashboardService(t *testing.T, c *harness.Container) {
+	// L-1: `apigw dashboard start` used to fail with status=226/NAMESPACE
+	// on a fresh box because the unit listed /var/log/apigw in
+	// ReadWritePaths= without LogsDirectory= creating it first. install
+	// now also auto-starts the unit (L-4), but we run start explicitly so
+	// this test covers the operator-driven path too. Idempotent on the
+	// already-running unit.
+	out := c.MustExec(30*time.Second, "apigw", "dashboard", "start")
+	if !strings.Contains(out, "dashboard") {
+		t.Fatalf("dashboard start did not finish cleanly:\n%s", out)
+	}
+	c.MustExec(5*time.Second, "systemctl", "is-active", "--quiet", "apigw-dashboard.service")
+}
+
 // ----- step 3: api lifecycle ----------------------------------------------
 
 func testAPI(t *testing.T, c *harness.Container) {
@@ -77,7 +94,9 @@ func testAPI(t *testing.T, c *harness.Container) {
 
 	c.MustExec(15*time.Second, "apigw", "api", "add", "hello",
 		"--port", "3000", "--path", "/api/hello", "--yes")
-	body, code := c.HTTPGet(t, "/api/hello")
+	// nginx graceful reload is async (L-6, won't-fix); the route is live
+	// within ~100 ms–1 s of the `✓` print. Real clients retry; so do we.
+	body, code := c.HTTPGetUntil(t, "/api/hello", 200, 5*time.Second)
 	if code != 200 {
 		t.Fatalf("expected 200 from /api/hello, got %d (body=%q)", code, body)
 	}
@@ -86,7 +105,7 @@ func testAPI(t *testing.T, c *harness.Container) {
 	}
 
 	c.MustExec(10*time.Second, "apigw", "api", "remove", "hello", "--yes")
-	_, code = c.HTTPGet(t, "/api/hello")
+	_, code = c.HTTPGetUntil(t, "/api/hello", 404, 5*time.Second)
 	if code != 404 {
 		t.Fatalf("expected 404 after remove, got %d", code)
 	}

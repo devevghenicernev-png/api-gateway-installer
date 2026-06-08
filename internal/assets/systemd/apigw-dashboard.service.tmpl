@@ -48,9 +48,15 @@ SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @debug @mount @swap @reboot @raw-io
 
+# systemd creates and owns the state + log dirs BEFORE the namespace is
+# built, so we don't need to also list them in ReadWritePaths= (listing a
+# nonexistent dir there triggers status=226/NAMESPACE on a fresh box).
+StateDirectory=apigw
+LogsDirectory=apigw
+
 # Worker writes deploy state + units; dashboard reads /etc/apigw config; both
 # touch the bbolt queue at /var/lib/apigw/jobs.db.
-ReadWritePaths=/var/lib/apigw /etc/apigw /etc/nginx /etc/systemd/system /run /var/log/apigw
+ReadWritePaths=/etc/apigw /etc/nginx /etc/systemd/system /run
 
 # --- resource limits ---
 TasksMax=512

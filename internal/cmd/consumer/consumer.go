@@ -68,9 +68,13 @@ func newAdd(f *cmdutil.Factory) *cobra.Command {
 					return fmt.Errorf("consumer %q already exists", id)
 				}
 			}
+			displayName := name
+			if displayName == "" {
+				displayName = id
+			}
 			cfg.Security.Consumers = append(cfg.Security.Consumers, config.Consumer{
 				ID:          id,
-				Name:        name,
+				Name:        displayName,
 				Groups:      groups,
 				Description: description,
 			})

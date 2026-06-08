@@ -23,13 +23,17 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
 # Core: systemd as PID 1 + nginx + tools the test harness invokes.
+# python3 + netcat-traditional are used by install_test.go to spin up the
+# tiny :3000 upstream that `api add hello` proxies to.
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
         systemd systemd-sysv dbus \
         nginx \
         curl ca-certificates jq \
         openssl \
         iproute2 procps \
-    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/apt/*
+        python3 netcat-traditional \
+    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/apt/* \
+    && mkdir -p /var/log/nginx
 
 # Disable the services systemd would normally try to start that don't make
 # sense in a container — kernel modules, lvm, etc. Keeping the list short

@@ -15,7 +15,9 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
         curl ca-certificates jq \
         openssl \
         iproute2 procps \
-    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/apt/*
+        python3 netcat-traditional \
+    && rm -rf /var/lib/apt/lists/* /var/log/* /var/cache/apt/* \
+    && mkdir -p /var/log/nginx
 
 RUN systemctl mask -- \
         systemd-logind.service \

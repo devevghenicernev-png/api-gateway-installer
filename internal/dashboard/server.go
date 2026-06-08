@@ -11,14 +11,18 @@ package dashboard
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devevghenicernev-png/apigw/internal/assets"
@@ -27,6 +31,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/events"
 	"github.com/devevghenicernev-png/apigw/internal/metrics"
+	"github.com/devevghenicernev-png/apigw/internal/rbac"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
 )
@@ -97,6 +102,23 @@ type Server struct {
 	// ssoStateStoreInst tracks in-flight OIDC login attempts (state +
 	// nonce). Lazily created on first /sso/login hit.
 	ssoStateStoreInst *ssoStateStore
+
+	// jwtVerifiers memoizes JWT verifiers by (apiName + config-hash) so
+	// the JWKS cache inside auth.Verifier survives across requests. Without
+	// this each request rebuilt the Verifier and re-fetched JWKS from the
+	// IdP (tens to hundreds of ms per request, and a real chance of being
+	// rate-limited). Entries are evicted automatically when the config
+	// hash changes (e.g. operator rotates the JWKS URL).
+	jwtVerifiers   map[string]*jwtVerifierEntry
+	jwtVerifiersMu sync.Mutex
+}
+
+// jwtVerifierEntry is one cached Verifier plus the config-hash that
+// built it. Lookup compares hashes — a mismatch builds a fresh Verifier
+// (and lets the GC reclaim the old JWKS cache).
+type jwtVerifierEntry struct {
+	verifier   *auth.Verifier
+	configHash string
 }
 
 // New constructs a Server bound to `addr`.
@@ -167,6 +189,41 @@ func (s *Server) ensureSessionStore(cfg *config.Config) error {
 	return nil
 }
 
+// SessionIdentity is the SessionResolver Security uses to fall back from
+// header-based auth to the SSO/login session cookie. Returns ok=false
+// when the cookie is missing, expired, or names a session the store
+// doesn't know about — the caller treats that as "anonymous" rather than
+// an error so a stale cookie just behaves like no auth.
+func (s *Server) SessionIdentity(r *http.Request) (rbac.Identity, bool) {
+	cfg, err := s.ConfigFn()
+	if err != nil {
+		return rbac.Identity{}, false
+	}
+	cookieName := defaultSessionCookie
+	slidingTTL := time.Duration(0)
+	if cfg.Security.Sessions != nil {
+		if cfg.Security.Sessions.CookieName != "" {
+			cookieName = cfg.Security.Sessions.CookieName
+		}
+		if cfg.Security.Sessions.SlidingWindow {
+			slidingTTL = cfg.Security.Sessions.TTL
+		}
+	}
+	ck, err := r.Cookie(cookieName)
+	if err != nil || ck.Value == "" {
+		return rbac.Identity{}, false
+	}
+	if err := s.ensureSessionStore(cfg); err != nil {
+		return rbac.Identity{}, false
+	}
+	sess, err := s.SessionStore.Lookup(ck.Value, slidingTTL)
+	if err != nil {
+		return rbac.Identity{}, false
+	}
+	// Sessions carry the SSO-mapped role list in Session.Scopes.
+	return rbac.Identity{User: sess.Subject, Groups: append([]string(nil), sess.Scopes...)}, true
+}
+
 // Routes wires the mux. Split out for testability so callers can mount
 // alongside other handlers if needed (e.g. embed in webhook server later).
 func (s *Server) Routes(mux *http.ServeMux) {
@@ -205,6 +262,54 @@ func (s *Server) securityRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/alerts/test", s.handleAlertTest)
 }
 
+// getOrBuildJWTVerifier returns a Verifier for the given api+config.
+// Cached entries are invalidated when the config-hash changes (operator
+// rotated keys / changed jwks URL / issuer / audience / etc.).
+func (s *Server) getOrBuildJWTVerifier(apiName string, j *config.JWT) (*auth.Verifier, error) {
+	hash := jwtConfigHash(j)
+	s.jwtVerifiersMu.Lock()
+	defer s.jwtVerifiersMu.Unlock()
+	if s.jwtVerifiers == nil {
+		s.jwtVerifiers = make(map[string]*jwtVerifierEntry)
+	}
+	if entry, ok := s.jwtVerifiers[apiName]; ok && entry.configHash == hash {
+		return entry.verifier, nil
+	}
+	v, err := auth.NewVerifier(auth.JWTConfig{
+		Algorithm:     j.Algorithm,
+		HMACSecret:    j.HMACSecret,
+		JWKSURL:       j.JWKSURL,
+		Issuer:        j.Issuer,
+		Audience:      j.Audience,
+		RequireClaims: j.RequireClaims,
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.jwtVerifiers[apiName] = &jwtVerifierEntry{verifier: v, configHash: hash}
+	return v, nil
+}
+
+// jwtConfigHash returns a stable hash over the fields NewVerifier reads,
+// so a change to ANY of them invalidates the cached Verifier on the next
+// auth_request.
+func jwtConfigHash(j *config.JWT) string {
+	// Stable, allocation-light: SHA-256 over a delimiter-joined render.
+	// Sort RequireClaims keys so map iteration order doesn't churn the hash.
+	keys := make([]string, 0, len(j.RequireClaims))
+	for k := range j.RequireClaims {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "alg=%s\x00hmac=%s\x00jwks=%s\x00iss=%s\x00aud=%s\x00",
+		j.Algorithm, j.HMACSecret, j.JWKSURL, j.Issuer, j.Audience)
+	for _, k := range keys {
+		_, _ = fmt.Fprintf(h, "rc:%s=%v\x00", k, j.RequireClaims[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // handleJWTAuth answers nginx auth_request sub-requests. Path:
 // /auth/jwt/<api-name>. The original request's Authorization header arrives
 // via proxy_set_header (template ensures it's forwarded). We look up the
@@ -213,13 +318,11 @@ func (s *Server) securityRoutes(mux *http.ServeMux) {
 // Response body is empty — auth_request only honors the status code, never
 // the body, so there's no reason to send anything.
 //
-// Verifiers are built per-request because:
-//   - they're cheap (no expensive setup),
-//   - config can change between requests (apigw api reload),
-//   - JWKS caching lives inside Verifier so we'd lose it — but since we
-//     don't memoize Verifier across calls, JWKS gets re-fetched on every
-//     request. That's not ideal; TODO(perf): memoize verifiers by (api,
-//     config-hash) once profiling shows it matters.
+// Verifiers are memoized per API by config-hash so the in-Verifier JWKS
+// cache survives across requests. Without this each auth_request call
+// blocked on a fresh GET to the IdP's jwks_uri — adding ~hundreds-of-ms
+// of latency and likely getting the gateway rate-limited (D-1 in
+// MANUAL_TEST_REPORT.md).
 func (s *Server) handleJWTAuth(w http.ResponseWriter, r *http.Request) {
 	apiName := strings.TrimPrefix(r.URL.Path, "/auth/jwt/")
 	apiName = strings.TrimSuffix(apiName, "/")
@@ -249,14 +352,7 @@ func (s *Server) handleJWTAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	verifier, err := auth.NewVerifier(auth.JWTConfig{
-		Algorithm:     apiCfg.JWT.Algorithm,
-		HMACSecret:    apiCfg.JWT.HMACSecret,
-		JWKSURL:       apiCfg.JWT.JWKSURL,
-		Issuer:        apiCfg.JWT.Issuer,
-		Audience:      apiCfg.JWT.Audience,
-		RequireClaims: apiCfg.JWT.RequireClaims,
-	})
+	verifier, err := s.getOrBuildJWTVerifier(apiName, apiCfg.JWT)
 	if err != nil {
 		s.Logger.Error("jwt: build verifier", "api", apiName, "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
@@ -436,14 +532,15 @@ func (s *Server) staticHandler(uiFS fs.FS) http.HandlerFunc {
 // StatusSnapshot is what /api/status returns. JSON-shaped so the dashboard
 // can render the initial state before the SSE stream catches it up.
 type StatusSnapshot struct {
-	Version   string            `json:"version"`
-	Commit    string            `json:"commit"`
-	UptimeSec int64             `json:"uptime_sec"`
-	Clients   int               `json:"sse_clients"`
-	Deploys   []DeploySummary   `json:"deploys"`
-	TLS       []apitls.CertInfo `json:"tls"`
-	Webhook   WebhookSummary    `json:"webhook"`
-	NowUnix   int64             `json:"now_unix"`
+	Version    string            `json:"version"`
+	Commit     string            `json:"commit"`
+	UptimeSec  int64             `json:"uptime_sec"`
+	Clients    int               `json:"sse_clients"`
+	Deploys    []DeploySummary   `json:"deploys"`
+	TLS        []apitls.CertInfo `json:"tls"`
+	Webhook    WebhookSummary    `json:"webhook"`
+	NowUnix    int64             `json:"now_unix"`
+	SSOEnabled bool              `json:"sso_enabled"`
 }
 
 type DeploySummary struct {
@@ -471,11 +568,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap := StatusSnapshot{
-		Version:   build.Version,
-		Commit:    build.Commit,
-		UptimeSec: int64(time.Since(s.started).Seconds()),
-		Clients:   s.clients.get(),
-		NowUnix:   time.Now().Unix(),
+		Version:    build.Version,
+		Commit:     build.Commit,
+		UptimeSec:  int64(time.Since(s.started).Seconds()),
+		Clients:    s.clients.get(),
+		NowUnix:    time.Now().Unix(),
+		SSOEnabled: cfg.Security.SSO != nil && cfg.Security.SSO.IssuerURL != "" && cfg.Security.SSO.ClientID != "",
 		Webhook: WebhookSummary{
 			Enabled: cfg.Webhook.Enabled,
 			Port:    cfg.Webhook.Port,
