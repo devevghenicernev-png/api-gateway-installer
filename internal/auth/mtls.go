@@ -99,10 +99,15 @@ func VerifyMTLS(cfg MTLSConfig, h http.Header) (MTLSResult, string, string) {
 	pemStr := h.Get("X-Apigw-Mtls-Cert")
 	if pemStr == "" {
 		// No cert body forwarded — fall back to DN-only matching.
+		// nginx's $ssl_client_escaped_cert is empty when the operator
+		// didn't enable the http_ssl_module's "verify" support, or when
+		// a non-TLS server-block somehow routed here. Don't 500 — treat
+		// it like any other auth failure so curl + browsers see a clean
+		// 403 rather than "Server Error".
 		dn := h.Get("X-Apigw-Mtls-SDN")
 		cn := extractCN(dn)
 		if cn == "" {
-			return MTLSBackendError, "", "no cert body and no DN forwarded"
+			return MTLSNotAllowed, "", "no cert body and no DN forwarded — nginx server block missing ssl_client_certificate or $ssl_client_escaped_cert"
 		}
 		if allowCN(cfg, cn) {
 			return MTLSOK, cn, "DN-only match"
@@ -112,7 +117,10 @@ func VerifyMTLS(cfg MTLSConfig, h http.Header) (MTLSResult, string, string) {
 
 	cert, err := parseCertPEM(pemStr)
 	if err != nil {
-		return MTLSBackendError, "", "parse cert: " + err.Error()
+		// Parse failure on a forwarded body is similarly not a server
+		// fault — return 403 so the caller knows they aren't allowed
+		// rather than presenting a 500 to clients.
+		return MTLSNotAllowed, "", "parse cert: " + err.Error()
 	}
 
 	// Fingerprint match — strongest form (cert pinning).

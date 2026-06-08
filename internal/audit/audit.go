@@ -61,16 +61,31 @@ const (
 	dbFileName = "audit.db"
 )
 
+// ErrAuditLocked is returned when audit.db is held by another apigw
+// process (the running dashboard's audit logger). Mirrors webhook.
+// ErrQueueLocked so doctor/CLI surfaces a clear "busy" message instead
+// of a generic timeout.
+var ErrAuditLocked = errors.New("audit locked by another apigw process (the running dashboard holds it)")
+
 // Open initializes the audit log at <dir>/audit.db. The bucket is created
 // on first use and the chain tip (last hash + next ID) is restored on
 // reopen.
 func Open(dir string) (*Logger, error) {
+	return OpenTimeout(dir, 2*time.Second)
+}
+
+// OpenTimeout is the explicit-timeout variant for CLI commands that
+// would otherwise stall when the dashboard holds the flock.
+func OpenTimeout(dir string, timeout time.Duration) (*Logger, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("mkdir audit dir: %w", err)
 	}
 	path := filepath.Join(dir, dbFileName)
-	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 2 * time.Second})
+	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: timeout})
 	if err != nil {
+		if errors.Is(err, bolt.ErrTimeout) {
+			return nil, ErrAuditLocked
+		}
 		return nil, fmt.Errorf("open audit.db: %w", err)
 	}
 	l := &Logger{db: db}

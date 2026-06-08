@@ -24,6 +24,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/shim"
 	"github.com/devevghenicernev-png/apigw/internal/system"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
+	"github.com/devevghenicernev-png/apigw/internal/tuning"
 )
 
 type options struct {
@@ -171,9 +172,21 @@ func run(opts *options) error {
 	}
 
 	// ----- nginx site -----
-	for _, p := range []string{nginx.SitePath, nginx.EnabledLink, nginx.SitePath + nginx.BackupExtension} {
+	// Remove the server-scope conf + its enabled-link symlink, the
+	// http-scope conf in conf.d/ (and our backup), and the stream-scope
+	// file outside conf.d/. Leaving any of these behind left the operator
+	// with stale apigw upstreams/log_formats long after uninstall.
+	for _, p := range []string{
+		nginx.SitePath, nginx.EnabledLink, nginx.SitePath + nginx.BackupExtension,
+		nginx.HTTPConfPath, nginx.HTTPConfPath + nginx.BackupExtension,
+		nginx.StreamConfPath, nginx.StreamConfPath + nginx.BackupExtension,
+	} {
 		_ = os.Remove(p)
 	}
+	// Strip any leftover apigw marker blocks from /etc/nginx/nginx.conf
+	// (tuning, stream-include). Best-effort — the next `apigw install`
+	// would re-inject them if needed.
+	_, _ = tuning.Revert()
 	// Restore the stock default site we disabled on install (BUG-6). The
 	// re-symlink covers the common case; if a real file was backed up to
 	// .apigw-prev we rename it back. Both are best-effort.

@@ -3,6 +3,7 @@
 package audit
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -33,7 +34,18 @@ func NewCmdAudit(f *cmdutil.Factory) *cobra.Command {
 }
 
 func openLogger() (*audit.Logger, error) {
-	return audit.Open(paths.StateDir())
+	// 300ms timeout: when the dashboard is running it holds the audit.db
+	// flock; mirroring the queue-lock pattern (webhook.ErrQueueLocked +
+	// 300ms timeout in doctor/status) keeps `apigw audit *` from stalling
+	// 2 s and turns the cryptic timeout into a clear "busy" message.
+	l, err := audit.OpenTimeout(paths.StateDir(), 300*time.Millisecond)
+	if err != nil {
+		if errors.Is(err, audit.ErrAuditLocked) {
+			return nil, fmt.Errorf("%w — use the /api/admin/audit endpoint via the dashboard instead", err)
+		}
+		return nil, err
+	}
+	return l, nil
 }
 
 func newCmdQuery(f *cmdutil.Factory) *cobra.Command {

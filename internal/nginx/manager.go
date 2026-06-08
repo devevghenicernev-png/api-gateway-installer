@@ -28,9 +28,14 @@ import (
 //
 // These are var, not const, because the values are os-dependent.
 var (
-	SitePath        = paths.NginxSitesAvailable() + "/apigw.conf"
-	EnabledLink     = paths.NginxSitesEnabled() + "/apigw.conf"
-	HTTPConfPath    = paths.NginxConfD() + "/apigw-http.conf"
+	SitePath    = paths.NginxSitesAvailable() + "/apigw.conf"
+	EnabledLink = paths.NginxSitesEnabled() + "/apigw.conf"
+	HTTPConfPath = paths.NginxConfD() + "/apigw-http.conf"
+	// Stream block lives OUTSIDE conf.d/ because nginx auto-includes
+	// conf.d/*.conf inside http{}, and stream{} content can't sit there.
+	// We park it next to nginx.conf and the marker-block in nginx.conf
+	// loads it from main scope.
+	StreamConfPath  = paths.NginxConfDir() + "/apigw-stream.conf"
 	BackupExtension = ".apigw-prev"
 )
 
@@ -109,6 +114,10 @@ func (m *Manager) WriteAndReload(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
 	}
+	streamBody, err := m.gen.RenderStream(cfg)
+	if err != nil {
+		return fmt.Errorf("render stream: %w", err)
+	}
 
 	// Snapshot + stage server file + http file simultaneously. If either
 	// rename fails, restore both snapshots so the live nginx state stays
@@ -135,6 +144,27 @@ func (m *Manager) WriteAndReload(cfg *config.Config) error {
 			_ = afero.WriteFile(m.fs, m.sitePath, prev, 0o640)
 		}
 		return fmt.Errorf("rename http: %w", err)
+	}
+
+	// Stream (TCP/UDP) — write the conf file when present, remove when not.
+	// nginx loads it via a `stream { include /etc/nginx/conf.d/apigw-stream.conf; }`
+	// block injected into nginx.conf by ensureStreamInclude (idempotent;
+	// removed by Uninstall + when the streams list goes back to empty).
+	if streamBody != nil && len(streamBody) > 0 {
+		if err := afero.WriteFile(m.fs, StreamConfPath, streamBody, 0o640); err != nil {
+			return fmt.Errorf("write stream: %w", err)
+		}
+		if err := ensureStreamInclude(true); err != nil {
+			return fmt.Errorf("nginx.conf stream-include: %w", err)
+		}
+	} else {
+		// No streams: remove the conf so an old apigw-stream.conf doesn't
+		// linger; strip the include from nginx.conf so empty stream{}
+		// doesn't sit in main scope.
+		_ = m.fs.Remove(StreamConfPath)
+		if err := ensureStreamInclude(false); err != nil {
+			return fmt.Errorf("nginx.conf stream-include: %w", err)
+		}
 	}
 
 	// Track whether ensureEnabled() actually created the symlink in this call

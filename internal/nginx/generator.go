@@ -564,46 +564,44 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 			Enabled:     a.Enabled,
 		}
 		entry.GRPC = a.GRPC
-		if a.JWT != nil {
+		// nginx forbids two `auth_request` directives in the same location,
+		// so we pick exactly one auth method per route. Priority order:
+		// JWT > MTLS > APIKey > HMAC > OAuth2 > Session. When more than one
+		// is configured the lower-priority methods are silently dropped at
+		// render time — the config remains intact so the operator can
+		// toggle priorities by removing the higher one.
+		hasJWT := a.JWT != nil
+		hasMTLS := a.MTLS != nil
+		hasAPIKey := a.APIKey != nil && len(a.APIKey.Keys) > 0
+		hasHMAC := a.HMAC != nil && len(a.HMAC.Keys) > 0
+		hasOAuth2 := a.OAuth2 != nil && a.OAuth2.IntrospectionURL != ""
+		hasSession := a.Session
+		switch {
+		case hasJWT:
 			entry.JWT = true
 			entry.JWTDashboardPort = cfg.Dashboard.Port
-		}
-		if a.MTLS != nil {
+		case hasMTLS:
 			entry.MTLS = true
 			entry.MTLSCAFile = a.MTLS.CAFile
 			entry.MTLSOptional = a.MTLS.Optional
-			if entry.JWTDashboardPort == 0 {
-				entry.JWTDashboardPort = cfg.Dashboard.Port
-			}
+			entry.JWTDashboardPort = cfg.Dashboard.Port
+		case hasAPIKey:
+			entry.APIKey = true
+			entry.JWTDashboardPort = cfg.Dashboard.Port
+		case hasHMAC:
+			entry.HMAC = true
+			entry.JWTDashboardPort = cfg.Dashboard.Port
+		case hasOAuth2:
+			entry.OAuth2 = true
+			entry.JWTDashboardPort = cfg.Dashboard.Port
+		case hasSession:
+			entry.Session = true
+			entry.JWTDashboardPort = cfg.Dashboard.Port
 		}
 		entry.CustomLocation = a.CustomLocation
 		entry.CustomServer = a.CustomServer
 
 		// v0.2.0 — populate the new middleware fields.
-		if a.APIKey != nil && len(a.APIKey.Keys) > 0 {
-			entry.APIKey = true
-			if entry.JWTDashboardPort == 0 {
-				entry.JWTDashboardPort = cfg.Dashboard.Port
-			}
-		}
-		if a.HMAC != nil && len(a.HMAC.Keys) > 0 {
-			entry.HMAC = true
-			if entry.JWTDashboardPort == 0 {
-				entry.JWTDashboardPort = cfg.Dashboard.Port
-			}
-		}
-		if a.Session {
-			entry.Session = true
-			if entry.JWTDashboardPort == 0 {
-				entry.JWTDashboardPort = cfg.Dashboard.Port
-			}
-		}
-		if a.OAuth2 != nil && a.OAuth2.IntrospectionURL != "" {
-			entry.OAuth2 = true
-			if entry.JWTDashboardPort == 0 {
-				entry.JWTDashboardPort = cfg.Dashboard.Port
-			}
-		}
 		if a.Mock != nil {
 			entry.Mock = true
 			if entry.JWTDashboardPort == 0 {
@@ -986,6 +984,21 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		ipFeed = cfg.Security.IPReputationFeed
 	}
 
+	// Emit the `log_format apigw_json` directive when ANY consumer needs
+	// it — either the global logging.format is json, or any per-API
+	// access_log_mode is "json". Without this gate, `apigw api log set
+	// <name> --format json` produces `access_log ... apigw_json;` in the
+	// server block but the format itself is missing in http-scope, and
+	// `nginx -t` dies with `unknown log format "apigw_json"`.
+	wantJSON := cfg.Logging.Format == "json"
+	if !wantJSON {
+		for i := range cfg.APIs {
+			if cfg.APIs[i].AccessLog == "json" {
+				wantJSON = true
+				break
+			}
+		}
+	}
 	hd := httpData{
 		Banner:           "PLACEHOLDER",
 		Upstreams:        upstreams,
@@ -993,7 +1006,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		CORSOriginMap:    corsOrigins,
 		SplitClients:     splits,
 		CacheZones:       cacheZones,
-		JSONLogFormat:    cfg.Logging.Format == "json",
+		JSONLogFormat:    wantJSON,
 		LogSampleRate:    resolveSampleRate(cfg.Logging.SamplePercent),
 		IPReputationFeed: ipFeed,
 		TLSPatternMaps:   tlsMaps,

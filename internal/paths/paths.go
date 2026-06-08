@@ -95,6 +95,13 @@ func NginxConfD() string {
 	return envOr("APIGW_NGINX_CONF_D", osDefault(LinuxNginxConfD, "etc/nginx/servers"))
 }
 
+// NginxConfDir is the directory holding nginx.conf itself — used for
+// MAIN-context files (stream{} include, tuning marker block) that can't
+// live in conf.d/ (which is included inside http{}).
+func NginxConfDir() string {
+	return envOr("APIGW_NGINX_CONF_DIR", osDefault("/etc/nginx", "etc/nginx"))
+}
+
 // SystemdUnitDir is irrelevant on macOS/Alpine — svcmgr's launchd/openrc
 // impls have their own destinations — but kept here for callers that still
 // reference "the unit directory" in messages or doctor checks.

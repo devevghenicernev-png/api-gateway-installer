@@ -37,7 +37,10 @@ ProtectControlGroups=true
 RestrictNamespaces=true
 RestrictSUIDSGID=true
 LockPersonality=true
-MemoryDenyWriteExecute=true        # Go has no JIT — safe here
+# MemoryDenyWriteExecute is safe here: Go has no JIT (don't put a comment on
+# the same line — systemd parses the value as `true        # Go has no JIT`
+# and silently ignores the directive, leaving MDWX OFF).
+MemoryDenyWriteExecute=true
 NoNewPrivileges=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service

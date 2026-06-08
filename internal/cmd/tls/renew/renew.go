@@ -22,17 +22,22 @@ type options struct {
 	force  bool
 	dryRun bool
 	asJSON bool
+	domain string // empty = all
 }
 
 func NewCmdRenew(f *cmdutil.Factory) *cobra.Command {
 	opts := &options{f: f}
 	cmd := &cobra.Command{
-		Use:   "renew",
+		Use:   "renew [domain]",
 		Short: "Renew certificates near expiry",
 		Long: "Renews any certificate within 30 days of expiry. Run by the\n" +
-			"systemd timer; safe to invoke manually anytime.",
-		Args: cobra.NoArgs,
-		RunE: func(c *cobra.Command, _ []string) error {
+			"systemd timer; safe to invoke manually anytime. Pass a domain\n" +
+			"to restrict the renewal to that one cert.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				opts.domain = args[0]
+			}
 			opts.dryRun, _ = c.Flags().GetBool("dry-run")
 			opts.asJSON, _ = c.Flags().GetBool("json")
 			return run(opts)
@@ -57,6 +62,20 @@ func run(opts *options) error {
 	})
 	if err != nil {
 		return err
+	}
+	// Filter to a single domain when the operator passed one as
+	// `apigw tls renew <domain>`. Mirrors `apigw tls status` semantics.
+	if opts.domain != "" {
+		filtered := results[:0]
+		for _, r := range results {
+			if r.Domain == opts.domain {
+				filtered = append(filtered, r)
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("no certificate registered for domain %q", opts.domain)
+		}
+		results = filtered
 	}
 
 	if opts.asJSON {

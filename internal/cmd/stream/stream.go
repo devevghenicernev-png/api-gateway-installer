@@ -12,6 +12,7 @@ import (
 
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
+	"github.com/devevghenicernev-png/apigw/internal/nginx"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
 )
 
@@ -66,6 +67,14 @@ func newAdd(f *cmdutil.Factory) *cobra.Command {
 			})
 			if err := cfg.Save(); err != nil {
 				return err
+			}
+			// Push the stream block to nginx — without this, `stream add`
+			// stores the entry but never renders /etc/nginx/conf.d/apigw-stream.conf
+			// or injects the `stream { include … }` block into nginx.conf,
+			// so the TCP/UDP proxy never actually serves anything.
+			if err := nginx.NewManager().WriteAndReload(cfg); err != nil {
+				return tui.NewError("nginx reload failed", err.Error()).
+					WithDocs("E_NGINX_RELOAD")
 			}
 			fmt.Fprintf(f.IOStreams.Out, "%s added %s stream %s on :%d → %s\n",
 				tui.Styles.Success.Render(tui.GlyphCheck), protocol, name, port, target)
@@ -133,6 +142,13 @@ func newRemove(f *cmdutil.Factory) *cobra.Command {
 			cfg.Streams = append(cfg.Streams[:idx], cfg.Streams[idx+1:]...)
 			if err := cfg.Save(); err != nil {
 				return err
+			}
+			// Push the (now possibly empty) stream block out to nginx;
+			// WriteAndReload strips apigw-stream.conf + the include line
+			// from nginx.conf when no streams remain.
+			if err := nginx.NewManager().WriteAndReload(cfg); err != nil {
+				return tui.NewError("nginx reload failed", err.Error()).
+					WithDocs("E_NGINX_RELOAD")
 			}
 			fmt.Fprintf(f.IOStreams.Out, "removed stream %s\n", args[0])
 			return nil
