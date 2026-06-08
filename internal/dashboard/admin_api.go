@@ -51,6 +51,10 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/config", s.adminConfigHandler)
 	mux.HandleFunc("/api/admin/sessions", s.adminSessionsHandler)
 	mux.HandleFunc("/api/admin/sessions/", s.adminSessionHandler)
+	mux.HandleFunc("/api/admin/streams", s.adminStreamsHandler)
+	mux.HandleFunc("/api/admin/streams/", s.adminStreamHandler)
+	mux.HandleFunc("/api/admin/consumers", s.adminConsumersHandler)
+	mux.HandleFunc("/api/admin/consumers/", s.adminConsumerHandler)
 }
 
 // ensureCSRF rejects write methods when the X-CSRF-Token header is missing
