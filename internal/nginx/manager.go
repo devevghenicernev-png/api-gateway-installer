@@ -137,14 +137,27 @@ func (m *Manager) WriteAndReload(cfg *config.Config) error {
 		return fmt.Errorf("rename http: %w", err)
 	}
 
-	// Ensure sites-enabled symlink exists BEFORE validate so `nginx -t` sees
-	// the linked file in the canonical location it would read at reload —
-	// otherwise validate can pass while the live config diverges.
-	m.ensureEnabled()
+	// Track whether ensureEnabled() actually created the symlink in this call
+	// so rollbackBoth() can remove it if validate fails. Without this, the
+	// FIRST install on a host (no .apigw-prev snapshot to restore) ends with
+	// a dangling sites-enabled/apigw.conf → sites-available/apigw.conf
+	// symlink while the target was deleted by rollback. Every subsequent
+	// `nginx -t` / reload / start then dies with "open() … failed (2)".
+	createdSymlink := m.ensureEnabled()
 
-	if err := m.validate(m.sitePath); err != nil {
-		// Validate failed → roll back BOTH files from their snapshots.
+	// validate("") runs plain `nginx -t` — it walks the real
+	// /etc/nginx/nginx.conf, picking up our file via the existing
+	// include sites-enabled/*; conf.d/* directives. Passing m.sitePath as
+	// -c instead would make nginx parse a server-block fragment as a MAIN-
+	// context file, which always fails with `"server" directive is not
+	// allowed here`. Our fragment is server-context by design.
+	if err := m.validate(""); err != nil {
+		// Roll back BOTH files; also remove the symlink we just created so
+		// stock nginx doesn't trip over a dangling include.
 		m.rollbackBoth()
+		if createdSymlink {
+			_ = os.Remove(m.enabled)
+		}
 		if m.Metrics != nil {
 			m.Metrics.IncNginxReload("validate_fail")
 		}
@@ -208,17 +221,24 @@ func (m *Manager) rollbackBoth() {
 
 // ensureEnabled creates the sites-enabled symlink if missing. Best-effort.
 // Only runs against the OS filesystem (afero.OsFs); skips for memory fs.
-func (m *Manager) ensureEnabled() {
+//
+// Returns true ONLY when this call actually created the symlink (so the
+// caller can roll it back if a subsequent validate fails). Returns false
+// when the symlink already existed or when running on a non-OS fs.
+func (m *Manager) ensureEnabled() bool {
 	osFs, ok := m.fs.(*afero.OsFs)
 	_ = osFs
 	if !ok {
-		return
+		return false
 	}
 	if _, err := os.Lstat(m.enabled); err == nil {
-		return
+		return false
 	}
 	_ = os.MkdirAll(filepath.Dir(m.enabled), 0o755)
-	_ = os.Symlink(m.sitePath, m.enabled)
+	if err := os.Symlink(m.sitePath, m.enabled); err != nil {
+		return false
+	}
+	return true
 }
 
 // defaultReload triggers an nginx reload. Tries `nginx -s reload` first
