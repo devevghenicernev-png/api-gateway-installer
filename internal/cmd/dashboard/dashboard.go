@@ -4,6 +4,7 @@ package dashboard
 import (
 	"github.com/spf13/cobra"
 
+	dashGrafana "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/grafana"
 	dashOpen "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/open"
 	dashServe "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/serve"
 	dashStart "github.com/devevghenicernev-png/apigw/internal/cmd/dashboard/start"
@@ -30,5 +31,6 @@ func NewCmdDashboard(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(dashStatus.NewCmdStatus(f))
 	cmd.AddCommand(dashURL.NewCmdURL(f))
 	cmd.AddCommand(dashOpen.NewCmdOpen(f))
+	cmd.AddCommand(dashGrafana.NewCmdGrafana(f))
 	return cmd
 }

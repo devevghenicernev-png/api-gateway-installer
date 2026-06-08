@@ -22,6 +22,9 @@ var openrcFS embed.FS
 //go:embed all:dashboard
 var dashboardFS embed.FS
 
+//go:embed grafana/*.json
+var grafanaFS embed.FS
+
 // Nginx returns the embedded nginx-template filesystem.
 func Nginx() embed.FS { return nginxFS }
 
@@ -39,3 +42,7 @@ func OpenRC() embed.FS { return openrcFS }
 // Files live under dashboard/ in the embedded FS so the dashboard server can
 // `fs.Sub(Dashboard(), "dashboard")` to strip the prefix.
 func Dashboard() embed.FS { return dashboardFS }
+
+// Grafana returns the embedded Grafana dashboard JSON files. Used by
+// the `apigw dashboard grafana` command to print importable JSON.
+func Grafana() embed.FS { return grafanaFS }
