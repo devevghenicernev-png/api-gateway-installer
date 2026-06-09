@@ -19,7 +19,7 @@ import (
 // memory — but we live under /var/lib/apigw/certs/, not /etc/letsencrypt/.
 // We do NOT mirror certbot's archive/live symlink layout.
 func CertPaths(domain string) (fullchain, privkey, meta string) {
-	dir := filepath.Join(CertDir, domain)
+	dir := filepath.Join(CertDir(), domain)
 	return filepath.Join(dir, "fullchain.pem"),
 		filepath.Join(dir, "privkey.pem"),
 		filepath.Join(dir, "meta.json")
@@ -165,7 +165,7 @@ func LoadCertInfo(domain string) (CertInfo, error) {
 
 // ListCerts returns metadata for every domain with a cert directory on disk.
 func ListCerts() ([]CertInfo, error) {
-	entries, err := os.ReadDir(CertDir)
+	entries, err := os.ReadDir(CertDir())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -189,7 +189,7 @@ func ListCerts() ([]CertInfo, error) {
 // RemoveCert deletes the per-domain directory. Used by `apigw tls disable`
 // when the user explicitly opts out.
 func RemoveCert(domain string) error {
-	dir := filepath.Join(CertDir, domain)
+	dir := filepath.Join(CertDir(), domain)
 	return os.RemoveAll(dir)
 }
 

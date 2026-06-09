@@ -145,7 +145,7 @@ func isSSHURL(url string) bool {
 }
 
 func loadDeployKey() ([]byte, error) {
-	b, err := os.ReadFile(SSHKeyPath)
+	b, err := os.ReadFile(SSHKeyPath())
 	if err != nil {
 		return nil, err
 	}

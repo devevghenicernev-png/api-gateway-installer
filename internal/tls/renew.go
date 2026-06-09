@@ -37,6 +37,11 @@ type RenewOptions struct {
 	// DuckDNSToken is needed if any cert uses StrategyDuckDNS. Pulled from
 	// config.TLS.DuckDNSToken in the calling command.
 	DuckDNSToken string
+
+	// DNSPropagationTimeout overrides the library default (120s) for DNS-01
+	// challenges. Pulled from config.TLS.DNSPropagationTimeoutSeconds. Zero
+	// keeps the default.
+	DNSPropagationTimeout time.Duration
 }
 
 // RenewDomain forces a renewal of a single named domain and reloads
@@ -99,12 +104,13 @@ func RenewAll(opts RenewOptions) ([]RenewResult, error) {
 		}
 
 		req := ObtainRequest{
-			Strategy:     ci.Strategy,
-			Domains:      []string{ci.Domain},
-			Email:        opts.Email,
-			Staging:      opts.Staging,
-			DuckDNSToken: opts.DuckDNSToken,
-			CommonName:   ci.Domain, // for self-signed
+			Strategy:              ci.Strategy,
+			Domains:               []string{ci.Domain},
+			Email:                 opts.Email,
+			Staging:               opts.Staging,
+			DuckDNSToken:          opts.DuckDNSToken,
+			DNSPropagationTimeout: opts.DNSPropagationTimeout,
+			CommonName:            ci.Domain, // for self-signed
 		}
 		if err := Obtain(req, true); err != nil {
 			r.Error = err

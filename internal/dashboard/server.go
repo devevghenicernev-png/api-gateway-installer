@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/events"
 	"github.com/devevghenicernev-png/apigw/internal/metrics"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/rbac"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
@@ -38,12 +40,16 @@ import (
 
 // DefaultOCSPCachePath is where the dashboard opens its OCSP cache
 // when Security.StateDir is unset. Mirrors audit.db / approvals.db /
-// jobs.db locations.
-const DefaultOCSPCachePath = "/var/lib/apigw/ocsp.db"
+// jobs.db locations. Honors APIGW_STATE_DIR; default /var/lib/apigw/ocsp.db.
+func DefaultOCSPCachePath() string {
+	return filepath.Join(paths.StateDir(), "ocsp.db")
+}
 
-// DefaultSessionsPath mirrors DefaultOCSPCachePath for the session
-// store.
-const DefaultSessionsPath = "/var/lib/apigw/sessions.db"
+// DefaultSessionsPath mirrors DefaultOCSPCachePath for the session store.
+// Honors APIGW_STATE_DIR; default /var/lib/apigw/sessions.db.
+func DefaultSessionsPath() string {
+	return filepath.Join(paths.StateDir(), "sessions.db")
+}
 
 // Server bundles the hub + HTTP mux + dependencies. One per process.
 type Server struct {
@@ -149,7 +155,7 @@ func ocspCachePath(cfg *config.Config) string {
 	if cfg != nil && cfg.Security.StateDir != "" {
 		return cfg.Security.StateDir + "/ocsp.db"
 	}
-	return DefaultOCSPCachePath
+	return DefaultOCSPCachePath()
 }
 
 // ensureOCSPCache opens the bbolt cache on first use; subsequent calls
@@ -172,7 +178,7 @@ func sessionsPath(cfg *config.Config) string {
 	if cfg != nil && cfg.Security.StateDir != "" {
 		return cfg.Security.StateDir + "/sessions.db"
 	}
-	return DefaultSessionsPath
+	return DefaultSessionsPath()
 }
 
 // ensureSessionStore opens the bbolt-backed session store on first
@@ -232,8 +238,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/events", s.sseWithCounter())
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/logs/", s.handleLogs)
-	mux.HandleFunc("/api/admin/sso/login", s.handleSSOLogin)
-	mux.HandleFunc("/api/admin/sso/callback", s.handleSSOCallback)
+	registerAdmin(mux, "/api/admin/sso/login", s.handleSSOLogin)
+	registerAdmin(mux, "/api/admin/sso/callback", s.handleSSOCallback)
 	mux.HandleFunc("/auth/jwt/", s.handleJWTAuth)
 	mux.HandleFunc("/auth/mtls/", s.handleMTLSAuth)
 	mux.HandleFunc("/auth/apikey/", s.handleAPIKeyAuth)
@@ -254,12 +260,34 @@ func (s *Server) Routes(mux *http.ServeMux) {
 // securityRoutes mounts the operator-facing audit/approvals/csrf endpoints.
 // All require RBAC permissions when Security is configured.
 func (s *Server) securityRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/admin/csrf", s.handleCSRF)
-	mux.HandleFunc("/api/admin/audit", s.handleAuditQuery)
-	mux.HandleFunc("/api/admin/approvals", s.handleApprovalsList)
-	mux.HandleFunc("/api/admin/approvals/", s.handleApprovalOne)
-	mux.HandleFunc("/api/admin/tenants", s.handleTenants)
-	mux.HandleFunc("/api/admin/alerts/test", s.handleAlertTest)
+	registerAdmin(mux, "/api/admin/csrf", s.handleCSRF)
+	registerAdmin(mux, "/api/admin/audit", s.handleAuditQuery)
+	registerAdmin(mux, "/api/admin/approvals", s.handleApprovalsList)
+	registerAdmin(mux, "/api/admin/approvals/", s.handleApprovalOne)
+	registerAdmin(mux, "/api/admin/tenants", s.handleTenants)
+	registerAdmin(mux, "/api/admin/alerts/test", s.handleAlertTest)
+}
+
+// registerAdmin mounts handler at both /api/admin/<rest> AND
+// /api/v1/admin/<rest>. The /api/v1/ alias gives external API consumers
+// a stable, versioned surface to pin to BEFORE the first paying customer
+// locks the unversioned path. Existing dashboard JS and pre-v1 CLI
+// clients still work because /api/admin/* keeps responding.
+//
+// path must start with "/api/admin" exactly; anything else panics at
+// startup (which is what we want — typos in route registration should
+// not silently dual-register on a wrong prefix).
+//
+// Deprecation: once /api/v1/admin/* has been the documented external
+// path for two minor releases, /api/admin/* drops to internal-only and
+// the dashboard JS migrates over.
+func registerAdmin(mux *http.ServeMux, path string, h http.HandlerFunc) {
+	const legacyPrefix = "/api/admin"
+	if !strings.HasPrefix(path, legacyPrefix) {
+		panic("registerAdmin: path must start with /api/admin (got " + path + ")")
+	}
+	mux.HandleFunc(path, h)
+	mux.HandleFunc("/api/v1/admin"+path[len(legacyPrefix):], h)
 }
 
 // getOrBuildJWTVerifier returns a Verifier for the given api+config.

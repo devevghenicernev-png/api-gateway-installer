@@ -34,24 +34,43 @@ var streamNginxConfPath = func() string {
 	return "/etc/nginx/nginx.conf"
 }
 
+// currentStreamInclude reports whether nginx.conf currently has the
+// apigw-managed stream{} marker block. Returns (false, nil) when nginx.conf
+// is absent. Used by Manager.WriteAndReload to snapshot the prior state
+// before mutating it, so rollback can flip it back on validate failure.
+func currentStreamInclude() (bool, error) {
+	path := streamNginxConfPath()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return streamBlockRE.Match(body), nil
+}
+
 // ensureStreamInclude makes the live `nginx.conf` either contain or
 // lack the apigw-stream{} include block. `want=true` adds it (idempotent),
 // `want=false` removes it (idempotent). On first add, snapshots
 // nginx.conf to <path>.apigw-prev.
-func ensureStreamInclude(want bool) error {
+//
+// Returns (changed, err): changed=true iff nginx.conf was actually mutated
+// this call. Callers use that to roll back when a subsequent validate fails.
+func ensureStreamInclude(want bool) (bool, error) {
 	path := streamNginxConfPath()
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No nginx.conf to update — caller (likely a unit test or
 			// custom layout) handles main-scope includes itself.
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("read %s: %w", path, err)
+		return false, fmt.Errorf("read %s: %w", path, err)
 	}
 	has := streamBlockRE.Match(body)
 	if want == has {
-		return nil
+		return false, nil
 	}
 	var out []byte
 	if want {
@@ -77,10 +96,22 @@ func ensureStreamInclude(want bool) error {
 	bak := path + BackupExtension
 	if _, statErr := os.Stat(bak); os.IsNotExist(statErr) {
 		if werr := os.WriteFile(bak, body, 0o644); werr != nil {
-			return fmt.Errorf("write backup %s: %w", bak, werr)
+			return false, fmt.Errorf("write backup %s: %w", bak, werr)
 		}
 	}
-	return streamWriteAtomic(path, out)
+	if werr := streamWriteAtomic(path, out); werr != nil {
+		return false, werr
+	}
+	return true, nil
+}
+
+// revertStreamInclude restores nginx.conf to the OPPOSITE state of `prevWant`.
+// Used by Manager.WriteAndReload when validate fails AFTER ensureStreamInclude
+// already mutated nginx.conf — without this we'd leave a stream-include
+// pointing at a deleted apigw-stream.conf (or vice versa).
+func revertStreamInclude(prevWant bool) error {
+	_, err := ensureStreamInclude(prevWant)
+	return err
 }
 
 func streamWriteAtomic(path string, body []byte) error {

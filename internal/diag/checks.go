@@ -19,6 +19,7 @@ import (
 	apideploy "github.com/devevghenicernev-png/apigw/internal/deploy"
 	"github.com/devevghenicernev-png/apigw/internal/fips"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/system/svcmgr"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
@@ -318,9 +319,10 @@ func checkTLSExpiry(_ context.Context) Result {
 }
 
 func checkConfigPerms(_ context.Context) Result {
-	st, err := os.Stat("/etc/apigw")
+	dir := paths.ConfigDir()
+	st, err := os.Stat(dir)
 	if errors.Is(err, os.ErrNotExist) {
-		return Result{Level: LevelInfo, Name: "config-perms", Message: "/etc/apigw not present yet"}
+		return Result{Level: LevelInfo, Name: "config-perms", Message: dir + " not present yet"}
 	}
 	if err != nil {
 		return Result{Level: LevelWarn, Name: "config-perms", Message: err.Error()}
@@ -331,8 +333,8 @@ func checkConfigPerms(_ context.Context) Result {
 		return Result{
 			Level:   LevelFail,
 			Name:    "config-perms",
-			Message: fmt.Sprintf("/etc/apigw is world-writable (%04o)", mode),
-			Fix:     "sudo chmod 0755 /etc/apigw",
+			Message: fmt.Sprintf("%s is world-writable (%04o)", dir, mode),
+			Fix:     "sudo chmod 0755 " + dir,
 		}
 	}
 	return Result{Level: LevelOK, Name: "config-perms", Message: fmt.Sprintf("mode %04o", mode)}
@@ -374,7 +376,7 @@ func sshDeployKeyCheck(cfg *config.Config) func(context.Context) Result {
 		if !needsKey {
 			return Result{Level: LevelInfo, Name: "ssh-deploy-key", Message: "no SSH-clone deploys"}
 		}
-		if _, err := os.Stat(apideploy.SSHKeyPath); err != nil {
+		if _, err := os.Stat(apideploy.SSHKeyPath()); err != nil {
 			return Result{
 				Level:   LevelFail,
 				Name:    "ssh-deploy-key",
@@ -382,7 +384,7 @@ func sshDeployKeyCheck(cfg *config.Config) func(context.Context) Result {
 				Fix:     "apigw deploy ssh-key",
 			}
 		}
-		return Result{Level: LevelOK, Name: "ssh-deploy-key", Message: apideploy.SSHKeyPath}
+		return Result{Level: LevelOK, Name: "ssh-deploy-key", Message: apideploy.SSHKeyPath()}
 	}
 }
 
@@ -445,9 +447,9 @@ func queueDepthCheck(_ context.Context) Result {
 // Pure stdlib via syscall.Statfs would force a platform import — instead we
 // shell to `df -P -k` which works on every Linux + macOS distro we target.
 func diskFreeCheck(_ context.Context) Result {
-	dir := "/var/lib/apigw"
+	dir := paths.StateDir()
 	if _, err := os.Stat(dir); err != nil {
-		dir = filepath.Dir(dir) // /var/lib
+		dir = filepath.Dir(dir) // parent (e.g. /var/lib)
 	}
 	cmd := exec.Command("df", "-P", "-k", dir)
 	var out bytes.Buffer

@@ -15,7 +15,12 @@
 // newer than the binary's, and verifies hashes as it goes.
 package backup
 
-import "time"
+import (
+	"path/filepath"
+	"time"
+
+	"github.com/devevghenicernev-png/apigw/internal/paths"
+)
 
 // SchemaVersion is the on-disk manifest schema. Bump when the layout of
 // what we pack changes incompatibly. Restore validates this.
@@ -46,16 +51,20 @@ type FileSpec struct {
 	SHA256 string `json:"sha256"`
 }
 
-// roots is the canonical set of source paths backed up. Defined once so
-// pack + describe + the doctor check agree on what's inside.
-var roots = []string{
-	"/etc/apigw",
-	"/var/lib/apigw/acme",
-	"/var/lib/apigw/certs",
+// Roots returns the canonical set of source paths backed up. Resolved
+// at call time so APIGW_STATE_DIR / APIGW_CONFIG_DIR overrides are honored.
+func Roots() []string {
+	return []string{
+		paths.ConfigDir(),
+		filepath.Join(paths.StateDir(), "acme"),
+		filepath.Join(paths.StateDir(), "certs"),
+	}
 }
 
-// optionalRoots are only packed when the caller opts in. jobs.db is here
+// OptionalRoots are only packed when the caller opts in. jobs.db is here
 // because restoring it onto a fresh host could re-trigger old deploys.
-var optionalRoots = []string{
-	"/var/lib/apigw/jobs.db",
+func OptionalRoots() []string {
+	return []string{
+		filepath.Join(paths.StateDir(), "jobs.db"),
+	}
 }

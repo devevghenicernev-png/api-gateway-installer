@@ -50,6 +50,16 @@ vuln:
 snapshot:
 	goreleaser release --snapshot --clean
 
+.PHONY: docker-image
+# Build the distribution image for the apigw CLI (not the runtime gateway).
+# See top of Dockerfile for what this image is and isn't.
+docker-image:
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) \
+		-t apigw:$(VERSION) -t apigw:latest .
+
 .PHONY: e2e e2e-image
 # Build the apigw binary, build the e2e Docker image(s), and run scenarios.
 # Override DISTRO=debian12|ubuntu22|ubuntu24 to limit to one.

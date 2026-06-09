@@ -7,6 +7,7 @@ package renew
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -54,11 +55,12 @@ func run(opts *options) error {
 	}
 
 	results, err := apitls.RenewAll(apitls.RenewOptions{
-		Force:        opts.force,
-		DryRun:       opts.dryRun,
-		Email:        cfg.TLS.Email,
-		Staging:      cfg.TLS.Staging,
-		DuckDNSToken: cfg.TLS.DuckDNSToken,
+		Force:                 opts.force,
+		DryRun:                opts.dryRun,
+		Email:                 cfg.TLS.Email,
+		Staging:               cfg.TLS.Staging,
+		DuckDNSToken:          cfg.TLS.DuckDNSToken,
+		DNSPropagationTimeout: time.Duration(cfg.TLS.DNSPropagationTimeoutSeconds) * time.Second,
 	})
 	if err != nil {
 		return err

@@ -118,13 +118,21 @@ func runBuild(ctx context.Context, cwd, cmdStr string, port int, sink io.Writer)
 	// Wrap whatever sink we use with a secret-scrubber so anything echoed by
 	// the build (npm install dumping `process.env`, a shell `set -x`, etc.)
 	// has its credential-looking values masked before reaching journald/SSE.
+	//
+	// When the caller didn't provide a sink (e.g. a programmatic caller
+	// hooked deploy.Apply with Logsink unset), tee the build output to
+	// os.Stderr live AND retain a tail buffer so the caller still has
+	// something to print on error. Previously we only buffered + dumped
+	// the last 40 lines on failure, which meant 0 live visibility — and
+	// `npm install` jobs that hang for minutes looked like the deploy
+	// was silently stuck.
 	if sink != nil {
 		scrub := newSecretScrubber(sink)
 		cmd.Stdout = scrub
 		cmd.Stderr = scrub
 	} else {
 		var buf bytes.Buffer
-		scrub := newSecretScrubber(&buf)
+		scrub := newSecretScrubber(io.MultiWriter(os.Stderr, &buf))
 		cmd.Stdout = scrub
 		cmd.Stderr = scrub
 		defer func() {

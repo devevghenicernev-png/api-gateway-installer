@@ -3,10 +3,12 @@ package nginx
 import (
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/devevghenicernev-png/apigw/internal/config"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 )
 
 // applyMiddleware copies all middleware fields off a config.API onto the
@@ -105,7 +107,7 @@ func applyMiddleware(
 		}
 		file := ba.File
 		if file == "" {
-			file = "/etc/apigw/htpasswd." + a.Name
+			file = filepath.Join(paths.ConfigDir(), "htpasswd."+a.Name)
 		}
 		out.BasicAuthRealm = ba.Realm
 		out.BasicAuthFile = file

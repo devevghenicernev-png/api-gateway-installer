@@ -8,7 +8,12 @@
 // Why lego (not certbot, not CertMagic) is documented in ARCHITECTURE.md.
 package tls
 
-import "time"
+import (
+	"path/filepath"
+	"time"
+
+	"github.com/devevghenicernev-png/apigw/internal/paths"
+)
 
 // Strategy enumerates how a certificate is obtained.
 //
@@ -54,6 +59,11 @@ type ObtainRequest struct {
 	// DuckDNS-only.
 	DuckDNSToken string
 
+	// DNSPropagationTimeout overrides the lego default (120s) for DNS-01
+	// solvers. Zero keeps the default. Bump on slow registrars / when LE
+	// rate-limit retries push the verification window past 2 min.
+	DNSPropagationTimeout time.Duration
+
 	// Self-signed-only.
 	CommonName string
 	ValidFor   time.Duration // default 365d
@@ -73,24 +83,21 @@ type CertInfo struct {
 	Fingerprint string    `json:"fingerprint_sha256"`
 }
 
-// Default paths. Match the architecture brief (§ "Storage layout").
-const (
-	// BaseDir is the root for apigw's TLS state.
-	BaseDir = "/var/lib/apigw"
+// RenewalThreshold is "how close to expiry before we re-issue".
+//
+// 30 days is the industry default (certbot uses the same). Tighter risks
+// flapping on transient ACME outages; looser leaves no buffer for failure.
+const RenewalThreshold = 30 * 24 * time.Hour
 
-	// AccountDir holds the long-lived ACME account key + registration.
-	AccountDir = BaseDir + "/acme"
+// BaseDir returns the root for apigw's TLS state (paths.StateDir()).
+func BaseDir() string { return paths.StateDir() }
 
-	// CertDir is the parent of per-domain subdirectories.
-	CertDir = BaseDir + "/certs"
+// AccountDir holds the long-lived ACME account key + registration.
+func AccountDir() string { return filepath.Join(BaseDir(), "acme") }
 
-	// AcmeWebrootDir is what nginx serves /.well-known/acme-challenge/ from
-	// during HTTP-01 renewals. Created by `apigw tls enable`.
-	AcmeWebrootDir = BaseDir + "/acme-webroot"
+// CertDir is the parent of per-domain subdirectories.
+func CertDir() string { return filepath.Join(BaseDir(), "certs") }
 
-	// RenewalThreshold is "how close to expiry before we re-issue".
-	//
-	// 30 days is the industry default (certbot uses the same). Tighter risks
-	// flapping on transient ACME outages; looser leaves no buffer for failure.
-	RenewalThreshold = 30 * 24 * time.Hour
-)
+// AcmeWebrootDir is what nginx serves /.well-known/acme-challenge/ from
+// during HTTP-01 renewals. Created by `apigw tls enable`.
+func AcmeWebrootDir() string { return filepath.Join(BaseDir(), "acme-webroot") }

@@ -28,6 +28,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/audit"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/deploy"
+	"github.com/devevghenicernev-png/apigw/internal/nginx"
 	"github.com/devevghenicernev-png/apigw/internal/rbac"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
@@ -37,25 +38,28 @@ import (
 // endpoints (csrf, audit, approvals, tenants, alerts) are registered by
 // securityRoutes() in server.go to keep this file focused on the config
 // mutation surface.
+//
+// Every route is mounted under BOTH /api/admin/* and /api/v1/admin/*
+// via registerAdmin() — see its docstring in server.go.
 func (s *Server) adminRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/admin/apis", s.adminAPIsHandler)
-	mux.HandleFunc("/api/admin/apis/", s.adminAPIHandler)
-	mux.HandleFunc("/api/admin/deploys", s.adminDeploysHandler)
-	mux.HandleFunc("/api/admin/deploys/", s.adminDeployHandler)
-	mux.HandleFunc("/api/admin/deploy-run/", s.adminDeployRunHandler)
-	mux.HandleFunc("/api/admin/deploy-rollback/", s.adminDeployRollbackHandler)
-	mux.HandleFunc("/api/admin/tls-renew/", s.adminTLSRenewHandler)
-	mux.HandleFunc("/api/admin/webhook-rotate/", s.adminWebhookRotateHandler)
-	mux.HandleFunc("/api/admin/cache-purge/", s.adminCachePurgeHandler)
-	mux.HandleFunc("/api/admin/tls", s.adminTLSHandler)
-	mux.HandleFunc("/api/admin/config", s.adminConfigHandler)
-	mux.HandleFunc("/api/admin/sessions", s.adminSessionsHandler)
-	mux.HandleFunc("/api/admin/sessions/", s.adminSessionHandler)
-	mux.HandleFunc("/api/admin/streams", s.adminStreamsHandler)
-	mux.HandleFunc("/api/admin/streams/", s.adminStreamHandler)
-	mux.HandleFunc("/api/admin/consumers", s.adminConsumersHandler)
-	mux.HandleFunc("/api/admin/consumers/", s.adminConsumerHandler)
-	mux.HandleFunc("/api/admin/gitops", s.adminGitOpsHandler)
+	registerAdmin(mux, "/api/admin/apis", s.adminAPIsHandler)
+	registerAdmin(mux, "/api/admin/apis/", s.adminAPIHandler)
+	registerAdmin(mux, "/api/admin/deploys", s.adminDeploysHandler)
+	registerAdmin(mux, "/api/admin/deploys/", s.adminDeployHandler)
+	registerAdmin(mux, "/api/admin/deploy-run/", s.adminDeployRunHandler)
+	registerAdmin(mux, "/api/admin/deploy-rollback/", s.adminDeployRollbackHandler)
+	registerAdmin(mux, "/api/admin/tls-renew/", s.adminTLSRenewHandler)
+	registerAdmin(mux, "/api/admin/webhook-rotate/", s.adminWebhookRotateHandler)
+	registerAdmin(mux, "/api/admin/cache-purge/", s.adminCachePurgeHandler)
+	registerAdmin(mux, "/api/admin/tls", s.adminTLSHandler)
+	registerAdmin(mux, "/api/admin/config", s.adminConfigHandler)
+	registerAdmin(mux, "/api/admin/sessions", s.adminSessionsHandler)
+	registerAdmin(mux, "/api/admin/sessions/", s.adminSessionHandler)
+	registerAdmin(mux, "/api/admin/streams", s.adminStreamsHandler)
+	registerAdmin(mux, "/api/admin/streams/", s.adminStreamHandler)
+	registerAdmin(mux, "/api/admin/consumers", s.adminConsumersHandler)
+	registerAdmin(mux, "/api/admin/consumers/", s.adminConsumerHandler)
+	registerAdmin(mux, "/api/admin/gitops", s.adminGitOpsHandler)
 }
 
 // ensureCSRF rejects write methods when the X-CSRF-Token header is missing
@@ -778,6 +782,19 @@ func (s *Server) adminTLSRenewHandler(w http.ResponseWriter, r *http.Request) {
 				if s.Sec != nil {
 					s.Sec.FireAlert("cert.renew.failed", "warning",
 						"TLS renew failed: "+domain, err.Error(), "cert/"+domain)
+				}
+				return
+			}
+			// Reload nginx so the freshly-issued cert is actually served.
+			// Without this, fullchain.pem is updated on disk but nginx keeps
+			// serving the old cert from memory until something else triggers
+			// a reload (the CLI `apigw tls renew` does this, the dashboard
+			// button used to skip it).
+			if err := nginx.NewManager().Reload(); err != nil {
+				s.Logger.Warn("nginx reload after renew", slog.String("domain", domain), slog.String("err", err.Error()))
+				if s.Sec != nil {
+					s.Sec.FireAlert("cert.renew.reload_failed", "warning",
+						"nginx reload failed after TLS renew: "+domain, err.Error(), "cert/"+domain)
 				}
 				return
 			}

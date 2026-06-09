@@ -97,7 +97,7 @@ func run(opts *options) error {
 		Add("Strategy", string(strategy)).
 		Add("Domains", strings.Join(req.Domains, ", ")).
 		Add("Email", emptyDash(req.Email)).
-		Add("Storage", apitls.CertDir+"/<domain>/").
+		Add("Storage", apitls.CertDir()+"/<domain>/").
 		Add("Auto-renew", autoRenewLabel(opts.noTimer))
 	if strategy == apitls.StrategyLetsEncrypt && opts.Staging {
 		plan.Add("CA", "staging (test-only certs, not browser-trusted)")

@@ -7,6 +7,9 @@ package setup
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -90,14 +93,76 @@ func run(f *cmdutil.Factory, name string, rotate bool) error {
 	return nil
 }
 
+// publicHost picks the best hostname to print in the GitHub webhook setup
+// instructions. Preference order:
+//
+//  1. APIGW_PUBLIC_HOST env (operator override — wins over everything).
+//  2. First TLS domain (Let's Encrypt / DuckDNS issued — must already
+//     resolve, otherwise the cert wouldn't have been issued).
+//  3. cfg.Listen.ServerName when not the catch-all "_".
+//  4. The hostname's first non-loopback routable IP — when ServerName="_"
+//     (any-address) we still want a URL the operator can paste WITHOUT
+//     editing. Better a bare IP than the literal "<your-host>" string
+//     that broke GitHub deliveries when copied verbatim.
+//  5. os.Hostname() — last resort before the placeholder.
 func publicHost(cfg *config.Config) string {
+	if v := strings.TrimSpace(os.Getenv("APIGW_PUBLIC_HOST")); v != "" {
+		return v
+	}
 	if len(cfg.TLS.Domains) > 0 {
 		return cfg.TLS.Domains[0]
 	}
 	if cfg.Listen.ServerName != "" && cfg.Listen.ServerName != "_" {
 		return cfg.Listen.ServerName
 	}
+	if ip := firstRoutableIP(); ip != "" {
+		return ip
+	}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
 	return "<your-host>"
+}
+
+// firstRoutableIP returns the first non-loopback, non-link-local IP from
+// any UP interface. Empty string on no candidate. IPv4 wins over IPv6 so
+// the printed URL looks familiar to the operator.
+func firstRoutableIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	var v4, v6 string
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil && v4 == "" {
+				v4 = ip4.String()
+			} else if ip.To4() == nil && v6 == "" {
+				v6 = "[" + ip.String() + "]"
+			}
+		}
+	}
+	if v4 != "" {
+		return v4
+	}
+	return v6
 }
 
 func boolLabel(b bool, yes, no string) string {

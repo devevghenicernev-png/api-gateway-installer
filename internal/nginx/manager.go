@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/spf13/afero"
@@ -49,6 +50,13 @@ type Manager struct {
 	enabled   string
 	reloadCmd func() error // injectable for tests; default systemctl reload nginx
 	validate  func(path string) error
+
+	// mu serializes WriteAndReload / Validate / Reload across goroutines so
+	// two callers (e.g. `apigw api add` and the `apigw tls renew` timer)
+	// don't tear each other's snapshot+rename+validate sequences. Stays a
+	// per-Manager mutex (NOT process-wide) so dashboard + cli still race
+	// at the syscall level — but inside one process all writes serialize.
+	mu sync.Mutex
 
 	// Metrics, when non-nil, receives a result-labeled increment on every
 	// WriteAndReload call ("ok" | "validate_fail" | "rollback").
@@ -94,11 +102,17 @@ func (m *Manager) Render(cfg *config.Config) (serverBytes, httpBytes []byte, err
 // Validate runs `nginx -t` against the current on-disk config. Does NOT
 // re-render. Use WriteAndReload to apply a new config.
 func (m *Manager) Validate() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.validate("")
 }
 
 // Reload sends SIGHUP via systemctl. Idempotent; safe to call repeatedly.
-func (m *Manager) Reload() error { return m.reloadCmd() }
+func (m *Manager) Reload() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reloadCmd()
+}
 
 // WriteAndReload is the atomic apply: render → tmp → validate → rename →
 // reload. On any failure the previous file is restored.
@@ -110,6 +124,9 @@ func (m *Manager) Reload() error { return m.reloadCmd() }
 //  4. nginx -t — if it fails, restore <path>.apigw-prev → <path> and return.
 //  5. systemctl reload nginx.
 func (m *Manager) WriteAndReload(cfg *config.Config) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	serverBody, httpBody, err := m.gen.Render(cfg)
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
@@ -118,6 +135,10 @@ func (m *Manager) WriteAndReload(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("render stream: %w", err)
 	}
+
+	// Snapshot stream-include state BEFORE we mutate it, so a validate
+	// failure later can flip nginx.conf back to its prior shape.
+	prevStreamWant, _ := currentStreamInclude()
 
 	// Snapshot + stage server file + http file simultaneously. If either
 	// rename fails, restore both snapshots so the live nginx state stays
@@ -150,21 +171,26 @@ func (m *Manager) WriteAndReload(cfg *config.Config) error {
 	// nginx loads it via a `stream { include /etc/nginx/conf.d/apigw-stream.conf; }`
 	// block injected into nginx.conf by ensureStreamInclude (idempotent;
 	// removed by Uninstall + when the streams list goes back to empty).
+	streamIncludeChanged := false
 	if len(streamBody) > 0 {
 		if err := afero.WriteFile(m.fs, StreamConfPath, streamBody, 0o640); err != nil {
 			return fmt.Errorf("write stream: %w", err)
 		}
-		if err := ensureStreamInclude(true); err != nil {
+		changed, err := ensureStreamInclude(true)
+		if err != nil {
 			return fmt.Errorf("nginx.conf stream-include: %w", err)
 		}
+		streamIncludeChanged = changed
 	} else {
 		// No streams: remove the conf so an old apigw-stream.conf doesn't
 		// linger; strip the include from nginx.conf so empty stream{}
 		// doesn't sit in main scope.
 		_ = m.fs.Remove(StreamConfPath)
-		if err := ensureStreamInclude(false); err != nil {
+		changed, err := ensureStreamInclude(false)
+		if err != nil {
 			return fmt.Errorf("nginx.conf stream-include: %w", err)
 		}
+		streamIncludeChanged = changed
 	}
 
 	// Track whether ensureEnabled() actually created the symlink in this call
@@ -183,8 +209,14 @@ func (m *Manager) WriteAndReload(cfg *config.Config) error {
 	// allowed here`. Our fragment is server-context by design.
 	if err := m.validate(""); err != nil {
 		// Roll back BOTH files; also remove the symlink we just created so
-		// stock nginx doesn't trip over a dangling include.
+		// stock nginx doesn't trip over a dangling include. If this call
+		// flipped nginx.conf's stream-include, revert that too — otherwise
+		// nginx.conf is left pointing at a (possibly deleted) apigw-stream.conf
+		// and the next `nginx -t` / reload fails with "open() … failed (2)".
 		m.rollbackBoth()
+		if streamIncludeChanged {
+			_ = revertStreamInclude(prevStreamWant)
+		}
 		if createdSymlink {
 			_ = os.Remove(m.enabled)
 		}

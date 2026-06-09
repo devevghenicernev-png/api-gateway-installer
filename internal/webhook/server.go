@@ -227,7 +227,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret, err := LoadSecret(deploy)
+	secrets, err := LoadValidSecrets(deploy)
 	if err != nil {
 		// Don't leak whether the deploy exists or just lacks a secret.
 		http.NotFound(w, r)
@@ -254,7 +254,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if !VerifySignature([]byte(secret), body, sig) {
+	if !verifyAny(secrets, body, sig) {
 		s.mismatched.Add(1)
 		if s.Metrics != nil {
 			s.Metrics.IncWebhookHMACFails()

@@ -12,6 +12,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
 )
 
@@ -83,7 +84,7 @@ func run(opts *options) error {
 	if api := cfg.FindAPI(opts.name); api != nil && api.BasicAuth != nil {
 		basicAuthFile = api.BasicAuth.File
 		if basicAuthFile == "" {
-			basicAuthFile = filepath.Join("/etc/apigw", "htpasswd."+opts.name)
+			basicAuthFile = filepath.Join(paths.ConfigDir(), "htpasswd."+opts.name)
 		}
 	}
 

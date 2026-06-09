@@ -64,6 +64,7 @@ func runOne(ctx context.Context, f *cmdutil.Factory, name string, force bool) er
 		RuntimeHint: d.Runtime,
 		Build:       d.Build,
 		Start:       d.Start,
+		HealthPath:  d.HealthPath,
 		Logsink:     f.IOStreams.Out,
 		ForceClone:  force,
 	}, "")

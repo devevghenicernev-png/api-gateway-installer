@@ -14,13 +14,14 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/paths"
 )
 
-// QueueDBPath is where bbolt stores apigw's job queue. Per-host, owned by
-// the webhook user (root via systemd). File mode 0600.
+// QueueDBPath returns the bbolt path for apigw's job queue. Per-host,
+// owned by the webhook user (root via systemd). File mode 0600. Honors
+// APIGW_STATE_DIR; default /var/lib/apigw/jobs.db.
 //
 // We use bbolt (an etcd-vendored fork of Bolt) because: single-file, no
 // daemon, ACID, native Go, used by Nomad, Tailscale, etcd itself. Doesn't
 // add a deployment requirement (Redis, Postgres) for a single-host installer.
-const QueueDBPath = "/var/lib/apigw/jobs.db"
+func QueueDBPath() string { return paths.QueueDB() }
 
 var (
 	bucketJobs  = []byte("jobs")  // key=monotonic, value=Job JSON

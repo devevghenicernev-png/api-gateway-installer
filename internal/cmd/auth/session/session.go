@@ -8,6 +8,7 @@ package session
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,9 +16,12 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/auth"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 )
 
-const defaultSessionsPath = "/var/lib/apigw/sessions.db"
+func defaultSessionsPath() string {
+	return filepath.Join(paths.StateDir(), "sessions.db")
+}
 
 func NewCmdSession(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
@@ -152,7 +156,7 @@ func openStore(f *cmdutil.Factory) (*auth.SessionStore, func(), error) {
 	if !ok {
 		return nil, nil, fmt.Errorf("config: unexpected type %T", c)
 	}
-	path := defaultSessionsPath
+	path := defaultSessionsPath()
 	if cfg.Security.StateDir != "" {
 		path = cfg.Security.StateDir + "/sessions.db"
 	}

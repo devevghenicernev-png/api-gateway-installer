@@ -92,6 +92,17 @@
 
   <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
+  <div class="modal-bg" id="confirm-modal" hidden>
+    <div class="modal" role="dialog" aria-labelledby="confirm-modal-title" aria-modal="true">
+      <h3 id="confirm-modal-title">Confirm</h3>
+      <p id="confirm-modal-body" class="muted"></p>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="confirm-modal-cancel">Cancel</button>
+        <button class="btn-primary" id="confirm-modal-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-bg" id="token-modal" hidden>
     <div class="modal" role="dialog" aria-labelledby="token-modal-title" aria-modal="true">
       <h3 id="token-modal-title">Sign in</h3>

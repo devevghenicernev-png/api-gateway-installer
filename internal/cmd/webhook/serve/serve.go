@@ -61,7 +61,7 @@ func run(ctx context.Context, f *cmdutil.Factory, addr string) error {
 
 	logger.Info("apigw webhook starting",
 		slog.String("addr", listenAddr),
-		slog.String("queue", webhook.QueueDBPath))
+		slog.String("queue", webhook.QueueDBPath()))
 
 	_ = system.SdNotifyReady()
 	_ = system.WatchdogTick(ctx)

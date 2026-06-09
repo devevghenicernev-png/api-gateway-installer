@@ -35,6 +35,9 @@ func TestSafeTarget_RejectsTraversal(t *testing.T) {
 }
 
 func TestSafeTarget_AcceptsAllowedRoots(t *testing.T) {
+	// Pin the test to the canonical Linux roots regardless of host OS.
+	t.Setenv("APIGW_CONFIG_DIR", "/etc/apigw")
+	t.Setenv("APIGW_STATE_DIR", "/var/lib/apigw")
 	cases := []string{
 		"etc/apigw/config.yaml",
 		"var/lib/apigw/certs/example.com/fullchain.pem",

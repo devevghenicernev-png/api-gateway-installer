@@ -894,7 +894,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		Deploys:        deploys,
 		Webhook:        cfg.Webhook,
 		Dashboard:      cfg.Dashboard,
-		AcmeWebroot:    apitls.AcmeWebrootDir,
+		AcmeWebroot:    apitls.AcmeWebrootDir(),
 		Banner:         "PLACEHOLDER", // substituted post-render
 		MTLSAnyEnabled: mtlsAny,
 		MTLSCAFile:     mtlsCAFile,
@@ -917,7 +917,7 @@ func (g *Generator) Render(cfg *config.Config) (serverBytes, httpBytes []byte, e
 		data.TLSDomains = domains
 		data.CertFile = certFile
 		data.KeyFile = keyFile
-		data.AcmeWebroot = apitls.AcmeWebrootDir
+		data.AcmeWebroot = apitls.AcmeWebrootDir()
 		// DuckDNS: omit includeSubDomains — we don't own siblings under
 		// *.duckdns.org. Same trap noted in ARCHITECTURE.md §"HSTS trap".
 		data.HSTSIncludeSubDomains = strategy != apitls.StrategyDuckDNS

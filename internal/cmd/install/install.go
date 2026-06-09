@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
@@ -22,6 +23,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/system"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
@@ -61,7 +63,7 @@ func defaults() Answers {
 		DashboardPort:    9080,
 		WebhookEnabled:   false,
 		WebhookPort:      9000,
-		ConfigPath:       "/etc/apigw/config.yaml",
+		ConfigPath:       filepath.Join(paths.ConfigDir(), "config.yaml"),
 		TLSStrategy:      "skip",
 		SecurityEnabled:  false,
 		SecurityUser:     "admin",

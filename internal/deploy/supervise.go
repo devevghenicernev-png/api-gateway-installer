@@ -67,7 +67,7 @@ func WriteOverride(name string) error {
 		Name:    name,
 		User:    RunUser,
 		Group:   RunGroup,
-		WorkDir: filepath.Join(BaseDir, name, "current"),
+		WorkDir: filepath.Join(BaseDir(), name, "current"),
 		EnvFile: EnvFile(name),
 	}
 	activeSpec[name] = spec

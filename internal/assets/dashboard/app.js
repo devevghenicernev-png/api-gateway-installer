@@ -302,7 +302,13 @@
   // approvals when threshold > 0.
   async function rollbackDeploy(name, card) {
     if (!token) { toast("Sign in first.", "warn"); return; }
-    if (!confirm(`Roll back ${name} to the previous release?`)) return;
+    const ok = await confirmModal({
+      title: "Roll back deploy",
+      body: `Roll back ${name} to the previous release?`,
+      ok: "Roll back",
+      danger: true,
+    });
+    if (!ok) return;
     const btn = card.querySelector('[data-role="rollback"]');
     btn.disabled = true;
     btn.textContent = "…";
@@ -337,7 +343,13 @@
   // pin it so an accidental refresh doesn't wipe it.
   async function rotateWebhook(name, card) {
     if (!token) { toast("Sign in first.", "warn"); return; }
-    if (!confirm(`Rotate the webhook secret for ${name}?\n\nThe old secret stops working immediately. Be ready to update GitHub.`)) return;
+    const ok = await confirmModal({
+      title: "Rotate webhook secret",
+      body: `Rotate the webhook secret for ${name}?\n\nThe previous secret keeps working for 5 minutes (grace window) so in-flight GitHub deliveries don't fail. Update GitHub's webhook UI within that window.`,
+      ok: "Rotate",
+      danger: true,
+    });
+    if (!ok) return;
     const btn = card.querySelector('[data-role="rotate"]');
     btn.disabled = true;
     btn.textContent = "…";
@@ -477,6 +489,10 @@
       renderApprovals(null);
       return;
     }
+    // Mark the three admin panels as loading so the previous render dims
+    // (CSS .loading rule) instead of flashing to empty for ~500ms. The
+    // class is removed on each render call below.
+    setLoading(["apis-list", "audit-list", "approvals-list"], true);
     const [apis, audit, approvals] = await Promise.all([
       fetchAdmin("/api/admin/apis"),
       fetchAdmin("/api/admin/audit"),
@@ -485,6 +501,67 @@
     renderApis(apis);
     renderAudit(audit);
     renderApprovals(approvals);
+    setLoading(["apis-list", "audit-list", "approvals-list"], false);
+  }
+
+  // setLoading toggles the .loading CSS class on a list of element IDs.
+  // Used to dim panels during refreshAdmin's network round-trip so the
+  // previous content fades to ~50% opacity instead of being nuked first.
+  function setLoading(ids, on) {
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const parent = el.closest(".card") || el;
+      parent.classList.toggle("loading", !!on);
+    }
+  }
+
+  // confirmModal replaces window.confirm() so destructive actions show a
+  // styled dialog instead of the browser-native popup (which can be
+  // suppressed per-site by users, and doesn't fit our visual language).
+  // Returns a Promise<boolean>: resolves true on OK, false on Cancel,
+  // Escape, or backdrop click. Body accepts plain text — newlines are
+  // preserved via white-space: pre-line CSS on #confirm-modal-body.
+  function confirmModal({ title = "Confirm", body = "", ok = "OK", danger = false } = {}) {
+    return new Promise((resolve) => {
+      const bg = document.getElementById("confirm-modal");
+      const titleEl = document.getElementById("confirm-modal-title");
+      const bodyEl = document.getElementById("confirm-modal-body");
+      const okBtn = document.getElementById("confirm-modal-ok");
+      const cancelBtn = document.getElementById("confirm-modal-cancel");
+      if (!bg) {
+        // Fallback if the markup was stripped — keep the action working.
+        resolve(window.confirm(body));
+        return;
+      }
+      titleEl.textContent = title;
+      bodyEl.textContent = body;
+      okBtn.textContent = ok;
+      okBtn.classList.toggle("danger", !!danger);
+      bg.hidden = false;
+
+      const cleanup = (result) => {
+        bg.hidden = true;
+        okBtn.removeEventListener("click", onOk);
+        cancelBtn.removeEventListener("click", onCancel);
+        bg.removeEventListener("click", onBackdrop);
+        document.removeEventListener("keydown", onKey);
+        okBtn.classList.remove("danger");
+        resolve(result);
+      };
+      const onOk = () => cleanup(true);
+      const onCancel = () => cleanup(false);
+      const onBackdrop = (e) => { if (e.target === bg) cleanup(false); };
+      const onKey = (e) => {
+        if (e.key === "Escape") cleanup(false);
+        if (e.key === "Enter") cleanup(true);
+      };
+      okBtn.addEventListener("click", onOk);
+      cancelBtn.addEventListener("click", onCancel);
+      bg.addEventListener("click", onBackdrop);
+      document.addEventListener("keydown", onKey);
+      okBtn.focus();
+    });
   }
 
   async function fetchAdmin(url) {
@@ -581,7 +658,12 @@
   // it surfaces the change ID so reviewers can find it.
   async function deleteResource(kind, name, rowEl) {
     if (!token) { toast("Sign in first.", "warn"); return; }
-    const ok = confirm(`Delete ${kind} "${name}"?\n\nThis will remove its nginx config; if approvals are required, the change will be parked instead of applied.`);
+    const ok = await confirmModal({
+      title: `Delete ${kind}`,
+      body: `Delete ${kind} "${name}"?\n\nThis will remove its nginx config; if approvals are required, the change will be parked instead of applied.`,
+      ok: "Delete",
+      danger: true,
+    });
     if (!ok) return;
     const btn = rowEl.querySelector('[data-role="delete"]');
     btn.disabled = true;
@@ -617,8 +699,9 @@
   }
 
   function renderAudit(entries) {
-    elAudit.innerHTML = "";
     if (entries === null) {
+      // Unauth state — wipe and bail (no preservation needed).
+      elAudit.innerHTML = "";
       lastAuditEntries = [];
       elAuditEmpty.textContent = "Sign in to read the hash-chained audit log.";
       elAuditEmpty.hidden = false;
@@ -639,35 +722,81 @@
       ? `${shown} of ${total} ${total === 1 ? "entry" : "entries"}`
       : `${total} ${total === 1 ? "entry" : "entries"}`;
     if (total === 0) {
+      elAudit.innerHTML = "";
       elAuditEmpty.textContent = "Audit log is empty.";
       elAuditEmpty.hidden = false;
       return;
     }
     if (shown === 0) {
+      elAudit.innerHTML = "";
       elAuditEmpty.textContent = "No entries match the current filter.";
       elAuditEmpty.hidden = false;
       return;
     }
     elAuditEmpty.hidden = true;
-    // newest first, cap at 200 in DOM (full set lives in lastAuditEntries
-    // and re-applied on filter change).
+
+    // Key-based DOM diff so the 10-second poll doesn't blow away expanded
+    // detail rows or reset scroll position. Audit entries are hash-chained
+    // and immutable once written — same id ⇒ identical content, so we can
+    // keep the existing <li> in place.
+    //
+    // Algorithm: scan existing children → {key: row, detail?}; walk the new
+    // ordered list creating only missing rows + moving them into position;
+    // remove any rows whose keys aren't in the new list. Their attached
+    // detail-li (created lazily by toggleAuditDetail) follows the parent.
     const ordered = filtered.slice().reverse().slice(0, 200);
+    const wantKeys = new Set(ordered.map((e) => String(e.id)));
+    const existing = new Map();
+    for (let n = elAudit.firstElementChild; n; ) {
+      const next = n.nextElementSibling;
+      if (n.classList.contains("audit-row")) {
+        const k = n.dataset.key;
+        if (k && wantKeys.has(k)) {
+          existing.set(k, n);
+        } else {
+          // Stale: drop the row AND any expanded detail-li immediately
+          // following it (toggleAuditDetail inserts detail as next sibling).
+          if (next && next.classList.contains("audit-detail")) {
+            next.remove();
+          }
+          n.remove();
+        }
+      }
+      n = next;
+    }
+    // Walk the new ordered list, placing rows in order. Existing rows are
+    // moved (not replaced) via appendChild so any attached detail row
+    // stays alongside. New rows get freshly constructed.
+    let cursor = elAudit.firstElementChild;
     for (const e of ordered) {
-      const li = document.createElement("li");
-      li.className = "audit-row " + resultClass(e.result);
-      li.innerHTML = `
-        <span class="audit-ts">${fmtTsISO(e.timestamp)}</span>
-        <span class="audit-actor">${esc(e.actor || "—")}</span>
-        <span class="audit-action">${esc(e.action || "")}</span>
-        <span class="audit-resource muted">${esc(e.resource || "")}</span>
-        <span class="badge ${resultClass(e.result)}">${esc(e.result || "")}</span>
-      `;
-      // Click to expand detail row: shows reason, before/after, hash chain.
-      li.addEventListener("click", (ev) => {
-        if (ev.target.closest(".badge")) return;
-        toggleAuditDetail(li, e);
-      });
-      elAudit.appendChild(li);
+      const key = String(e.id);
+      let li = existing.get(key);
+      if (!li) {
+        li = document.createElement("li");
+        li.className = "audit-row " + resultClass(e.result);
+        li.dataset.key = key;
+        li.innerHTML = `
+          <span class="audit-ts">${fmtTsISO(e.timestamp)}</span>
+          <span class="audit-actor">${esc(e.actor || "—")}</span>
+          <span class="audit-action">${esc(e.action || "")}</span>
+          <span class="audit-resource muted">${esc(e.resource || "")}</span>
+          <span class="badge ${resultClass(e.result)}">${esc(e.result || "")}</span>
+        `;
+        li.addEventListener("click", (ev) => {
+          if (ev.target.closest(".badge")) return;
+          toggleAuditDetail(li, e);
+        });
+      }
+      if (cursor !== li) {
+        elAudit.insertBefore(li, cursor);
+      } else {
+        cursor = li.nextElementSibling;
+        // Skip over an attached detail row so we don't try to position
+        // the next audit-row before it.
+        if (cursor && cursor.classList.contains("audit-detail")) {
+          cursor = cursor.nextElementSibling;
+        }
+      }
     }
   }
 

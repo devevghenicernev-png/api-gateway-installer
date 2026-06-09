@@ -27,3 +27,7 @@ coverage.txt
 # Local install / dev
 /var-apigw/
 /etc-apigw/
+
+# Local-only — not shared
+.golangci.bck.yml
+.recover/

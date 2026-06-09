@@ -13,6 +13,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/deploy"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/tui"
 	"github.com/devevghenicernev-png/apigw/internal/webhook"
 )
@@ -109,7 +110,7 @@ func run(opts *options) error {
 				tui.Styles.Warn.Render("!"), err.Error())
 		}
 		_ = os.Remove(deploy.EnvFile(opts.name))
-		_ = os.Remove(filepath.Join("/var/log/apigw", opts.name))
+		_ = os.Remove(filepath.Join(paths.LogDir(), opts.name))
 	}
 	fmt.Fprintf(opts.f.IOStreams.Out, "\n%s removed %s\n",
 		tui.Styles.Success.Render(tui.GlyphCheck),

@@ -163,6 +163,7 @@ func run(ctx context.Context, opts *options) error {
 		RuntimeHint: d.Runtime,
 		Build:       d.Build,
 		Start:       d.Start,
+		HealthPath:  d.HealthPath,
 		Logsink:     opts.f.IOStreams.Out,
 	}, "")
 

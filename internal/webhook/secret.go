@@ -24,13 +24,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 )
 
-// SecretDir is where per-deploy HMAC secrets live. 0700 root:root by design;
+// SecretDir is where per-deploy HMAC secrets live (defaults to
+// /etc/apigw/webhooks, honors APIGW_CONFIG_DIR). 0700 root:root by design;
 // the secrets themselves are 0600. We chose filesystem over systemd-creds as
 // the default per ARCHITECTURE.md §"Secrets matrix" — Phase 7 will add an
 // opt-in `--use-creds` flag that re-encrypts these.
-const SecretDir = "/etc/apigw/webhooks"
+func SecretDir() string { return filepath.Join(paths.ConfigDir(), "webhooks") }
 
 // SecretBytes is the length of a generated HMAC secret in bytes (256 bits).
 //
@@ -38,9 +42,23 @@ const SecretDir = "/etc/apigw/webhooks"
 // gives us 256 bits of entropy — well above the conservative bar.
 const SecretBytes = 32
 
-// SecretPath returns /etc/apigw/webhooks/<deploy>.secret.
+// RotationGrace is how long the PREVIOUS secret remains valid after a
+// rotation, so in-flight GitHub deliveries signed with the old key still
+// verify until the new secret is configured on GitHub's side.
+//
+// 5 minutes matches GitHub's webhook retry window; longer would extend
+// the time an attacker who once captured the old secret can replay.
+var RotationGrace = 5 * time.Minute
+
+// SecretPath returns <ConfigDir>/webhooks/<deploy>.secret.
 func SecretPath(deploy string) string {
-	return filepath.Join(SecretDir, deploy+".secret")
+	return filepath.Join(SecretDir(), deploy+".secret")
+}
+
+// PrevSecretPath returns <ConfigDir>/webhooks/<deploy>.secret.prev. The file
+// is touched at rotation time; mtime drives the grace-window check.
+func PrevSecretPath(deploy string) string {
+	return filepath.Join(SecretDir(), deploy+".secret.prev")
 }
 
 // EnsureSecret returns the existing secret for `deploy`, or generates a new
@@ -73,18 +91,60 @@ func EnsureSecret(deploy string) (string, error) {
 // RotateSecret unconditionally regenerates the secret for `deploy` and
 // returns the new value. Used by `apigw webhook rotate-secret`.
 //
-// Atomic: tmp → fsync → rename. The old secret is overwritten in place; the
-// caller is responsible for printing the new one (we print it once and never
-// again — same UX as gh's PAT creation).
+// Grace period: the OLD secret is moved to <deploy>.secret.prev and remains
+// valid for RotationGrace (5 min). In-flight GitHub deliveries signed with
+// the previous key keep verifying so the operator can update GitHub's UI
+// without dropping deliveries.
+//
+// Atomic: write new tmp → fsync → mv old → .prev → rename new → live. If
+// any step fails the live file is untouched.
 func RotateSecret(deploy string) (string, error) {
 	s, err := generate()
 	if err != nil {
 		return "", err
 	}
-	if err := writeSecret(SecretPath(deploy), s); err != nil {
+	live := SecretPath(deploy)
+	prev := PrevSecretPath(deploy)
+	// Preserve current as .prev when one exists. Touch mtime so the
+	// grace-window check reads accurately.
+	if cur, err := os.ReadFile(live); err == nil {
+		if werr := writeSecret(prev, strings.TrimSpace(string(cur))); werr != nil {
+			return "", fmt.Errorf("save previous secret: %w", werr)
+		}
+		now := time.Now()
+		_ = os.Chtimes(prev, now, now)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read live secret: %w", err)
+	}
+	if err := writeSecret(live, s); err != nil {
 		return "", err
 	}
 	return s, nil
+}
+
+// LoadValidSecrets returns every secret that should currently verify a
+// webhook delivery: the live secret plus (if present and within
+// RotationGrace) the previous one. Server.go iterates these and accepts
+// the first hex-matching signature.
+//
+// Returns nil + error only when there's no live secret at all.
+func LoadValidSecrets(deploy string) ([][]byte, error) {
+	live, err := LoadSecret(deploy)
+	if err != nil {
+		return nil, err
+	}
+	out := [][]byte{[]byte(live)}
+	if b, err := os.ReadFile(PrevSecretPath(deploy)); err == nil {
+		if st, serr := os.Stat(PrevSecretPath(deploy)); serr == nil {
+			if time.Since(st.ModTime()) <= RotationGrace {
+				out = append(out, []byte(strings.TrimSpace(string(b))))
+			} else {
+				// Expired — best-effort cleanup so stale .prev files don't accrete.
+				_ = os.Remove(PrevSecretPath(deploy))
+			}
+		}
+	}
+	return out, nil
 }
 
 // LoadSecret reads a previously-generated secret. Returns an error if the
@@ -100,7 +160,7 @@ func LoadSecret(deploy string) (string, error) {
 
 // ListSecrets returns the deploy names that have a secret on disk.
 func ListSecrets() ([]string, error) {
-	entries, err := os.ReadDir(SecretDir)
+	entries, err := os.ReadDir(SecretDir())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -121,9 +181,10 @@ func ListSecrets() ([]string, error) {
 	return out, nil
 }
 
-// RemoveSecret deletes the secret file for `deploy`. Called from
-// `apigw deploy remove --purge`.
+// RemoveSecret deletes the secret file for `deploy` (and any .prev grace
+// copy). Called from `apigw deploy remove --purge`.
 func RemoveSecret(deploy string) error {
+	_ = os.Remove(PrevSecretPath(deploy))
 	err := os.Remove(SecretPath(deploy))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

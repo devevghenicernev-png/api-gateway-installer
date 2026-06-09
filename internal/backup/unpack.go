@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 )
 
 // UnpackOptions tunes Unpack().
@@ -240,7 +242,7 @@ func safeTarget(name string) (string, error) {
 	}
 	clean := filepath.Clean("/" + name)
 	allowed := false
-	for _, root := range allowedRoots {
+	for _, root := range allowedRoots() {
 		if clean == root || strings.HasPrefix(clean, root+"/") {
 			allowed = true
 			break
@@ -252,11 +254,10 @@ func safeTarget(name string) (string, error) {
 	return clean, nil
 }
 
-// allowedRoots is the union of canonical roots packed by Pack() — anything
+// allowedRoots returns the union of canonical roots packed by Pack() — anything
 // outside this list comes from a malicious or corrupt archive.
-var allowedRoots = []string{
-	"/etc/apigw",
-	"/var/lib/apigw",
+func allowedRoots() []string {
+	return []string{paths.ConfigDir(), paths.StateDir()}
 }
 
 // writeFsync writes body to path, fsyncs, and chmods. Caller normally

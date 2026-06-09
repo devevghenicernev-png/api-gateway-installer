@@ -1241,6 +1241,12 @@ type Deploy struct {
 	Description string `koanf:"description" yaml:"description"`
 	Enabled     bool   `koanf:"enabled" yaml:"enabled"`
 
+	// HealthPath, when set, switches deploy health probes to STRICT HTTP
+	// mode: a successful TCP connect plus GET <HealthPath> returning 2xx
+	// is required for the deploy to be considered live. Empty preserves
+	// the legacy lenient TCP-only probe so existing apps don't regress.
+	HealthPath string `koanf:"health_path" yaml:"health_path,omitempty"`
+
 	// Recorded after each pass.
 	LastSHA    string `koanf:"last_sha" yaml:"last_sha"`
 	LastDeploy string `koanf:"last_deploy" yaml:"last_deploy"` // RFC3339
@@ -1287,6 +1293,12 @@ type TLS struct {
 	Email        string   `koanf:"email" yaml:"email"`
 	Staging      bool     `koanf:"staging" yaml:"staging"`
 	DuckDNSToken string   `koanf:"duckdns_token" yaml:"duckdns_token"`
+
+	// DNSPropagationTimeoutSeconds caps how long DNS-01 challenges wait for
+	// the TXT record to propagate before failing. 0 = library default
+	// (120s for DuckDNS). Bump to 180-300 on slow registrars to avoid
+	// spurious renewal failures during LE rate-limit retries.
+	DNSPropagationTimeoutSeconds int `koanf:"dns_propagation_timeout_seconds" yaml:"dns_propagation_timeout_seconds,omitempty"`
 
 	// OCSPStapling turns on `ssl_stapling on; ssl_stapling_verify on;`
 	// for our own server cert. Off by default because Let's Encrypt

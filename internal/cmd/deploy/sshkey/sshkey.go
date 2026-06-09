@@ -41,10 +41,10 @@ func NewCmdSSHKey(f *cmdutil.Factory) *cobra.Command {
 
 func run(f *cmdutil.Factory, regenerate bool) error {
 	if regenerate {
-		if err := os.Remove(deploy.SSHKeyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(deploy.SSHKeyPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove old key: %w", err)
 		}
-		_ = os.Remove(deploy.SSHPubKeyPath)
+		_ = os.Remove(deploy.SSHPubKeyPath())
 	}
 
 	pub, err := ensureKey()
@@ -60,7 +60,7 @@ func run(f *cmdutil.Factory, regenerate bool) error {
 	ios := f.IOStreams
 	fmt.Fprintf(ios.Out, "%s deploy SSH key (%s):\n\n",
 		tui.Styles.Heading.Render("apigw"),
-		tui.Styles.Muted.Render(deploy.SSHPubKeyPath))
+		tui.Styles.Muted.Render(deploy.SSHPubKeyPath()))
 	fmt.Fprintln(ios.Out, tui.Styles.Identifier.Render(pub))
 	fmt.Fprintln(ios.Out)
 	fmt.Fprintf(ios.Out, "  %s add this as a Deploy Key on each private repo\n",
@@ -73,11 +73,11 @@ func run(f *cmdutil.Factory, regenerate bool) error {
 // ensureKey loads the public key from disk, generating an ed25519 keypair
 // if none exists. Returns the OpenSSH-format public key string.
 func ensureKey() (string, error) {
-	if b, err := os.ReadFile(deploy.SSHPubKeyPath); err == nil {
+	if b, err := os.ReadFile(deploy.SSHPubKeyPath()); err == nil {
 		return string(b), nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(deploy.SSHKeyPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(deploy.SSHKeyPath()), 0o700); err != nil {
 		return "", fmt.Errorf("mkdir .ssh: %w", err)
 	}
 
@@ -93,7 +93,7 @@ func ensureKey() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal private key: %w", err)
 	}
-	if err := writeFile(deploy.SSHKeyPath, pem.EncodeToMemory(pemBlock), 0o600); err != nil {
+	if err := writeFile(deploy.SSHKeyPath(), pem.EncodeToMemory(pemBlock), 0o600); err != nil {
 		return "", err
 	}
 
@@ -103,7 +103,7 @@ func ensureKey() (string, error) {
 		return "", fmt.Errorf("public key: %w", err)
 	}
 	pubLine := string(ssh.MarshalAuthorizedKey(sshPub))
-	if err := writeFile(deploy.SSHPubKeyPath, []byte(pubLine), 0o644); err != nil {
+	if err := writeFile(deploy.SSHPubKeyPath(), []byte(pubLine), 0o644); err != nil {
 		return "", err
 	}
 	return pubLine, nil

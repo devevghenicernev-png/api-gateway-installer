@@ -7,16 +7,20 @@ package ocsp
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
+	"github.com/devevghenicernev-png/apigw/internal/paths"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
 )
 
-const defaultCachePath = "/var/lib/apigw/ocsp.db"
+func defaultCachePath() string {
+	return filepath.Join(paths.StateDir(), "ocsp.db")
+}
 
 // NewCmdOCSP returns the `apigw tls ocsp` parent command.
 func NewCmdOCSP(f *cmdutil.Factory) *cobra.Command {
@@ -139,7 +143,7 @@ func newStatus(f *cmdutil.Factory) *cobra.Command {
 
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "revocation cache:")
-			path := defaultCachePath
+			path := defaultCachePath()
 			if cfg.Security.StateDir != "" {
 				path = cfg.Security.StateDir + "/ocsp.db"
 			}

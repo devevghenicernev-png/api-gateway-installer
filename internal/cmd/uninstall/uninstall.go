@@ -207,7 +207,7 @@ func run(opts *options) error {
 
 	// ----- purge state -----
 	if opts.Purge {
-		for _, p := range []string{"/etc/apigw", "/var/lib/apigw"} {
+		for _, p := range []string{paths.ConfigDir(), paths.StateDir()} {
 			if err := os.RemoveAll(p); err != nil {
 				fmt.Fprintf(ios.ErrOut, "%s could not purge %s: %s\n",
 					tui.Styles.Warn.Render("!"), p, err.Error())
@@ -217,9 +217,9 @@ func run(opts *options) error {
 					tui.Styles.Identifier.Render(p))
 			}
 		}
-		// Best-effort: purge per-deploy env files we wrote into /etc/apigw.
+		// Best-effort: purge per-deploy env files we wrote into <ConfigDir>.
 		for _, name := range deploys {
-			_ = os.Remove(filepath.Join("/etc/apigw", name+".env"))
+			_ = os.Remove(filepath.Join(paths.ConfigDir(), name+".env"))
 		}
 	}
 
@@ -229,8 +229,8 @@ func run(opts *options) error {
 	if !opts.Purge {
 		fmt.Fprintf(ios.Out, "  %s state preserved at %s + %s\n",
 			tui.Styles.Muted.Render("›"),
-			tui.Styles.Identifier.Render("/etc/apigw"),
-			tui.Styles.Identifier.Render("/var/lib/apigw"))
+			tui.Styles.Identifier.Render(paths.ConfigDir()),
+			tui.Styles.Identifier.Render(paths.StateDir()))
 	}
 	return nil
 }

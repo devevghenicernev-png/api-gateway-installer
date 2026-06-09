@@ -47,7 +47,7 @@ func Obtain(req ObtainRequest, force bool) error {
 		}
 	}
 
-	user, err := LoadOrCreateAccount(AccountDir, req.Email)
+	user, err := LoadOrCreateAccount(AccountDir(), req.Email)
 	if err != nil {
 		return fmt.Errorf("acme account: %w", err)
 	}
@@ -72,7 +72,7 @@ func Obtain(req ObtainRequest, force bool) error {
 		// challenge file out of /var/lib/apigw/acme-webroot/ — we just drop
 		// the token file there. See webroot.go and the tls-server.tmpl
 		// `/.well-known/acme-challenge/` location.
-		wp, err := NewWebrootProvider(AcmeWebrootDir)
+		wp, err := NewWebrootProvider(AcmeWebrootDir())
 		if err != nil {
 			return fmt.Errorf("webroot provider: %w", err)
 		}
@@ -81,9 +81,13 @@ func Obtain(req ObtainRequest, force bool) error {
 		}
 
 	case StrategyDuckDNS:
+		propagation := req.DNSPropagationTimeout
+		if propagation == 0 {
+			propagation = 120 * time.Second // ARCHITECTURE.md §"DuckDNS propagation"
+		}
 		p, err := duckdns.NewDNSProviderConfig(&duckdns.Config{
 			Token:              req.DuckDNSToken,
-			PropagationTimeout: 120 * time.Second, // ARCHITECTURE.md §"DuckDNS propagation"
+			PropagationTimeout: propagation,
 			PollingInterval:    5 * time.Second,
 			SequenceInterval:   60 * time.Second,
 		})
@@ -107,7 +111,7 @@ func Obtain(req ObtainRequest, force bool) error {
 			return fmt.Errorf("acme register: %w", err)
 		}
 		user.Registration = reg
-		if err := user.Save(AccountDir); err != nil {
+		if err := user.Save(AccountDir()); err != nil {
 			return fmt.Errorf("save account: %w", err)
 		}
 	}

@@ -34,6 +34,18 @@ func VerifySignature(secret, body []byte, header string) bool {
 	return hmac.Equal(got, mac.Sum(nil))
 }
 
+// verifyAny tries each secret in turn (constant-time per candidate) and
+// returns true if any verifies. Used by the server when a rotation grace
+// is active and both the live + previous keys must be honoured.
+func verifyAny(secrets [][]byte, body []byte, header string) bool {
+	for _, s := range secrets {
+		if VerifySignature(s, body, header) {
+			return true
+		}
+	}
+	return false
+}
+
 // Sign computes the HMAC header value for `body` with `secret`. Used by
 // tests and the dashboard's "test webhook" feature.
 //

@@ -531,10 +531,36 @@ main[data-maxed] .panel-max::before { content: '↩ '; }
   border-radius: 4px;
   font-size: 11px;
   line-height: 1.45;
-  max-height: 220px;
+  max-height: 60vh;
   overflow: auto;
   margin: 0;
   white-space: pre;
+  resize: vertical;
+}
+
+/* ---------- loading skeleton ---------- */
+/* Applied to a panel while refreshAdmin's network call is in flight.
+   Dims existing content + shows a moving shimmer at the top edge so the
+   operator sees "fetching" instead of an empty-then-populated flash. */
+.card.loading {
+  position: relative;
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 120ms ease-in;
+}
+.card.loading::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent, #4a90e2) 50%, transparent 100%);
+  animation: apigw-shimmer 1.2s linear infinite;
+  background-size: 200% 100%;
+  z-index: 1;
+}
+@keyframes apigw-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 /* ---------- approvals ---------- */
@@ -702,6 +728,17 @@ main[data-maxed] .panel-max::before { content: '↩ '; }
   color: white;
 }
 .btn-primary:hover { filter: brightness(1.1); }
+/* .danger variant — applied by confirmModal({ danger: true }) for
+   destructive actions (delete, rollback, rotate secret). */
+.btn-primary.danger {
+  background: var(--danger, #e02b3a);
+}
+.btn-primary.danger:hover { filter: brightness(1.1); }
+
+/* Preserve newlines in the confirm-modal body so multi-paragraph
+   prompts (e.g. webhook rotation grace explanation) render the way
+   the JS author wrote them. */
+#confirm-modal-body { white-space: pre-line; color: var(--fg); margin-bottom: 16px; }
 .btn-secondary {
   background: var(--bg);
   border-color: var(--subtle);

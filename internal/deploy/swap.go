@@ -46,6 +46,13 @@ type ApplyRequest struct {
 	Logsink     io.Writer
 	ForceClone  bool // ignore SHA-match short-circuit
 
+	// HealthPath, when non-empty, is requested via HTTP GET against
+	// http://127.0.0.1:<port><HealthPath> as a strict probe — a 2xx is
+	// required for the deploy to be considered alive. Default behavior
+	// (empty) keeps the legacy lenient TCP-only check so existing apps
+	// without a /health endpoint don't regress.
+	HealthPath string
+
 	// Metrics, when non-nil, receives Apply() count + duration.
 	Metrics ApplyMetrics
 }
@@ -108,7 +115,7 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 		Build:       build,
 		Start:       startCmd,
 		Port:        req.Port,
-		EnvFilePath: "/etc/apigw/" + req.Name + ".env",
+		EnvFilePath: EnvFile(req.Name),
 	}
 	if _, err := PrepareRelease(ctx, req.Name, spec, cl.Path, req.Logsink); err != nil {
 		return res, fmt.Errorf("prepare release: %w", err)
@@ -141,7 +148,7 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 		return res, fmt.Errorf("systemctl restart: %w", err)
 	}
 
-	if err := healthProbe(ctx, req.Port); err != nil {
+	if err := healthProbe(ctx, req.Port, req.HealthPath); err != nil {
 		rollback(req.Name, previous)
 		_ = Restart(req.Name)
 		return res, fmt.Errorf("health probe (rolled back): %w", err)
@@ -188,10 +195,15 @@ func rollback(name, previous string) {
 // 127.0.0.1:<port>. If `port` is 0 we treat the deploy as a worker
 // (no listener) and return nil immediately.
 //
-// For HTTP services we additionally try a GET /health — but ignore 4xx/5xx
-// since not every app implements that endpoint. A successful TCP connect is
-// enough proof the process is alive.
-func healthProbe(ctx context.Context, port int) error {
+// When `healthPath` is non-empty, the probe is STRICT: a successful TCP
+// connect is not enough — we additionally require GET http://127.0.0.1:<port><healthPath>
+// to return 2xx. Apps that 404 on / can no longer slip through as "alive"
+// when they opt in (deploy config sets `health_path: /health`).
+//
+// When `healthPath` is empty we fall back to the legacy lenient behaviour
+// (TCP only + best-effort GET /health whose status is ignored). This keeps
+// existing apps without a /health endpoint from regressing.
+func healthProbe(ctx context.Context, port int, healthPath string) error {
 	if port == 0 {
 		return nil
 	}
@@ -205,7 +217,16 @@ func healthProbe(ctx context.Context, port int) error {
 		conn, err := net.DialTimeout("tcp", addr, 750*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
-			// Optional /health hit — best-effort, never blocks the result.
+			if healthPath != "" {
+				if herr := strictHealthURL(ctx, port, healthPath); herr != nil {
+					lastErr = herr
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
+				return nil
+			}
+			// Lenient legacy mode: TCP alive + best-effort GET /health
+			// whose status is intentionally ignored.
 			_ = tryHealthURL(ctx, port)
 			return nil
 		}
@@ -216,6 +237,26 @@ func healthProbe(ctx context.Context, port int) error {
 		lastErr = fmt.Errorf("nothing listening on %s", addr)
 	}
 	return lastErr
+}
+
+// strictHealthURL requires HTTP 2xx from http://127.0.0.1:<port><path>.
+// Used when the deploy config opts in via `health_path`.
+func strictHealthURL(ctx context.Context, port int, path string) error {
+	c := &http.Client{Timeout: 2 * time.Second}
+	if path == "" || path[0] != '/' {
+		path = "/" + path
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := c.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", url, err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("GET %s returned %d (want 2xx)", url, resp.StatusCode)
+	}
+	return nil
 }
 
 func tryHealthURL(ctx context.Context, port int) error {

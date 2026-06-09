@@ -60,9 +60,9 @@ func Pack(dest string, opts PackOptions) (Manifest, error) {
 	// write the placeholder header now (empty payload), record offset.
 	// Simpler alternative: write files first, manifest last. We pick that.
 
-	srcs := append([]string{}, roots...)
+	srcs := append([]string{}, Roots()...)
 	if opts.IncludeQueue {
-		srcs = append(srcs, optionalRoots...)
+		srcs = append(srcs, OptionalRoots()...)
 	}
 	for _, src := range srcs {
 		if err := packTree(tw, src, &mf); err != nil {
