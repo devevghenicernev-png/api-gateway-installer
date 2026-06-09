@@ -586,7 +586,29 @@
 
     {{ end -}}
     {{ if .Dashboard.Enabled -}}
-    location {{ .Dashboard.Path }} {
+    # Dashboard mount. EVERYTHING dashboard-related (HTML, app.css,
+    # app.js, favicon, /api/admin/*, /api/status, /events SSE) lives under
+    # {{ .Dashboard.Path }}/ on the gateway. We rewrite the prefix away and
+    # the daemon serves itself as if mounted at root.
+    #
+    # Why this shape (versus exposing /api/admin/* at gateway root):
+    # the gateway namespace at root is owned by user-defined APIs
+    # (e.g. /api/foodmanager). Leaking dashboard admin routes
+    # alongside them creates collisions when a user names an API
+    # "admin" or "status" or "logs", and makes the security boundary
+    # fuzzy — at a glance you cannot tell which /api/<X> is the
+    # operator API and which is a user-facing service. Confining the
+    # whole dashboard to a single prefix solves both.
+    #
+    # `<base href="{{ .Dashboard.Path }}/">` in index.html pins every
+    # relative URL in HTML + JS (`fetch("api/admin/audit")` etc.) to
+    # this mount, so the same dashboard daemon works behind any
+    # Dashboard.Path operators choose.
+    location = {{ .Dashboard.Path }} {
+        return 301 {{ .Dashboard.Path }}/;
+    }
+    location {{ .Dashboard.Path }}/ {
+        rewrite ^{{ .Dashboard.Path }}/(.*)$ /$1 break;
         proxy_pass http://127.0.0.1:{{ .Dashboard.Port }};
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
@@ -594,26 +616,6 @@
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_buffering off;                    # SSE — never buffer
         proxy_set_header X-Accel-Buffering no;  # SSE — never buffer
-    }
-    # Dashboard absolute static assets. index.html references /app.css and
-    # /app.js with a leading slash; without these exact-match locations the
-    # browser would hit `location /` below and get 404 — stylesheet + JS
-    # never load, dashboard renders as unstyled HTML with console errors
-    # ('Refused to apply style ... MIME type ('text/html')').
-    location = /app.css {
-        proxy_pass http://127.0.0.1:{{ .Dashboard.Port }};
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-    }
-    location = /app.js {
-        proxy_pass http://127.0.0.1:{{ .Dashboard.Port }};
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-    }
-    location = /favicon.svg {
-        proxy_pass http://127.0.0.1:{{ .Dashboard.Port }};
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
     }
     {{ end -}}
     location / {

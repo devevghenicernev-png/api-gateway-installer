@@ -216,7 +216,7 @@
   // ---- initial snapshot ----
   async function loadStatus() {
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch("api/status");
       if (!res.ok) throw new Error(`status ${res.status}`);
       const s = await res.json();
       renderSnapshot(s);
@@ -313,9 +313,9 @@
     btn.disabled = true;
     btn.textContent = "…";
     try {
-      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
       const csrf = (await csrfRes.json()).token;
-      const res = await fetch(`/api/admin/deploy-rollback/${encodeURIComponent(name)}`, {
+      const res = await fetch(`api/admin/deploy-rollback/${encodeURIComponent(name)}`, {
         method: "POST",
         headers: { ...authHeaders(), "X-CSRF-Token": csrf },
       });
@@ -354,9 +354,9 @@
     btn.disabled = true;
     btn.textContent = "…";
     try {
-      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
       const csrf = (await csrfRes.json()).token;
-      const res = await fetch(`/api/admin/webhook-rotate/${encodeURIComponent(name)}`, {
+      const res = await fetch(`api/admin/webhook-rotate/${encodeURIComponent(name)}`, {
         method: "POST",
         headers: { ...authHeaders(), "X-CSRF-Token": csrf },
       });
@@ -390,9 +390,9 @@
     btn.disabled = true;
     btn.textContent = "…";
     try {
-      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
       const csrf = (await csrfRes.json()).token;
-      const res = await fetch(`/api/admin/deploy-run/${encodeURIComponent(name)}`, {
+      const res = await fetch(`api/admin/deploy-run/${encodeURIComponent(name)}`, {
         method: "POST",
         headers: { ...authHeaders(), "X-CSRF-Token": csrf },
       });
@@ -452,9 +452,9 @@
     btn.disabled = true;
     btn.textContent = "…";
     try {
-      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
       const csrf = (await csrfRes.json()).token;
-      const res = await fetch(`/api/admin/tls-renew/${encodeURIComponent(domain)}`, {
+      const res = await fetch(`api/admin/tls-renew/${encodeURIComponent(domain)}`, {
         method: "POST",
         headers: { ...authHeaders(), "X-CSRF-Token": csrf },
       });
@@ -494,9 +494,9 @@
     // class is removed on each render call below.
     setLoading(["apis-list", "audit-list", "approvals-list"], true);
     const [apis, audit, approvals] = await Promise.all([
-      fetchAdmin("/api/admin/apis"),
-      fetchAdmin("/api/admin/audit"),
-      fetchAdmin("/api/admin/approvals?status=pending"),
+      fetchAdmin("api/admin/apis"),
+      fetchAdmin("api/admin/audit"),
+      fetchAdmin("api/admin/approvals?status=pending"),
     ]);
     renderApis(apis);
     renderAudit(audit);
@@ -630,10 +630,10 @@
     const btn = rowEl.querySelector('[data-role="toggle"]');
     btn.disabled = true;
     try {
-      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
       const csrf = (await csrfRes.json()).token;
       const next = { ...api, Enabled: !api.Enabled };
-      const res = await fetch(`/api/admin/apis/${encodeURIComponent(api.Name)}`, {
+      const res = await fetch(`api/admin/apis/${encodeURIComponent(api.Name)}`, {
         method: "PUT",
         headers: { ...authHeaders(), "Content-Type": "application/json", "X-CSRF-Token": csrf },
         body: JSON.stringify(next),
@@ -669,9 +669,9 @@
     btn.disabled = true;
     btn.textContent = "…";
     try {
-      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
       const csrf = (await csrfRes.json()).token;
-      const path = kind === "api" ? "/api/admin/apis/" : "/api/admin/deploys/";
+      const path = kind === "api" ? "api/admin/apis/" : "api/admin/deploys/";
       const res = await fetch(path + encodeURIComponent(name), {
         method: "DELETE",
         headers: { ...authHeaders(), "X-CSRF-Token": csrf },
@@ -894,10 +894,10 @@
     const btnR = rowEl.querySelector('[data-role="reject"]');
     btnA.disabled = btnR.disabled = true;
     try {
-      const csrfRes = await fetch("/api/admin/csrf", { headers: authHeaders() });
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
       const csrf = (await csrfRes.json()).token;
       const body = verb === "approve" ? { comment: note } : { reason: note };
-      const res = await fetch(`/api/admin/approvals/${encodeURIComponent(id)}/${verb}`, {
+      const res = await fetch(`api/admin/approvals/${encodeURIComponent(id)}/${verb}`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json", "X-CSRF-Token": csrf },
         body: JSON.stringify(body),
@@ -932,7 +932,7 @@
 
   // ---- SSE ----
   function connectStream() {
-    const url = "/events?topic=webhook.recv&topic=tls.expiry&topic=status.deploy&topic=" +
+    const url = "events?topic=webhook.recv&topic=tls.expiry&topic=status.deploy&topic=" +
                 "deploy.*.stdout&topic=deploy.*.state";
     const es = new EventSource(url, { withCredentials: false });
 
@@ -1075,7 +1075,7 @@
   async function loadHistoricalLogs(name) {
     if (!name) return;
     try {
-      const res = await fetch(`/api/logs/${encodeURIComponent(name)}?lines=200`);
+      const res = await fetch(`api/logs/${encodeURIComponent(name)}?lines=200`);
       if (!res.ok) return;
       const events = await res.json();
       events.reverse();

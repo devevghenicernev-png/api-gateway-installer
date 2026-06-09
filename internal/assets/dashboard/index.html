@@ -3,9 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- <base> pins the dashboard to its mount point. The daemon serves its
+       own routes as if mounted at root (/api/admin/*, /events, etc.), but
+       at the gateway nginx strips the /dashboard/ prefix on every request.
+       <base href="/dashboard/"> means every relative URL in this HTML and
+       in app.js resolves under /dashboard/, so the user-API namespace at
+       gateway root (/api/<service>) never collides with the dashboard's
+       own admin API. -->
+  <base href="/dashboard/">
   <title>apigw dashboard</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
 </head>
 <body>
   <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -18,7 +26,7 @@
       <span class="stat"><span class="muted">uptime</span> <span id="uptime">—</span></span>
       <span class="stat"><span class="muted">clients</span> <span id="clients">0</span></span>
       <span class="conn" id="conn-status" title="SSE connection">●</span>
-      <a class="token-btn sso-btn" id="sso-btn" href="/api/admin/sso/login" title="Sign in via SSO" hidden>
+      <a class="token-btn sso-btn" id="sso-btn" href="api/admin/sso/login" title="Sign in via SSO" hidden>
         Sign in with SSO
       </a>
       <button class="token-btn" id="token-btn" title="Sign in with bearer token">
@@ -117,6 +125,6 @@
     </div>
   </div>
 
-  <script src="/app.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

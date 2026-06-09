@@ -5,6 +5,69 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-06-09
+
+Architectural fix. v0.4.1 and v0.4.2 papered over a deeper problem in
+the dashboard URL design by adding per-asset `location =` blocks at
+gateway root for `/app.css`, `/app.js`, `/favicon.svg`. The dashboard's
+**admin API** (`/api/admin/*`, `/api/status`, `/api/logs/*`, `/events`)
+was never proxied at all — anyone hitting the dashboard in a browser
+got a fully rendered UI but every backend call 404'd. Worse, exposing
+dashboard endpoints at gateway root collided with user-defined APIs
+under `/api/<service>` and made the operator-vs-user security boundary
+fuzzy.
+
+### Changed
+
+- **Dashboard moves entirely under `{Dashboard.Path}/`.** Gateway-root
+  pollution is gone. The nginx template now emits ONE
+  `location /dashboard/` block with a `rewrite ^/dashboard/(.*)$ /$1
+  break;` directive that strips the prefix; the daemon serves itself
+  as if mounted at root, so its routes (`/`, `/api/admin/*`,
+  `/api/status`, `/events`, `/app.css`, `/app.js`, `/favicon.svg`) do
+  not change. A second `location = /dashboard` block returns 301 to
+  `/dashboard/` so the trailing slash is enforced consistently.
+- **`internal/assets/dashboard/index.html` gets `<base href="/dashboard/">`**
+  and all asset references switch to relative (`app.css`, `app.js`,
+  `favicon.svg`, `api/admin/sso/login`). The `<base>` pins every
+  relative URL in the document — including `fetch()` and
+  `EventSource()` calls in app.js — to the dashboard mount.
+- **`internal/assets/dashboard/app.js` switches all 19 backend calls
+  from absolute to relative.** Every `fetch("/api/admin/X")`,
+  `fetch("/api/status")`, `EventSource("/events?...")` etc. is now
+  `fetch("api/admin/X")` etc. Browser + `<base>` together resolve them
+  under `/dashboard/`, nginx strips the prefix, the daemon sees its
+  native routes. No code change needed on the daemon side.
+- **`location = /app.css` / `/app.js` / `/favicon.svg` blocks removed
+  from the nginx template.** They were the v0.4.1/v0.4.2 workaround
+  for the absolute-URL design; v0.4.4 fixes the root cause and the
+  workaround is no longer needed.
+
+### Tests
+
+- `TestRender_DashboardMount` pins the new shape: 301 redirect, prefix
+  rewrite, single proxy, no leaked per-asset locations.
+- `TestRender_DashboardMount_OmittedWhenDisabled` ensures the mount is
+  only emitted when `Dashboard.Enabled`.
+- `TestRender_NoRewrites` tightened from "no rewrite directive at all"
+  to "no API-level `rewrite ^/<api>` directive" — the structural
+  `rewrite ^/dashboard/...` for the dashboard mount is now legitimate.
+
+### Migration
+
+For installs upgrading from v0.4.0…v0.4.3:
+
+1. `apigw upgrade` → swaps binary to v0.4.4.
+2. `systemctl restart apigw-dashboard.service` → loads new HTML + JS.
+3. `apigw api reload` → regenerates `/etc/nginx/sites-available/apigw.conf`
+   with the v0.4.4 template (single `/dashboard/` mount).
+4. Hard-refresh the dashboard in a browser. The bookmark/URL changes
+   from `https://<host>/dashboard` to `https://<host>/dashboard/`
+   (server-side 301 handles the legacy URL automatically).
+
+User-defined APIs (`/api/<service>`, `/observe`, anything else) are
+unaffected — they live at gateway root in their own location blocks.
+
 ## [0.4.3] — 2026-06-09
 
 Bugfix release. Closes the ETXTBSY swap failure surfaced on the orange

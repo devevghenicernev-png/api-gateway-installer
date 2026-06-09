@@ -82,7 +82,12 @@ func TestRender_NoRewrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if strings.Contains(string(serverBody), "rewrite ") {
-		t.Errorf("no-Rewrites should not emit rewrite directives:\n%s", serverBody)
+	// Per-API rewrites: when none are configured we must not emit a
+	// rewrite directive that mentions the API's path. The structural
+	// `rewrite ^/dashboard/(.*)$ ...` that the dashboard mount uses
+	// (added in v0.4.4) is intentional and unrelated; check for the
+	// API-specific shape instead of a bare "rewrite ".
+	if strings.Contains(string(serverBody), "rewrite ^/billing") {
+		t.Errorf("no-Rewrites should not emit API-level rewrite directives:\n%s", serverBody)
 	}
 }
