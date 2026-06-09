@@ -174,11 +174,30 @@ func DownloadAndSwap(ctx context.Context, asset, checksums Asset, repo string, o
 
 	// Atomic swap. rename(2) over an executing binary works on Linux/macOS
 	// because the kernel keeps the open inode alive for the running process.
-	if err := os.Rename(binPath, exe); err != nil {
-		// Fallback for cross-device rename (tmp on tmpfs, /usr/local on rootfs).
-		if err := copyOver(binPath, exe); err != nil {
-			return "", fmt.Errorf("swap: %w", err)
-		}
+	//
+	// The naive `Rename(binPath, exe)` fails when tmp lives on a different
+	// filesystem from exe — extremely common in practice (/tmp on tmpfs,
+	// /usr/local/bin on rootfs). The historical fallback was a
+	// copy-to-existing-file, which on Linux fails with ETXTBSY ("text file
+	// busy") because the destination IS the currently-running executable.
+	//
+	// Instead we stage the new binary as a sibling of exe (same filesystem
+	// guaranteed) and then rename it onto exe. rename(2) only touches the
+	// directory entry, never opens the destination — ETXTBSY does not apply.
+	stagedPath := filepath.Join(filepath.Dir(exe),
+		fmt.Sprintf(".%s.staging-%d", filepath.Base(exe), os.Getpid()))
+	if err := copyFileTo(binPath, stagedPath); err != nil {
+		return "", fmt.Errorf("stage new binary alongside %s: %w", exe, err)
+	}
+	// Best-effort cleanup on any failure path after this point. On the
+	// happy path the staging file is gone (renamed onto exe) so Remove
+	// silently no-ops.
+	defer os.Remove(stagedPath)
+	if err := os.Chmod(stagedPath, 0o755); err != nil {
+		return "", fmt.Errorf("chmod staged binary: %w", err)
+	}
+	if err := os.Rename(stagedPath, exe); err != nil {
+		return "", fmt.Errorf("swap: %w", err)
 	}
 	return mode, nil
 }
@@ -325,15 +344,21 @@ func extractApigw(tarPath, dir string) (string, error) {
 	return "", errors.New("apigw binary not found in tarball")
 }
 
-// copyOver overwrites `dst` with the contents of `src`. Used when rename(2)
-// fails across filesystems.
-func copyOver(src, dst string) error {
+// copyFileTo writes src's contents into dst as a brand-new file. Unlike
+// the previous copyOver helper, dst must NOT already exist as an
+// executable being run — on Linux that would yield ETXTBSY when we
+// open it for writing. The new swap flow guarantees dst is a fresh
+// path (`.apigw.staging-<pid>` next to exe), not the live executable.
+func copyFileTo(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_TRUNC, 0o755)
+	// O_CREATE for the new file; O_TRUNC just in case a previous crashed
+	// run left a stale staging file with the same name (unlikely — PID
+	// would have to recycle — but cheap to handle).
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
 	}

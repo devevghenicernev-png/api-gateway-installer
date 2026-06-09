@@ -5,6 +5,34 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-06-09
+
+Bugfix release. Closes the ETXTBSY swap failure surfaced on the orange
+pi when upgrading from v0.4.0 with the cosign-bootstrap path off.
+
+### Fixed
+
+- **`apigw upgrade` failed with `swap: open /usr/local/bin/apigw: text
+  file busy` on most Linux installs.** `os.MkdirTemp("", ...)` puts the
+  upgrade scratch dir under `$TMPDIR` (typically `/tmp` → `tmpfs`),
+  while the live binary lives on rootfs. The `os.Rename` swap step
+  failed with `EXDEV` (cross-device) and the historical fallback
+  `copyOver` did `OpenFile(dst, O_WRONLY|O_TRUNC)` on the running
+  executable — Linux returns `ETXTBSY` for that. Result: the upgrade
+  finished verification, then died right before swap, leaving the host
+  on the old binary.
+
+  v0.4.3 stages the new binary as `<exe>.staging-<pid>` next to the
+  live executable (same filesystem by construction), then uses a
+  single atomic `rename(2)`. `rename(2)` only updates the directory
+  entry — it never opens the destination, so `ETXTBSY` does not apply.
+  Running processes keep their old inode alive, the new binary takes
+  the path. The legacy `copyOver` helper is replaced by `copyFileTo`,
+  which only writes to a brand-new path, never to a live executable.
+
+  Tests: `internal/selfupdate/swap_test.go::TestCopyFileTo` +
+  `TestCopyFileTo_OverwritesStaleStaging`.
+
 ## [0.4.2] — 2026-06-09
 
 Follow-up to v0.4.1 — closes the cosign UX gap discovered when running
