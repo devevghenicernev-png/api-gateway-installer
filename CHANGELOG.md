@@ -5,6 +5,153 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-09
+
+Follow-up release after the v0.3.0 e2e pass. Two-session bundle: the
+2026-06-08 session closed the remaining install-flow / quality bugs
+surfaced during real-world testing on a clean orange-pi-class box; the
+2026-06-09 session added OSS-project hygiene and a versioned admin API
+surface so external consumers can pin to a stable path before the
+unversioned surface is locked in.
+
+### Fixed — install / nginx pipeline (`D-3`, `RACE-1`, `RACE-2`)
+
+- **`D-3` — `APIGW_STATE_DIR` / `APIGW_CONFIG_DIR` / `APIGW_LOG_DIR`
+  were honored inconsistently.** Some packages still hardcoded
+  `/var/lib/apigw`, `/etc/apigw`, `/var/log/apigw` directly, so
+  `APIGW_STATE_DIR=/tmp/foo apigw install` would silently land state in
+  the system path. Refactored ~25 files to route every path lookup
+  through `internal/paths`. Env vars now take effect everywhere they
+  should — install, deploy, webhook, dashboard, audit, TLS, OCSP cache,
+  sessions.
+- **`RACE-1` — concurrent nginx mutations could interleave.** Two
+  parallel `apigw api add` / dashboard CRUD calls could both call
+  `WriteAndReload` concurrently, producing torn config writes when one
+  process finished its template render while the other had already
+  written its own. Added `sync.Mutex` to `nginx.Manager`; `Validate` /
+  `Reload` / `WriteAndReload` are now serialized inside a single
+  process. (Cross-process races are still prevented by the existing
+  filesystem-level audit-lock.)
+- **`RACE-2` — stream-include marker leaked on validate-fail.**
+  `ensureStreamInclude(true)` rewrote `nginx.conf` BEFORE running
+  `nginx -t`; if validation failed, the marker block stayed in
+  `nginx.conf` referring to a non-existent `apigw-stream.conf`, so the
+  next `systemctl restart nginx` died. `currentStreamInclude()` now
+  snapshots the prior state and `revertStreamInclude(prev)` restores it
+  inside the rollback path.
+
+### Fixed — TLS / DuckDNS (`TLS-1`, `TLS-2`)
+
+- **`TLS-1` — DuckDNS DNS-01 timeout was hardcoded.** DNS propagation
+  to LE's lookup resolvers can take 5+ minutes on a busy DuckDNS shard;
+  the previous fixed timeout produced spurious failures. Added
+  `tls.dns_propagation_timeout_seconds` (config) — defaults preserved,
+  but operators on slow shards can crank it.
+- **`TLS-2` — dashboard "Renew" did not reload nginx.** The dashboard
+  renew button called `StoreCert` and stopped, leaving the served cert
+  stale until something else reloaded nginx. Now triggers
+  `Manager.Reload()` immediately after `StoreCert`, matching CLI
+  behavior.
+
+### Fixed — deploy / webhook (`DEP-1`, `DEP-2`, `WH-1`, `WH-2`)
+
+- **`DEP-1` — strict 2xx health check is now opt-in.** `health_path`
+  field on `config.Deploy` enables a strict 2xx-probe before promoting
+  a new release; absent → keeps the existing lenient TCP probe so
+  deploys without a health endpoint still work.
+- **`DEP-2` — build logs vanished without a Publisher.** When the
+  deploy queue was driven from CLI (no SSE Hub), build stdout/stderr
+  were dropped on the floor. Now `Build()` always tees through
+  `os.Stderr` even when `Publisher` is nil; live log even from a
+  one-off `apigw deploy run`.
+- **`WH-1` — `webhook setup` printed `<your-host>` on a configured
+  box.** The setup wizard used a placeholder hostname even when the
+  operator had set `APIGW_PUBLIC_HOST`, configured TLS, or had a
+  routable IP. Resolution order is now: `APIGW_PUBLIC_HOST` → TLS
+  domain → `ServerName` (when not `_`) → routable non-loopback IP →
+  `os.Hostname()` → placeholder as last resort.
+- **`WH-2` — `webhook rotate-secret` had no grace window.** Pre-rotation
+  webhook deliveries that arrived during the GitHub-side update were
+  rejected as HMAC-invalid. Rotated secrets now keep the prior secret
+  in `<deploy>.secret.prev` for a 5-minute grace window;
+  `LoadValidSecrets()` returns both and `verifyAny()` accepts either,
+  so GitHub's overlap period no longer drops deliveries. New unit test:
+  `internal/webhook/secret_test.go`.
+
+### Fixed — dashboard UI (`D-4` … `D-7`)
+
+- **`D-4` — native `confirm()` dialogs replaced.** Three destructive
+  actions (rollback, delete, rotate) used the browser's native
+  `confirm()` — un-stylable, blocked the whole event loop, broke
+  embedded views. Now an async `confirmModal({title, body, ok,
+  danger})` Promise, with Esc / Enter / backdrop dismissal and
+  destructive-action styling.
+- **`D-5` — audit-detail `<pre>.json` was un-resizable.** Long entries
+  forced the page to scroll; now `max-height: 60vh` + `resize:
+  vertical` so the operator can drag the pane to fit.
+- **`D-6` — expanded audit rows collapsed on every poll.** `renderAudit`
+  re-rendered the whole list every 10 s, throwing away expanded-detail
+  + scroll position. Now does key-based DOM-diff on `entry.id`:
+  unchanged rows are kept in place, new rows insert, removed rows
+  delete. Expanded detail and scroll survive.
+- **`D-7` — initial dashboard load looked frozen.** Cards now apply
+  `.card.loading` (dim + CSS-shimmer) while `refreshAdmin()` is in
+  flight, so the operator sees something is happening.
+
+### Added — OSS hygiene
+
+- **`SECURITY.md`** — private vulnerability disclosure policy. GitHub
+  Security Advisories as the primary channel with an email fallback;
+  3-day acknowledge / 10-day initial assessment / 30-day fix target for
+  High/Critical. Includes safe-harbor wording and a supported-versions
+  table. Documents the cosign + sha256 + SLSA L3 supply-chain story.
+- **`CONTRIBUTING.md`** — minimal contributor guide. Build / test /
+  lint commands, e2e suite instructions, conventional-commit subject
+  line, what kind of PR is welcome vs. what gets pushed back.
+- **`gosec` job in CI** (`.github/workflows/ci.yml`). Advisory-only
+  initially (`continue-on-error: true`) so a noisy false-positive can't
+  wedge the release pipeline overnight; SARIF output uploaded to the
+  Security tab so findings are still visible. Threshold:
+  `-severity high -confidence medium`. Skips `test/e2e` + `test/benchmark`.
+
+### Added — Dockerfile + `make docker-image`
+
+- **`Dockerfile`** (root). Multi-stage `golang:1.25-alpine` → `alpine:3.20`,
+  ~24 MB final image. Ships the static `apigw` binary plus the runtime
+  prerequisites the deploy path shells out to (`git`, `curl`, `ssh`,
+  `ca-certificates`). Intended as a **tool image** for CI/CD use
+  (driving installs over SSH, validating YAML, exporting OpenAPI from
+  a pipeline) — explicitly NOT a runtime gateway, since the gateway
+  expects systemd + a real nginx on the host.
+- **`make docker-image`** wraps the build with the standard
+  `VERSION` / `COMMIT` / `DATE` ldflags.
+
+### Added — admin API `/v1/` aliases (`/api/v1/admin/*`)
+
+- Every existing `/api/admin/*` route is now ALSO mounted under
+  `/api/v1/admin/*`, via a new `registerAdmin()` helper in
+  `internal/dashboard/server.go`. External consumers can pin to the
+  versioned surface immediately; the unversioned path remains in place
+  for the embedded dashboard JS and pre-v1 CLI clients. No breaking
+  changes — both prefixes resolve to the same handler.
+- **`internal/dashboard/admin_v1_alias_test.go`** — regression guard.
+  15 endpoint sub-tests assert that hitting `/api/v1/admin/<X>` reaches
+  the same handler as `/api/admin/<X>` (identical status + body). A
+  panic-guard sub-test protects the helper's invariant (path must start
+  with `/api/admin`).
+
+### Changed
+
+- **`docs/RELEASE_QUALITY.md`** — release-quality log replacing the
+  earlier commercial-readiness draft. Technical scope only: what was
+  closed, what was not verified, what was added this cycle, and a
+  test-gate snapshot. The earlier draft conflated tech and bizdev
+  considerations that don't apply to this hobby / personal-use
+  project.
+- **`CONTRIBUTING.md`** wording on breaking changes — framed in terms
+  of "don't break someone's working install," not "commercial users
+  expect stability."
+
 ## [0.3.0] — 2026-06-08
 
 First release driven by a comprehensive end-to-end Docker pass
