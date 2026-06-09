@@ -79,11 +79,21 @@ export function useStatus() {
 }
 
 // ----- Read -----
-// asArray defends against the nil-slice → JSON-null wire shape that
-// Go's encoding/json emits when a cfg field has zero entries. Without
-// it the v0.5.0 first-boot crashed with "a.map is not a function"
-// before any panel could render.
-const asArray = <T>(v: T[] | null | undefined): T[] => v ?? [];
+// asArray defends against TWO upstream shapes that a list endpoint can
+// land on the wire as:
+//   1. nil slice → JSON `null` (Go's encoding/json default for `var
+//      []T`). This is the v0.5.0 first-boot trap.
+//   2. error / shape mismatch → arbitrary object body. We saw this on
+//      v0.5.1 when /api/admin/config/history returned an error envelope
+//      `{error: "..."}` that asArray-with-?? happily passed through —
+//      then `t.map` crashed at render.
+// We hard-check Array.isArray so anything else collapses to []. Panels
+// then render their empty state rather than blowing up the whole app.
+function asArray<T>(v: T[] | null | undefined): T[] {
+  // Defensive: also coerce non-array objects (error envelopes, unexpected
+  // shapes) to []. Plain `?? []` only catches null/undefined.
+  return Array.isArray(v) ? v : [];
+}
 
 export function useApis() {
   const api = useAdminAPI();

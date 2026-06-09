@@ -5,6 +5,28 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-06-10
+
+Second hotfix for the v0.5.0 dashboard crash. v0.5.1's `?? []` only
+caught `null` / `undefined` — it didn't catch the case the bundle
+actually hit on the orange pi: an endpoint that returned a non-array
+shape (e.g. an error envelope `{error: "..."}` when the audit log
+wasn't initialised). `Array.isArray` strict check now collapses every
+non-array result to `[]` so panels render an empty state rather than
+crashing the React root with `TypeError: a.map is not a function`.
+
+### Fixed
+
+- **`asArray` upgrades from `v ?? []` to `Array.isArray(v) ? v : []`.**
+  The v0.5.1 hook helper missed the wire shape we actually saw:
+  `/api/admin/config/history` returning either an object or null
+  depending on whether the snapshot path was initialised, plus a few
+  other admin endpoints where backend error paths slipped a JSON
+  object through to the body. ConfigSettings → `t.map(c => ...)` was
+  the first crash site to trip.
+
+  Bundle delta vs v0.5.1: +20 bytes raw / +5 bytes gz.
+
 ## [0.5.1] — 2026-06-10
 
 Hotfix for the v0.5.0 first-boot crash.
