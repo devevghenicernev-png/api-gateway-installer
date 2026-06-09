@@ -164,6 +164,7 @@ func (s *Server) adminSSOHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
+		s.publishCfgChange("sso")
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -236,6 +237,7 @@ func (s *Server) adminTuningHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, http.StatusInternalServerError, "tuning saved but reload failed: "+err.Error())
 			return
 		}
+		s.publishCfgChange("tuning")
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -300,6 +302,7 @@ func (s *Server) adminAdminTokensHandler(w http.ResponseWriter, r *http.Request)
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
+		s.publishCfgChange("tokens")
 		// Note: we return the unredacted token so the UI can show it
 		// once before the value disappears server-side.
 		adminWriteJSON(w, http.StatusCreated, t)
@@ -350,6 +353,7 @@ func (s *Server) adminAdminTokenHandler(w http.ResponseWriter, r *http.Request) 
 		adminWriteJSONError(w, Status(err), err.Error())
 		return
 	}
+	s.publishCfgChange("tokens")
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -14,7 +14,12 @@ const queryClient = new QueryClient({
       staleTime: 5_000,
       gcTime: 5 * 60_000,
       refetchOnWindowFocus: true,
-      refetchInterval: 10_000,
+      // v0.5.4: SSE handles real-time invalidation via the `cfg.change`
+      // topic (see Dashboard.tsx). Polling drops to 60s as a fallback
+      // for cases where SSE drops connection (idle laptop wake,
+      // intermittent network) — operators still get fresh data within
+      // a minute even without SSE.
+      refetchInterval: 60_000,
       retry: (failureCount, err: unknown) => {
         // 4xx errors are operator/auth issues — don't hammer.
         if (typeof err === "object" && err && "status" in err) {

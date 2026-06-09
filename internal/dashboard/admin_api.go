@@ -191,6 +191,7 @@ func (s *Server) adminAPIsHandler(w http.ResponseWriter, r *http.Request) {
 				"config saved but nginx reload failed — run `apigw api reload` or `apigw doctor`: "+err.Error())
 			return
 		}
+		s.publishCfgChange("apis")
 		adminWriteJSON(w, http.StatusCreated, api)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -295,6 +296,7 @@ func (s *Server) adminAPIHandler(w http.ResponseWriter, r *http.Request) {
 				"config saved but nginx reload failed — run `apigw api reload` or `apigw doctor`: "+err.Error())
 			return
 		}
+		s.publishCfgChange("apis")
 		writeJSONWithETag(w, http.StatusOK, updated)
 	case http.MethodDelete:
 		if err := checkIfMatch(r, cfg.APIs[idx]); err != nil {
@@ -320,6 +322,7 @@ func (s *Server) adminAPIHandler(w http.ResponseWriter, r *http.Request) {
 				"config saved but nginx reload failed — run `apigw api reload` or `apigw doctor`: "+err.Error())
 			return
 		}
+		s.publishCfgChange("apis")
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
@@ -404,6 +407,7 @@ func (s *Server) adminDeploysHandler(w http.ResponseWriter, r *http.Request) {
 				"config saved but nginx reload failed — run `apigw api reload`: "+err.Error())
 			return
 		}
+		s.publishCfgChange("deploys")
 		adminWriteJSON(w, http.StatusCreated, dep)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -462,6 +466,7 @@ func (s *Server) adminDeployHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
+		s.publishCfgChange("deploys")
 		adminWriteJSON(w, http.StatusOK, updated)
 	case http.MethodDelete:
 		before := deployToMap(cfg.Deploys[idx])
@@ -477,6 +482,7 @@ func (s *Server) adminDeployHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
+		s.publishCfgChange("deploys")
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")

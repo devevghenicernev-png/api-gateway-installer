@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
+// Pinned to react-resizable-panels v2.x (stable PanelGroup / Panel /
+// PanelResizeHandle API). v4 renamed exports + flipped to a single
+// `defaultLayout` array prop on the group, which doesn't compose well
+// with our auto-saved-per-group ID scheme.
+import { Panel as RPanel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { useQueryClient } from "@tanstack/react-query";
 import { useStatus } from "./hooks/useAdminQueries";
 import { TopBar } from "./components/layout/TopBar";
 import { Panel } from "./components/layout/Panel";
@@ -18,17 +24,72 @@ import { WebhookSetupDialog } from "./components/webhook/WebhookSetupDialog";
 import { LogsPanel } from "./components/logs/LogsPanel";
 import { Badge } from "./components/ui/badge";
 import { useApis, useApprovals } from "./hooks/useAdminQueries";
-import type { SSEStatus } from "./hooks/useSSE";
+import { useSSE, type SSEStatus } from "./hooks/useSSE";
 import { TooltipProvider } from "./components/ui/tooltip";
 
 type PanelKey = "apis" | "deploys" | "tls" | "audit" | "approvals" | "webhook" | "logs";
 
+// Persisted layout IDs. react-resizable-panels writes to localStorage
+// under these keys — drag once, every subsequent reload keeps the
+// proportions. Bump the version suffix when the panel set changes so
+// stale percentages can't strand a panel at 0%.
+const RESIZE_VERTICAL_ID = "apigw.dashboard.rows.v1";
+const RESIZE_ROW1_ID     = "apigw.dashboard.row1.v1";
+const RESIZE_ROW2_ID     = "apigw.dashboard.row2.v1";
+
+// Visible resize handles. v0.5.3 used `bg-transparent` 6px — operators
+// couldn't see where to grab, the whole feature looked broken. Now a
+// 1px subtle line + 3-dot grip in the middle, both fade to primary on
+// hover or active drag. 7px hit area is comfortable on touch screens.
+function VHandle() {
+  return (
+    <PanelResizeHandle className="group relative w-[7px] cursor-col-resize">
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary group-data-[resize-handle-active]:bg-primary" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
+        <span className="h-0.5 w-0.5 rounded-full bg-foreground" />
+        <span className="h-0.5 w-0.5 rounded-full bg-foreground" />
+        <span className="h-0.5 w-0.5 rounded-full bg-foreground" />
+      </div>
+    </PanelResizeHandle>
+  );
+}
+function HHandle() {
+  return (
+    <PanelResizeHandle className="group relative h-[7px] cursor-row-resize">
+      <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border transition-colors group-hover:bg-primary group-data-[resize-handle-active]:bg-primary" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
+        <span className="h-0.5 w-0.5 rounded-full bg-foreground" />
+        <span className="h-0.5 w-0.5 rounded-full bg-foreground" />
+        <span className="h-0.5 w-0.5 rounded-full bg-foreground" />
+      </div>
+    </PanelResizeHandle>
+  );
+}
+
+// Map cfg.change `section` → React Query key prefix to invalidate.
+// `any` invalidates everything under ["admin", ...] — the catch-all
+// path for operations that touch multiple sections at once.
+const SECTION_TO_QUERY: Record<string, readonly unknown[][]> = {
+  apis:      [["admin", "apis"]],
+  deploys:   [["admin", "deploys"]],
+  tls:       [["admin", "tls"]],
+  approvals: [["admin", "approvals", "pending"], ["admin", "approvals", "all"]],
+  webhook:   [["admin", "webhook-activity"]],
+  streams:   [["admin", "streams"]],
+  consumers: [["admin", "consumers"]],
+  tokens:    [["admin", "admin-tokens"]],
+  sso:       [["admin", "sso"], ["status"]],
+  tuning:    [["admin", "tuning"]],
+  any:       [["admin"]],
+};
+
 export function Dashboard() {
+  const qc = useQueryClient();
+
   // Maximize state persisted in URL hash so a refresh / share-link
   // keeps focus on the panel the operator was inspecting.
   const [maxed, setMaxed] = useState<PanelKey | null>(() => {
-    const h = window.location.hash;
-    const m = h.match(/max=(\w+)/);
+    const m = window.location.hash.match(/max=(\w+)/);
     return (m?.[1] as PanelKey) || null;
   });
   useEffect(() => {
@@ -48,79 +109,149 @@ export function Dashboard() {
   const [webhookDeploy, setWebhookDeploy] = useState<string | null>(null);
 
   const [sseStatus, setSseStatus] = useState<SSEStatus>("connecting");
-  const handleSSE = useCallback((s: SSEStatus) => setSseStatus(s), []);
+  const handleSSEStatus = useCallback((s: SSEStatus) => setSseStatus(s), []);
 
-  // Force-mount the status query so TopBar can show uptime.
   useStatus();
-
-  // Counts for panel badges.
   const { data: apis } = useApis();
   const { data: approvals } = useApprovals("pending");
 
-  // Keyboard: "/" → audit filter, "g a/d/t/x" → jump panel, Esc → restore.
+  // SSE-driven cache invalidation. The backend publishes a `cfg.change`
+  // event with `{section: "apis"|"deploys"|..."any"}` after every
+  // successful Guard+Save inside the admin handlers. React Query
+  // invalidates only the affected section so we don't refetch
+  // everything — and we don't have to keep polling at 10s intervals.
+  // Polling stays as a 60s fallback in case SSE is disconnected
+  // (the queries' refetchInterval).
+  //
+  // `audit.entry` pushes new rows for the Audit log live tail without
+  // a periodic /api/admin/audit poll.
+  const { status: cfgSSEStatus } = useSSE(
+    ["cfg.change", "audit.entry"],
+    {
+      "cfg.change": (data) => {
+        const section = (data as { section?: string })?.section || "any";
+        const targets = SECTION_TO_QUERY[section] || SECTION_TO_QUERY.any;
+        for (const key of targets) {
+          qc.invalidateQueries({ queryKey: key as unknown as string[] });
+        }
+      },
+      "audit.entry": () => {
+        qc.invalidateQueries({ queryKey: ["admin", "audit"] });
+      },
+    },
+  );
+  useEffect(() => { handleSSEStatus(cfgSSEStatus); }, [cfgSSEStatus, handleSSEStatus]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLElement && /input|textarea|select/i.test(e.target.tagName)) return;
-      if (e.key === "Escape" && maxed) { setMaxed(null); return; }
+      if (e.key === "Escape" && maxed) { setMaxed(null); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [maxed]);
 
+  // ---- Panel renderers ----
+  const apisPanel = (
+    <Panel area="apis" title="APIs"
+      badge={apis ? <Badge variant="muted">{apis.length}</Badge> : null}
+      add={{ label: "Add", onClick: () => setApiAddOpen(true) }}
+      maxed={maxed === "apis"} onMaxToggle={onMaxToggle("apis")}
+    >
+      <ApisPanel onAdd={() => setApiAddOpen(true)} />
+    </Panel>
+  );
+  const deploysPanel = (
+    <Panel area="deploys" title="Deployments"
+      add={{ label: "Add", onClick: () => setDeployAddOpen(true) }}
+      maxed={maxed === "deploys"} onMaxToggle={onMaxToggle("deploys")}
+    >
+      <DeploysPanel
+        onAdd={() => setDeployAddOpen(true)}
+        onShowWebhook={(name) => setWebhookDeploy(name)}
+        onShowSSH={() => setSshOpen(true)}
+      />
+    </Panel>
+  );
+  const tlsPanel = (
+    <Panel area="tls" title="TLS"
+      add={{ label: "Add", onClick: () => setTlsAddOpen(true) }}
+      maxed={maxed === "tls"} onMaxToggle={onMaxToggle("tls")}
+    >
+      <TlsPanel onAdd={() => setTlsAddOpen(true)} />
+    </Panel>
+  );
+  const auditPanel = (
+    <Panel area="audit" title="Audit log" maxed={maxed === "audit"} onMaxToggle={onMaxToggle("audit")}>
+      <AuditPanel />
+    </Panel>
+  );
+  const approvalsPanel = (
+    <Panel area="approvals" title="Pending approvals"
+      badge={approvals && approvals.length > 0 ? <Badge variant="warning">{approvals.length}</Badge> : null}
+      maxed={maxed === "approvals"} onMaxToggle={onMaxToggle("approvals")}
+    >
+      <ApprovalsPanel />
+    </Panel>
+  );
+  const webhookPanel = (
+    <Panel area="webhook" title="Webhook activity" maxed={maxed === "webhook"} onMaxToggle={onMaxToggle("webhook")}>
+      <WebhookActivityPanel onAddDeploy={() => setDeployAddOpen(true)} />
+    </Panel>
+  );
+  const logsPanel = (
+    <Panel area="logs" title="Live logs" maxed={maxed === "logs"} onMaxToggle={onMaxToggle("logs")}>
+      <LogsPanel onSSEStatus={handleSSEStatus} />
+    </Panel>
+  );
+
+  const single: Record<PanelKey, React.ReactNode> = {
+    apis: apisPanel, deploys: deploysPanel, tls: tlsPanel,
+    audit: auditPanel, approvals: approvalsPanel, webhook: webhookPanel, logs: logsPanel,
+  };
+
   return (
     <TooltipProvider>
-      <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
         <TopBar sseStatus={sseStatus} onOpenSignIn={() => setSignInOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
 
-        <main id="main" className="panel-grid" data-maxed={maxed || undefined}>
-          <Panel
-            area="apis" title="APIs"
-            badge={apis ? <Badge variant="muted">{apis.length}</Badge> : null}
-            add={{ label: "Add", onClick: () => setApiAddOpen(true) }}
-            maxed={maxed === "apis"} onMaxToggle={onMaxToggle("apis")}
-          >
-            <ApisPanel onAdd={() => setApiAddOpen(true)} />
-          </Panel>
-
-          <Panel
-            area="deploys" title="Deployments"
-            add={{ label: "Add", onClick: () => setDeployAddOpen(true) }}
-            maxed={maxed === "deploys"} onMaxToggle={onMaxToggle("deploys")}
-          >
-            <DeploysPanel
-              onAdd={() => setDeployAddOpen(true)}
-              onShowWebhook={(name) => setWebhookDeploy(name)}
-              onShowSSH={() => setSshOpen(true)}
-            />
-          </Panel>
-
-          <Panel
-            area="tls" title="TLS"
-            add={{ label: "Add", onClick: () => setTlsAddOpen(true) }}
-            maxed={maxed === "tls"} onMaxToggle={onMaxToggle("tls")}
-          >
-            <TlsPanel onAdd={() => setTlsAddOpen(true)} />
-          </Panel>
-
-          <Panel area="audit" title="Audit log" maxed={maxed === "audit"} onMaxToggle={onMaxToggle("audit")}>
-            <AuditPanel />
-          </Panel>
-
-          <Panel
-            area="approvals" title="Pending approvals"
-            badge={approvals && approvals.length > 0 ? <Badge variant="warning">{approvals.length}</Badge> : null}
-            maxed={maxed === "approvals"} onMaxToggle={onMaxToggle("approvals")}
-          >
-            <ApprovalsPanel />
-          </Panel>
-
-          <Panel area="webhook" title="Webhook activity" maxed={maxed === "webhook"} onMaxToggle={onMaxToggle("webhook")}>
-            <WebhookActivityPanel onAddDeploy={() => setDeployAddOpen(true)} />
-          </Panel>
-
-          <Panel area="logs" title="Live logs" maxed={maxed === "logs"} onMaxToggle={onMaxToggle("logs")}>
-            <LogsPanel onSSEStatus={handleSSE} />
-          </Panel>
+        <main id="main" className="flex-1 min-h-0 overflow-hidden p-3">
+          {maxed ? (
+            // flex chain so Panel's overflow-auto body clips correctly.
+            // The wrapper takes full main height, Panel takes 100% of
+            // wrapper via flex-1; Panel's inner scroll container
+            // bounded → audit list scrolls inside the panel instead of
+            // pushing past viewport.
+            <div className="flex h-full min-h-0 overflow-hidden">
+              <div className="flex-1 min-h-0">{single[maxed]}</div>
+            </div>
+          ) : (
+            <PanelGroup direction="vertical" autoSaveId={RESIZE_VERTICAL_ID} className="h-full">
+              <RPanel defaultSize={32} minSize={15} className="min-h-0">
+                <PanelGroup direction="horizontal" autoSaveId={RESIZE_ROW1_ID}>
+                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full pr-1">{apisPanel}</div></RPanel>
+                  <VHandle />
+                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full px-1">{deploysPanel}</div></RPanel>
+                  <VHandle />
+                  <RPanel defaultSize={34} minSize={15} className="min-h-0"><div className="h-full pl-1">{tlsPanel}</div></RPanel>
+                </PanelGroup>
+              </RPanel>
+              <HHandle />
+              <RPanel defaultSize={32} minSize={15} className="min-h-0">
+                <PanelGroup direction="horizontal" autoSaveId={RESIZE_ROW2_ID}>
+                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full pr-1">{auditPanel}</div></RPanel>
+                  <VHandle />
+                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full px-1">{approvalsPanel}</div></RPanel>
+                  <VHandle />
+                  <RPanel defaultSize={34} minSize={15} className="min-h-0"><div className="h-full pl-1">{webhookPanel}</div></RPanel>
+                </PanelGroup>
+              </RPanel>
+              <HHandle />
+              <RPanel defaultSize={36} minSize={15} className="min-h-0">
+                <div className="h-full">{logsPanel}</div>
+              </RPanel>
+            </PanelGroup>
+          )}
         </main>
 
         <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} />
