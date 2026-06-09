@@ -8,9 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/spf13/afero"
+
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/nginx"
-	"github.com/spf13/afero"
 )
 
 // TestAdminAPI_PutTriggersNginxApply pins the v0.4.6 fix for the bug
