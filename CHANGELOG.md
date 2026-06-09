@@ -5,6 +5,70 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.4] — 2026-06-10
+
+The v0.5.3 "resizable layout" commit actually shipped the old CSS-grid
+layout — the Vite `Dashboard.tsx` write that should have introduced
+`react-resizable-panels` was silently dropped. v0.5.4 lands what
+v0.5.3 advertised, fixes the maximize overflow bug for real, makes the
+resize handles actually visible, and converts the panel polling story
+to SSE-driven invalidation.
+
+### Added
+
+- **SSE-driven cache invalidation.** Every admin handler that touches
+  `config.yaml` now publishes a `cfg.change` event tagged with the
+  section that mutated (`apis` / `deploys` / `tls` / `sso` / `tuning`
+  / `tokens` / `any`). The React dashboard subscribes to this topic
+  via the existing `useSSE` hook and invalidates only the affected
+  `["admin", ...]` React Query key. Idle traffic drops ~6× and the UI
+  reflects mutations in ~10 ms instead of waiting up to 10 s.
+  Polling stays at a 60 s fallback (vs. the previous 10 s) for
+  SSE-disconnected sessions (idle laptop, intermittent network).
+- **Real resizable PanelGroup layout** with three groups
+  (`apigw.dashboard.rows.v1`, `…row1.v1`, `…row2.v1`) auto-saving sizes
+  to localStorage. Pinned to `react-resizable-panels@^2` — v4 renamed
+  every export and flipped to a single `defaultLayout` array prop that
+  doesn't compose with per-group autosave IDs.
+
+### Fixed
+
+- **Maximize panel overflowed past the viewport.** v0.5.3 wrapped the
+  maxed panel in `<div className="h-full">`, but `h-full` only
+  constrains the outer panel — long inner content (Audit log with 50+
+  rows) still pushed past `main`. Now wraps in a `flex h-full min-h-0
+  overflow-hidden` chain with the Panel taking `flex-1 min-h-0` so
+  the Panel's own `overflow-auto` body scrolls inside the panel.
+- **Resize handles were invisible.** The v0.5.3 handles were `w-1.5`
+  + `bg-transparent` — 6 px wide and fully transparent until hover.
+  Operators saw no affordance. Each handle now renders a 1 px subtle
+  border line plus a 3-dot grip in the middle; both fade to primary on
+  hover or during active drag. Still a 7 px-wide hit area so they're
+  touch-friendly.
+
+### Internal
+
+- `internal/dashboard/admin_v5_pub.go` — `publishCfgChange(section)`
+  helper. No-op when `s.Hub` is nil so test fixtures that build a bare
+  `Server` keep working.
+- `internal/dashboard/admin_api.go` — publish from the success path
+  of every APIs / Deploys POST/PUT/DELETE handler.
+- `internal/dashboard/admin_v5.go` — publish from SSO / Tuning /
+  Admin tokens success paths.
+- React Query default `refetchInterval` lifted from 10 s to 60 s
+  (`web/src/App.tsx`).
+
+### Bundle size
+
+| | Raw | Gzip |
+|---|---|---|
+| index.js | 153.6 KB | 40.8 KB |
+| react vendor | 352 KB | 109.5 KB |
+| css | 29.5 KB | 6.2 KB |
+| **Total** | ~536 KB | ~157 KB |
+
+About +10 KB gz vs v0.5.3 — the resizable primitives + the SSE wiring.
+
 ## [0.5.3] — 2026-06-10
 
 Polish pass on the v0.5.0 React dashboard. Six issues surfaced
