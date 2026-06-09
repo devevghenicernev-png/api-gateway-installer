@@ -401,6 +401,20 @@
         toast(`Redeploy refused (HTTP ${res.status}): ${body.error || ""}`, "err");
         return;
       }
+      // 202 = approvals-parked. Without this branch the operator clicked
+      // Redeploy, saw a "queued" badge flip in, and waited forever for a
+      // build that never started because the change is sitting in the
+      // approvals queue. Surface the parked-id so it can be found.
+      if (res.status === 202) {
+        const body = await res.json().catch(() => ({}));
+        toast(
+          `${name} redeploy parked for approvals — id: ${body.id || "(see Pending approvals)"}`,
+          "info",
+          { timeout: 9000 },
+        );
+        refreshAdmin();
+        return;
+      }
       // Switch log panel to this deploy so the build stream is visible.
       if (elLogSel.querySelector(`option[value="${cssEsc(name)}"]`)) {
         elLogSel.value = name;
@@ -641,6 +655,23 @@
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         toast(`Toggle refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+        return;
+      }
+      // 202 = approvals-parked. The server accepted the request shape but
+      // did not apply it because the api.edit policy requires N-of-M
+      // approvals. The previous code treated 202 as "ok" and toasted
+      // "enabled" / "disabled" — the operator clicked, saw success, then
+      // the API card kept showing the old state, and there was nothing in
+      // the UI to explain why. Surface the parked-id like deleteResource
+      // does, so the operator (or a reviewer) can find the change.
+      if (res.status === 202) {
+        const body = await res.json().catch(() => ({}));
+        toast(
+          `${api.Name} ${next.Enabled ? "enable" : "disable"} parked for approvals — id: ${body.id || "(see Pending approvals)"}`,
+          "info",
+          { timeout: 9000 },
+        );
+        refreshAdmin();
         return;
       }
       toast(`${api.Name} ${next.Enabled ? "enabled" : "disabled"}.`, "ok");

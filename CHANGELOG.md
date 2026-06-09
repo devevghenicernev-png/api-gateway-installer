@@ -5,6 +5,34 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-06-09
+
+Bugfix release. Dashboard toggle / redeploy actions silently swallowed
+the approvals-parked response (HTTP 202) — the operator clicked the
+button, saw a "✓ enabled." or "queued" toast, and then the UI kept
+showing the unchanged state with no explanation.
+
+### Fixed
+
+- **Dashboard `toggleAPI` did not distinguish 202 from 200.** The
+  Enable/Disable button on an API card calls
+  `PUT /api/admin/apis/<name>`; when the `api.edit` policy requires
+  N-of-M approvals the server returns 202 with the parked-change ID.
+  Previous code checked `if (!res.ok)` (false for 202), then toasted
+  `"foodmanager enabled."` even though the API stayed disabled in
+  config. The operator concluded the button was broken.
+
+  v0.4.5 branches on `res.status === 202` and toasts
+  `"<name> enable parked for approvals — id: <id>"`, mirroring the
+  shape already used by `deleteResource`. The Pending approvals panel
+  surfaces the change for a reviewer to approve. Same fix applied to
+  the Redeploy button (`POST /api/admin/deploy-run/<name>`), which had
+  the identical bug — operator hit Redeploy, saw the badge flip to
+  "queued", and waited forever for a build that was actually parked.
+
+  No daemon-side change. The admin handlers already returned 202
+  correctly; only the dashboard UI was misinterpreting it.
+
 ## [0.4.4] — 2026-06-09
 
 Architectural fix. v0.4.1 and v0.4.2 papered over a deeper problem in
