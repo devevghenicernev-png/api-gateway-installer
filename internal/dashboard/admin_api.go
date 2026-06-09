@@ -51,6 +51,19 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	registerAdmin(mux, "/api/admin/tls-renew/", s.adminTLSRenewHandler)
 	registerAdmin(mux, "/api/admin/webhook-rotate/", s.adminWebhookRotateHandler)
 	registerAdmin(mux, "/api/admin/webhook-setup/", s.adminWebhookSetupHandler)
+	registerAdmin(mux, "/api/admin/webhook-activity", s.adminWebhookActivityHandler)
+	// v0.5.0 — backing API for the React dashboard's Settings sheet
+	// and the deploy ssh-key dialog.
+	registerAdmin(mux, "/api/admin/deploys/sshkey", s.adminDeploySSHKeyHandler)
+	registerAdmin(mux, "/api/admin/sso", s.adminSSOHandler)
+	registerAdmin(mux, "/api/admin/tuning", s.adminTuningHandler)
+	registerAdmin(mux, "/api/admin/admin-tokens", s.adminAdminTokensHandler)
+	registerAdmin(mux, "/api/admin/admin-tokens/", s.adminAdminTokenHandler)
+	registerAdmin(mux, "/api/admin/audit/verify", s.adminAuditVerifyHandler)
+	registerAdmin(mux, "/api/admin/audit/export", s.adminAuditExportHandler)
+	registerAdmin(mux, "/api/admin/config/history", s.adminConfigHistoryHandler)
+	registerAdmin(mux, "/api/admin/config/rollback/", s.adminConfigRollbackHandler)
+	registerAdmin(mux, "/api/admin/config/import", s.adminConfigImportHandler)
 	registerAdmin(mux, "/api/admin/cache-purge/", s.adminCachePurgeHandler)
 	registerAdmin(mux, "/api/admin/tls", s.adminTLSHandler)
 	registerAdmin(mux, "/api/admin/config", s.adminConfigHandler)
@@ -143,12 +156,28 @@ func (s *Server) adminAPIsHandler(w http.ResponseWriter, r *http.Request) {
 			Before:     nil,
 			After:      apiToMap(api),
 		}
+		// v0.5.0: ?replace=<api-name> / ?replace_deploy=<name> atomically
+		// remove the conflicting entry before AddAPI in the same Guard
+		// callback. The dashboard UI computes the conflicting resource
+		// client-side and tags the POST; otherwise the second add fails
+		// the duplicate-path check at nginx -t time.
+		replaceAPI := r.URL.Query().Get("replace")
+		replaceDeploy := r.URL.Query().Get("replace_deploy")
 		if _, err := s.Sec.Guard(r, action, func() error {
 			if err := enforceTenantQuota(cfg, ident, s, "apis"); err != nil {
 				return err
 			}
-			// AddAPI guards uniqueness one more time — defense in depth in
-			// case Find above was racey with another writer.
+			if replaceAPI != "" {
+				_ = cfg.RemoveAPI(replaceAPI)
+			}
+			if replaceDeploy != "" {
+				for i, d := range cfg.Deploys {
+					if d.Name == replaceDeploy {
+						cfg.Deploys = append(cfg.Deploys[:i], cfg.Deploys[i+1:]...)
+						break
+					}
+				}
+			}
 			if err := cfg.AddAPI(api); err != nil {
 				return err
 			}
@@ -337,9 +366,27 @@ func (s *Server) adminDeploysHandler(w http.ResponseWriter, r *http.Request) {
 			Resource:   "deploy/" + dep.Name,
 			After:      deployToMap(dep),
 		}
+		// v0.5.0: same ?replace_api/replace_deploy atomic semantics
+		// as adminAPIsHandler. Without these flags the dashboard would
+		// have to do a fragile two-step (DELETE then POST) that races
+		// against another writer and produces a half-applied state if
+		// the second call fails.
+		replaceAPI := r.URL.Query().Get("replace_api")
+		replaceDeploy := r.URL.Query().Get("replace_deploy")
 		if _, err := s.Sec.Guard(r, action, func() error {
 			if err := enforceTenantQuota(cfg, ident, s, "deploys"); err != nil {
 				return err
+			}
+			if replaceAPI != "" {
+				_ = cfg.RemoveAPI(replaceAPI)
+			}
+			if replaceDeploy != "" {
+				for i, d := range cfg.Deploys {
+					if d.Name == replaceDeploy {
+						cfg.Deploys = append(cfg.Deploys[:i], cfg.Deploys[i+1:]...)
+						break
+					}
+				}
 			}
 			if err := cfg.AddDeploy(dep); err != nil {
 				return err
@@ -347,6 +394,14 @@ func (s *Server) adminDeploysHandler(w http.ResponseWriter, r *http.Request) {
 			return cfg.Save()
 		}); err != nil {
 			adminWriteJSONError(w, Status(err), err.Error())
+			return
+		}
+		// v0.5.0: nginx reload after deploy add (mirrors v0.4.6 fix for
+		// apis). Without this the deploy was registered in config but
+		// nginx still routed to the old API.
+		if err := s.nginxManager().WriteAndReload(cfg); err != nil {
+			adminWriteJSONError(w, http.StatusInternalServerError,
+				"config saved but nginx reload failed — run `apigw api reload`: "+err.Error())
 			return
 		}
 		adminWriteJSON(w, http.StatusCreated, dep)

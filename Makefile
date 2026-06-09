@@ -13,6 +13,18 @@ LDFLAGS := -s -w \
 
 GO ?= go
 
+# Web dashboard — Vite + React + shadcn (v0.5.0). Build output lands in
+# internal/assets/dashboard/ and is committed to git, so `go build`
+# alone produces a runnable binary even without Node on the host. Run
+# `make web` after editing anything under web/src/ to refresh the bundle.
+.PHONY: web web-dev web-clean
+web:
+	cd web && npm install --no-audit --no-fund && npm run build
+web-dev:
+	cd web && npm install && npm run dev
+web-clean:
+	rm -rf web/node_modules web/dist
+
 .PHONY: build
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/$(BINARY) $(CMD)

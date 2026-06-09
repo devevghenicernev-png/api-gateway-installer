@@ -1,0 +1,192 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens. All shadcn primitives + Tailwind colors resolve to the
+ * `--<token>` variables below via hsl(var(--token)). To flip themes we
+ * just swap the variable block on <html data-theme="dark">. The auto-
+ * detect rule applies the dark block when the OS asks for it AND the
+ * user hasn't overridden via the topbar toggle (which sets data-theme
+ * explicitly).
+ *
+ * Palette:
+ *   light: slate-50 surfaces, zinc-900 text, cyan-700 primary
+ *   dark:  zinc-950 surfaces, zinc-50 text, cyan-400 primary
+ *
+ * Semantic colors (success / warning / destructive) mirror Tailwind's
+ * emerald / amber / rose at appropriate weights for each theme.
+ */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 47.4% 11.2%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+
+    --primary: 186 76% 33%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142.1 76.2% 36.3%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 186 76% 33%;
+
+    --radius: 0.5rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: 240 10% 3.9%;
+      --foreground: 0 0% 98%;
+
+      --card: 240 10% 5.9%;
+      --card-foreground: 0 0% 98%;
+
+      --popover: 240 10% 3.9%;
+      --popover-foreground: 0 0% 98%;
+
+      --primary: 186 84% 60%;
+      --primary-foreground: 240 10% 3.9%;
+
+      --secondary: 240 3.7% 15.9%;
+      --secondary-foreground: 0 0% 98%;
+
+      --muted: 240 3.7% 15.9%;
+      --muted-foreground: 240 5% 64.9%;
+
+      --accent: 240 3.7% 15.9%;
+      --accent-foreground: 0 0% 98%;
+
+      --destructive: 0 62.8% 50.6%;
+      --destructive-foreground: 0 0% 98%;
+
+      --success: 142 76% 45%;
+      --success-foreground: 0 0% 98%;
+
+      --warning: 38 92% 60%;
+      --warning-foreground: 0 0% 9%;
+
+      --border: 240 3.7% 15.9%;
+      --input: 240 3.7% 15.9%;
+      --ring: 186 84% 60%;
+    }
+  }
+
+  [data-theme="dark"] {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 5.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 186 84% 60%;
+    --primary-foreground: 240 10% 3.9%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 50.6%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 142 76% 45%;
+    --success-foreground: 0 0% 98%;
+    --warning: 38 92% 60%;
+    --warning-foreground: 0 0% 9%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 186 84% 60%;
+  }
+
+  * { @apply border-border; }
+  html { -webkit-tap-highlight-color: transparent; }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Tight numeric tabular figures for ports / SHAs / timestamps. */
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@layer components {
+  /* Panel grid lives outside Tailwind's utility model because
+     grid-template-areas isn't expressible as a single class. */
+  .panel-grid {
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: minmax(220px, auto) minmax(220px, auto) minmax(280px, 1fr);
+    grid-template-areas:
+      "apis     deploys   tls"
+      "audit    approvals webhook"
+      "logs     logs      logs";
+    min-height: calc(100vh - 56px);
+  }
+  @media (max-width: 1100px) {
+    .panel-grid {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto;
+      grid-template-areas:
+        "apis     deploys"
+        "tls      audit"
+        "approvals webhook"
+        "logs     logs";
+    }
+  }
+  @media (max-width: 720px) {
+    .panel-grid {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+      grid-template-areas:
+        "apis"
+        "deploys"
+        "tls"
+        "audit"
+        "approvals"
+        "webhook"
+        "logs";
+      padding: 0.875rem;
+      gap: 0.75rem;
+    }
+  }
+  .panel-grid[data-maxed="apis"]      { grid-template-areas: "apis"; }
+  .panel-grid[data-maxed="deploys"]   { grid-template-areas: "deploys"; }
+  .panel-grid[data-maxed="tls"]       { grid-template-areas: "tls"; }
+  .panel-grid[data-maxed="audit"]     { grid-template-areas: "audit"; }
+  .panel-grid[data-maxed="approvals"] { grid-template-areas: "approvals"; }
+  .panel-grid[data-maxed="webhook"]   { grid-template-areas: "webhook"; }
+  .panel-grid[data-maxed="logs"]      { grid-template-areas: "logs"; }
+  .panel-grid[data-maxed] {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+  }
+}
+
+/* Hide-scrollbar-but-keep-scroll for log viewers. */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }

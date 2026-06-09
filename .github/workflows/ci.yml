@@ -9,6 +9,30 @@ permissions:
   contents: read
 
 jobs:
+  # v0.5.0 — Rebuilds the React dashboard and verifies the committed
+  # bundle matches the source. Catches the "I edited web/src/ but
+  # forgot to run `make web`" footgun before it lands in main.
+  web-build:
+    name: web build (no-drift)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: assert committed bundle is up to date
+        run: |
+          if ! git diff --exit-code internal/assets/dashboard/; then
+            echo "::error::Committed dashboard bundle is stale — run 'make web' and re-commit web/ + internal/assets/dashboard/"
+            exit 1
+          fi
+
   test:
     name: test
     runs-on: ubuntu-24.04

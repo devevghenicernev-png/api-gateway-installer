@@ -5,6 +5,138 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-10
+
+Dashboard ground-up rewrite. The vanilla HTML+CSS+JS embedded UI
+shipped in v0.4.0 had grown to ~1200 lines of JS and ~950 lines of
+hand-tuned CSS, with most CLI verbs (Settings, Streams, Consumers,
+Tuning, SSO setup form, deploy SSH key, conflict resolution) absent
+from the operator surface. v0.5.0 replaces the bundle with a typed
+React app built on shadcn/ui + Radix UI + Tailwind, sized at ~150KB
+gzipped (split into react vendor + app + ui chunks).
+
+### Added — React dashboard
+
+- **Full feature parity with the CLI surface.** Every `apigw` verb that
+  mutates config is now reachable from the UI: API rewrites editor,
+  deploy add (full form mirroring `apigw deploy add` including
+  rewrites + health probe + env-file copy), deploy SSH key gen, webhook
+  setup + rotate, TLS issuance form (Let's Encrypt / DuckDNS / self-signed),
+  audit verify + export, admin tokens CRUD, consumers CRUD, streams
+  CRUD, nginx tuning form, SSO setup form, config history (read-only
+  stub for v0.5.0; rollback/import remain CLI-only with a clear 501
+  message).
+- **Settings sheet** behind the topbar gear icon — tabbed surface for
+  SSO / Admin tokens / Consumers / Streams / Tuning / Config.
+- **Atomic conflict resolution.** Add API / Add Deploy detect a path
+  collision client-side and submit the create with `?replace_api=` /
+  `?replace_deploy=` query params; the backend removes the conflicting
+  entry and adds the new one inside a single `Guard` callback +
+  `cfg.Save` + `WriteAndReload` — no half-applied state if the second
+  step would have failed.
+- **Per-deploy webhook setup + rotate** lives inside an
+  in-card dialog. URL + secret + GitHub instructions + Rotate button
+  (with destructive confirmation) — no more dropping to the CLI for
+  `apigw webhook setup`.
+- **Live logs SSE indicator + virtualised buffer.** Connection state
+  (open / reconnecting / closed / connecting) renders as a coloured dot
+  in both the topbar and the logs panel header. The panel keeps the
+  last 5000 lines in memory and renders the trailing 800 so long-running
+  streams don't bloat the DOM.
+- **Audit log inline diff** (preserved from v0.4.7) plus full-document
+  detail dialog with before/after JSON, hash, and prev-hash.
+- **Approvals workflow** with comment / reject reason form, surfaces
+  N-of-M progress, and applies the change in place on threshold.
+- **Adaptive layout** with 1100 / 720 / 480px breakpoints — topbar
+  reflows on mobile, panel grid drops 3 → 2 → 1 column, dialogs
+  collapse to single column on phones.
+- **Theme system.** Auto-detect prefers-color-scheme + manual override
+  (`System` / `Light` / `Dark`) from the topbar dropdown. CSS
+  variables drive every shadcn primitive — no Tailwind color literals
+  in component source.
+- **Sign-in dialog** replaces the v0.4 absolute-positioned hand-rolled
+  modal with a Radix Dialog + focus trap + return-focus. SSO sign-in
+  button appears in the topbar when `Security.SSO` is configured.
+
+### Added — backend admin surface
+
+- `GET / POST /api/admin/deploys/sshkey` — read / generate the ed25519
+  deploy key used to clone private repos. POST is idempotent unless the
+  caller is willing to rotate via the same handler.
+- `GET / POST /api/admin/sso` — read or write the `Security.SSO` block.
+  ClientSecret is `[redacted]` in the audit payload so the hash-chained
+  log doesn't preserve plaintext.
+- `GET / POST /api/admin/tuning` — read / write `Listen.Tuning`. POST
+  triggers `WriteAndReload` so the new `worker_processes` etc. take
+  effect in the same request.
+- `GET /api/admin/admin-tokens`, `POST /api/admin/admin-tokens`,
+  `DELETE /api/admin/admin-tokens/<name>` — token CRUD. List redacts
+  the token to `…<last4>`. POST returns the full value once.
+- `GET /api/admin/audit/verify` — walks the audit hash chain, returns
+  `{valid, entries}`.
+- `GET /api/admin/audit/export?format=json|csv` — streaming export.
+- `GET /api/admin/webhook-activity` — last 200 `webhook.*` audit entries
+  rendered to the dashboard's Webhook Activity panel.
+- `GET /api/admin/config/history` — config snapshot listing (returns
+  `[]` on installs without the snapshot path enabled; the dashboard
+  shows an empty state rather than an error banner).
+- `POST /api/admin/apis?replace=<name>&replace_deploy=<name>` and
+  `POST /api/admin/deploys?replace_api=<name>&replace_deploy=<name>` —
+  atomic conflict replacement on create. Without the query params the
+  endpoint behaves exactly as in v0.4.x.
+- `POST /api/admin/deploys` now calls `WriteAndReload` after a
+  successful `Guard` (mirrors the v0.4.6 fix for `/api/admin/apis`).
+
+### Changed
+
+- **`internal/assets/dashboard/`** is now a Vite build output. The
+  vanilla `index.html`, `app.css`, `app.js`, `favicon.svg` are deleted
+  and replaced by the Vite-emitted bundle. `go:embed all:dashboard`
+  picks up everything the same way it did before.
+- **`writeSSOSetupHelper`** (v0.4.7 HTML stub for unconfigured SSO) is
+  gone — the dashboard's Settings → SSO tab is now the full setup
+  surface, so the bare-bones helper page that lived at the OIDC entry
+  is no longer needed. The endpoint still returns 404 for unconfigured
+  installs so robotic probes get a definitive answer.
+
+### Build pipeline
+
+- **`web/`** — Vite + React + TypeScript + Tailwind + shadcn primitives.
+  `npm install --no-audit --no-fund` pulls ~205 packages totalling
+  ~210MB on disk (gitignored); the production build emits
+  ~150KB gzipped to `internal/assets/dashboard/`.
+- **Makefile** `make web` builds the bundle. `make web-dev` runs the
+  Vite dev server with a proxy to `localhost:9080` for `/api`, `/events`,
+  `/auth`. `make web-clean` removes `node_modules` + `dist`.
+- **CI** new `web-build` job runs `npm ci && npm run build` then
+  `git diff --exit-code internal/assets/dashboard/` so a stale
+  committed bundle fails the build. Catches the "I edited web/src/ but
+  forgot to run `make web`" mistake before it lands.
+- **`.gitattributes`** marks `internal/assets/dashboard/index.html`
+  and `assets/**` as `linguist-generated=true` so GitHub's blame /
+  language stats / diff defaults treat them correctly.
+
+### Known scope
+
+The following endpoints land as informative 501s in v0.5.0 — the
+dashboard UI shows a clear toast, no broken UX:
+
+- `POST /api/admin/config/rollback/<sha>` — CLI-only (`apigw config rollback`).
+- `POST /api/admin/config/import`         — CLI-only (`apigw config import`).
+
+Both will get a proper implementation in v0.5.1 once the confighistory
+package surfaces a transactional rollback API.
+
+### Bundle size
+
+| File                        | Raw     | Gzip    |
+|-----------------------------|---------|---------|
+| `index.html`                | 1.7 KB  | 0.9 KB  |
+| `assets/index-<hash>.css`   | 29.7 KB | 6.2 KB  |
+| `assets/index-<hash>.js`    | 149 KB  | 39.8 KB |
+| `assets/react-<hash>.js`    | 325 KB  | 100 KB  |
+| **Total**                   | ~510 KB | ~147 KB |
+
 ## [0.4.7] — 2026-06-09
 
 Major dashboard UX pass. v0.4.0 shipped a functional dashboard but
