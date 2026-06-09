@@ -34,6 +34,7 @@ func TestRender_DashboardStaticAssets(t *testing.T) {
 	for _, want := range []string{
 		"location = /app.css {",
 		"location = /app.js {",
+		"location = /favicon.svg {",
 		"proxy_pass http://127.0.0.1:9080;",
 	} {
 		if !strings.Contains(got, want) {
@@ -59,6 +60,7 @@ func TestRender_DashboardStaticAssets_OmittedWhenDisabled(t *testing.T) {
 	for _, unwanted := range []string{
 		"location = /app.css",
 		"location = /app.js",
+		"location = /favicon.svg",
 	} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("rendered config contains %q when dashboard disabled\n--- BEGIN ---\n%s\n--- END ---", unwanted, got)

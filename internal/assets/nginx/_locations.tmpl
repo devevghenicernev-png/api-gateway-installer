@@ -610,6 +610,11 @@
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
     }
+    location = /favicon.svg {
+        proxy_pass http://127.0.0.1:{{ .Dashboard.Port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+    }
     {{ end -}}
     location / {
         return 404;

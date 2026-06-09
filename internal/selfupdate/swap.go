@@ -108,15 +108,23 @@ func DownloadAndSwap(ctx context.Context, asset, checksums Asset, repo string, o
 		return "", fmt.Errorf("download checksums: %w", err)
 	}
 
-	// Cosign keyless verification — mandatory by default. The only way to
-	// fall through to sha256-only is the explicit opt-out flag, because
-	// without cosign there's no defence against a malicious mirror that
-	// happens to publish a matching checksums.txt.
+	// Cosign keyless verification — mandatory by default. When cosign
+	// isn't on PATH we try to bootstrap a sha256-pinned cosign into the
+	// same tmp dir, mirroring scripts/install.sh. Only if that also
+	// fails (unknown arch, network unreachable, sha mismatch) do we
+	// fall through to the AllowMissingCosign gate.
 	mode := VerifyCosign
 	cosignPath, cosignErr := exec.LookPath("cosign")
 	if cosignErr != nil {
+		if bootstrapped, bErr := bootstrapCosign(ctx, tmp); bErr == nil {
+			cosignPath = bootstrapped
+			cosignErr = nil
+		}
+	}
+	if cosignErr != nil {
 		if !opts.AllowMissingCosign {
-			return "", fmt.Errorf("cosign not on PATH — install cosign (https://docs.sigstore.dev/cosign/installation/) or rerun with --insecure-skip-cosign")
+			return "", fmt.Errorf("cosign not on PATH and could not bootstrap (%s/%s) — install cosign (https://docs.sigstore.dev/cosign/installation/) or rerun with --insecure-skip-cosign",
+				runtime.GOOS, runtime.GOARCH)
 		}
 		mode = VerifySHA
 	}

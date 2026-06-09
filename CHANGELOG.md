@@ -5,6 +5,44 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-06-09
+
+Follow-up to v0.4.1 — closes the cosign UX gap discovered when running
+`apigw upgrade` on a host where install.sh had bootstrapped cosign into
+a temp dir and discarded it. Also adds the dashboard favicon that was
+missing from the published UI.
+
+### Added
+
+- **Dashboard favicon.** `internal/assets/dashboard/favicon.svg`
+  (copied from the landing-page asset) plus a `<link rel="icon">` in
+  the dashboard `index.html`. New `location = /favicon.svg` route in
+  the nginx template proxies it to the dashboard daemon, in line with
+  the `/app.css` + `/app.js` routes added in v0.4.1.
+  `TestRender_DashboardStaticAssets` now also asserts the favicon
+  route, and `_OmittedWhenDisabled` verifies it is gated on
+  `Dashboard.Enabled`.
+
+### Fixed
+
+- **`apigw upgrade` no longer requires a host-installed cosign.**
+  v0.4.0's install.sh bootstraps cosign into a temp dir for one
+  verification then discards it — leaving the host without cosign on
+  PATH and the first follow-up `apigw upgrade` print
+  `sha256-only (cosign missing)`. `apigw upgrade` now uses the same
+  bootstrap pattern as install.sh: download a sha256-pinned cosign
+  (`v3.0.6`) into the upgrade tmp dir, verify against an embedded
+  sha256, use it for one `verify-blob`, then discard. The pin sits in
+  `internal/selfupdate/cosign_bootstrap.go` and must be bumped together
+  with `scripts/install.sh` — both ship the same sha256 table.
+  Exported `selfupdate.CanBootstrapCosign()` /
+  `selfupdate.CosignAssetName()` / `selfupdate.PinnedCosignVersion()`
+  so `apigw upgrade --check` can advertise
+  `cosign+sha256 (bootstrapped v3.0.6 from sigstore)` upfront instead
+  of warning about a missing cosign. Tests:
+  `internal/selfupdate/cosign_bootstrap_test.go` covers the pin table
+  + version-string format guards.
+
 ## [0.4.1] — 2026-06-09
 
 Bugfix release. Surfaced during the first real-world v0.4.0 install on

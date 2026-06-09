@@ -67,9 +67,13 @@ func run(cmd *cobra.Command, opts *options) error {
 	newer := selfupdate.IsNewer(current, rel.TagName)
 	verifyMode := "cosign+sha256 (keyless, GH OIDC)"
 	switch {
-	case !cosignAvailable() && opts.InsecureSkipCosign:
+	case cosignAvailable():
+		// host cosign — best path; nothing to mention
+	case selfupdate.CanBootstrapCosign():
+		verifyMode = "cosign+sha256 (bootstrapped " + selfupdate.PinnedCosignVersion() + " from sigstore)"
+	case opts.InsecureSkipCosign:
 		verifyMode = "sha256-only (--insecure-skip-cosign)"
-	case !cosignAvailable():
+	default:
 		verifyMode = "sha256-only (cosign missing — install or pass --insecure-skip-cosign)"
 	}
 
