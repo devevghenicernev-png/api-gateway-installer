@@ -43,14 +43,20 @@ export interface Deploy {
   LastError?: string;
 }
 
+// Mirrors apitls.CertInfo on the Go side — keep these in lockstep when
+// touching either side. Field names are JSON-case (snake) because the
+// Go struct tags JSON-encode that way.
 export interface TLSCert {
   domain: string;
   strategy: string;        // letsencrypt | duckdns | selfsigned
-  days_left: number;
-  issued_at?: string;
-  expires_at?: string;
-  san?: string[];
+  subject?: string;
   issuer?: string;
+  not_before?: string;
+  not_after?: string;
+  days_left: number;
+  serial_hex?: string;
+  fingerprint_sha256?: string;
+  san?: string[];
   ocsp_enabled?: boolean;
 }
 

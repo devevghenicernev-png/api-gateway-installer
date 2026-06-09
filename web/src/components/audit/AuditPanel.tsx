@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Check, Download, FileText, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import { useAudit, useAuditVerify } from "../../hooks/useAdminQueries";
 import { useAuth } from "../../auth/auth-context";
 import type { AuditEntry } from "../../lib/types";
@@ -42,10 +43,21 @@ export function AuditPanel() {
       </div>
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
         <Button
-          variant="ghost" size="xs" onClick={() => verify.mutate()} disabled={verify.isPending}
+          variant="ghost" size="xs" disabled={verify.isPending}
           className="gap-1"
+          title="Walk the SHA-256 hash chain of every audit entry and report any tampering. Slow on large logs (up to ~30s for 10k entries)."
+          onClick={() => {
+            // Immediate feedback — the actual chain walk can take 30s on
+            // installs with thousands of entries. Without this toast
+            // operators thought the button did nothing.
+            toast.message("Verifying hash chain…", {
+              description: "Walking every entry — can take up to 30 seconds on big logs.",
+              duration: 5000,
+            });
+            verify.mutate();
+          }}
         >
-          <ShieldCheck className="h-3 w-3" /> Verify chain
+          <ShieldCheck className="h-3 w-3" /> {verify.isPending ? "Verifying…" : "Verify chain"}
         </Button>
         <Button asChild variant="ghost" size="xs" className="gap-1">
           <a href="api/admin/audit/export?format=json" download="audit.json"><Download className="h-3 w-3" /> JSON</a>

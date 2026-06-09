@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { CircleDot, LogIn, LogOut, MonitorCog, Moon, Settings as SettingsIcon, Sun, MonitorSmartphone } from "lucide-react";
 import { useAuth } from "../../auth/auth-context";
 import { useStatus } from "../../hooks/useAdminQueries";
@@ -20,16 +20,26 @@ export function TopBar({ sseStatus, onOpenSignIn, onOpenSettings }: {
   const { theme, setTheme } = useTheme();
 
   // Tick once per second to keep the uptime label live without
-  // re-fetching /api/status more than the existing 5s polling.
-  const [, force] = useState(0);
+  // re-fetching /api/status more than the existing 5s polling. We
+  // snapshot Date.now() at the moment status?.uptime_sec changes (i.e.
+  // each refetch) so the live offset is "seconds elapsed since the
+  // last server-reported uptime" rather than relying on an undefined
+  // sidecar field that produced `NaNs` in v0.5.0–v0.5.2.
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => force((n) => n + 1), 1000);
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, []);
-  const uptimeLabel =
-    status?.uptime_sec != null
-      ? fmtDuration(status.uptime_sec + Math.floor((Date.now() - (status as { __fetchedAt?: number }).__fetchedAt!) / 1000))
-      : "—";
+  const baseUptimeRef = React.useRef<{ value: number; at: number } | null>(null);
+  if (status?.uptime_sec != null) {
+    if (!baseUptimeRef.current || baseUptimeRef.current.value !== status.uptime_sec) {
+      baseUptimeRef.current = { value: status.uptime_sec, at: Date.now() };
+    }
+  }
+  const uptimeLabel = baseUptimeRef.current
+    ? fmtDuration(baseUptimeRef.current.value + Math.floor((Date.now() - baseUptimeRef.current.at) / 1000))
+    : "—";
+  void tick; // consumed via Date.now() at render time
 
   const version = (status?.version || "").replace(/^v+/, "");
   const commit = status?.commit && status.commit !== "none" ? status.commit.slice(0, 7) : "";

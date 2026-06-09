@@ -40,7 +40,11 @@ export function TlsPanel({ onAdd }: { onAdd: () => void }) {
           const icon = c.days_left < 0 ? <ShieldAlert className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />;
           return (
             <li key={c.domain} className="flex items-center gap-3 rounded-md border border-border bg-card p-3">
-              <span className={`text-${cls}`}>{icon}</span>
+              <span className={
+                cls === "destructive" ? "tls-cell-expired"
+                : cls === "warning"   ? "tls-cell-warn"
+                : "tls-cell-ok"
+              }>{icon}</span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-sm truncate">{c.domain}</span>

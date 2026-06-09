@@ -5,6 +5,74 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-06-10
+
+Polish pass on the v0.5.0 React dashboard. Six issues surfaced
+during the first live session on the orange pi got fixed in one
+commit, plus the long-asked resizable layout with localStorage
+persistence.
+
+### Added
+
+- **Resizable panel layout.** The 3×3 grid is now a
+  `react-resizable-panels` PanelGroup — drag any boundary to repartition
+  rows / columns, the new sizes auto-save to localStorage under stable
+  `autoSaveId`s and survive refreshes / browser restarts. Three groups:
+  `apigw.dashboard.rows.v1` (vertical row split), `…row1.v1`,
+  `…row2.v1`. Maximized state falls back to the full-screen single-panel
+  layout (no handles), Esc restores.
+- **Vite chunk note.** Bundle delta: ~1.2 KB raw / ~0.3 KB gz to ship
+  the resizable-panels primitive.
+
+### Fixed
+
+- **Topbar uptime "NaN s"** — `fmtDuration` used a private sidecar
+  field `__fetchedAt` that nobody ever set, so the cumulative live
+  offset was always NaN. Now snapshots `Date.now()` whenever
+  `status.uptime_sec` changes (i.e. on every refetch) and adds the
+  elapsed-since-then to the server-reported uptime. Updates every 1s.
+- **Webhook activity showed "DENIED 27 minutes ago"** on a fresh
+  install with zero webhooks configured. The admin endpoint had been
+  surfacing every `webhook.*` audit entry including `webhook.list`
+  RBAC denials from anonymous probes — which read like failed
+  deliveries. The filter now keeps only true delivery actions
+  (`webhook.recv` / `verified` / `dispatched` / `rejected` /
+  `delivery`).
+- **Audit panel content overflowed when maximized.** `panel-grid[data-
+  maxed]` had only `min-height` set — the single 1fr grid row grew
+  past the viewport when content was tall, and the browser scrolled
+  the whole page instead of the panel body. Locked grid height to
+  `calc(100vh - 56px)` + `overflow: hidden` so the Panel's internal
+  `overflow-auto` takes over.
+- **`Verify chain` button gave no immediate feedback.** Clicking
+  fired a `useMutation` that walked the hash chain on the server for
+  up to ~30 s, but the UI showed no toast or spinner — operators
+  thought the button did nothing. Added an immediate "Verifying hash
+  chain… (up to 30 s on big logs)" `toast.message` plus a tooltip on
+  the button itself and a pending-state label so the action is
+  obviously in flight.
+- **TLS panel said "No certificates registered" even with an issued
+  cert.** `GET /api/admin/tls` returned the bare `cfg.TLS` config
+  block, but the React panel expected the per-cert `CertInfo` shape
+  (domain + days_left + issuer) that Status (/api/status) has used
+  since v0.4.0. The handler now walks `cfg.TLS.Domains` and calls
+  `apitls.LoadCertInfo` per domain, returning the same array shape as
+  Status. Per-domain failures degrade to a stub row tagging the error
+  in the issuer field rather than 500-ing the whole panel.
+- **TLS card icon colour wasn't applied.** Tailwind purged the
+  dynamically-built `text-${cls}` class strings (no JIT visibility),
+  rendering the cell icon as default muted on every cert. Replaced
+  with three stable `.tls-cell-{ok,warn,expired}` utility classes in
+  `globals.css` so the colour survives purge.
+
+### Backend
+
+- `internal/dashboard/admin_api.go::adminTLSHandler` now returns
+  `[]apitls.CertInfo` instead of the bare `config.TLS` block.
+- `internal/dashboard/admin_v5.go::adminWebhookActivityHandler` keeps
+  only delivery actions (`webhook.recv` / `verified` / `dispatched` /
+  `rejected` / `delivery`).
+
 ## [0.5.2] — 2026-06-10
 
 Second hotfix for the v0.5.0 dashboard crash. v0.5.1's `?? []` only

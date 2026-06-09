@@ -496,7 +496,24 @@ func (s *Server) adminTLSHandler(w http.ResponseWriter, r *http.Request) {
 		adminWriteJSONError(w, Status(err), err.Error())
 		return
 	}
-	adminWriteJSON(w, http.StatusOK, cfg.TLS)
+	// v0.5.3: return the actual cert list (domain + days_left + issuer
+	// + SAN), not the cfg.TLS config block. The React TLS panel can't
+	// render days_left from the bare config. Status (/api/status) has
+	// always done this via apitls.LoadCertInfo per domain.
+	out := make([]apitls.CertInfo, 0, len(cfg.TLS.Domains))
+	for _, d := range cfg.TLS.Domains {
+		ci, err := apitls.LoadCertInfo(d)
+		if err != nil {
+			// Per-domain failure (missing file, bad PEM) should not 500
+			// the whole panel. Surface a stub row tagging the error in
+			// the issuer field so the operator sees which one needs
+			// attention.
+			out = append(out, apitls.CertInfo{Domain: d, Strategy: apitls.Strategy(cfg.TLS.Strategy), Issuer: err.Error()})
+			continue
+		}
+		out = append(out, ci)
+	}
+	adminWriteJSON(w, http.StatusOK, out)
 }
 
 // ---------- /api/admin/config (read-only — full config dump) ----------

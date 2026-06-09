@@ -184,8 +184,21 @@
   .panel-grid[data-maxed] {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
+    /* When one panel takes over, lock the grid to the viewport so the
+       single 1fr row is bounded — otherwise auto-sized content (audit
+       log with 50+ rows) pushes the row beyond the viewport and the
+       browser scrolls the whole page instead of the panel body. */
+    height: calc(100vh - 56px);
+    min-height: calc(100vh - 56px);
+    overflow: hidden;
   }
 }
+
+/* TLS card icon variants (replaces JSX-string interpolation that was
+   stripping the color in v0.5.0). */
+.tls-cell-ok       { color: hsl(var(--success)); }
+.tls-cell-warn     { color: hsl(var(--warning)); }
+.tls-cell-expired  { color: hsl(var(--destructive)); }
 
 /* Hide-scrollbar-but-keep-scroll for log viewers. */
 .no-scrollbar::-webkit-scrollbar { display: none; }
