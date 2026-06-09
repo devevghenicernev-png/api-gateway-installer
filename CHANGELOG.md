@@ -5,6 +5,29 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-06-09
+
+Bugfix release. Surfaced during the first real-world v0.4.0 install on
+a fresh Debian 13 (trixie) / arm64 host.
+
+### Fixed
+
+- **Dashboard CSS + JS 404 when accessed via the public TLS listener.**
+  `internal/assets/dashboard/index.html` references `/app.css` and
+  `/app.js` with leading slashes, but the generated nginx config only
+  mounted `location /dashboard` to proxy to the dashboard daemon. The
+  stylesheet and script URLs landed on `location / { return 404 }`,
+  producing browser console errors —
+  `Refused to apply style ... MIME type ('text/html')` and
+  `Refused to execute script ... MIME type ('text/html')` — and
+  rendering the dashboard as unstyled, non-interactive HTML.
+  `internal/assets/nginx/_locations.tmpl` now emits two extra
+  `location = /app.css` and `location = /app.js` exact-match blocks
+  that proxy to the dashboard port whenever the dashboard is enabled.
+  Covered by `TestRender_DashboardStaticAssets` and
+  `TestRender_DashboardStaticAssets_OmittedWhenDisabled` in
+  `internal/nginx/dashboard_assets_test.go`.
+
 ## [0.4.0] — 2026-06-09
 
 Follow-up release after the v0.3.0 e2e pass. Two-session bundle: the
