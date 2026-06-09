@@ -11,8 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/afero"
+
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/events"
+	"github.com/devevghenicernev-png/apigw/internal/nginx"
 )
 
 // newTestServer wires a Server with a temp config file + the optional
@@ -40,6 +43,20 @@ func newTestServer(t *testing.T, sc config.Security) (*Server, http.Handler, str
 	hub := events.New()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	srv := New(":0", hub, configFn, logger, nil)
+	// In-memory nginx Manager — admin POST/PUT/DELETE on /api/admin/apis
+	// now calls WriteAndReload after Guard succeeds (v0.4.6 fix for the
+	// "UI says disabled but curl returns 200" bug). The production
+	// manager shells out to `nginx -t` + `systemctl reload nginx`,
+	// neither of which is available in `go test`. NewManagerWithFS swaps
+	// in afero.MemMapFs + stub reload/validate so the mutation path is
+	// exercised end-to-end without touching the real system.
+	srv.Nginx = nginx.NewManagerWithFS(
+		afero.NewMemMapFs(),
+		filepath.Join(dir, "nginx", "apigw.conf"),
+		filepath.Join(dir, "nginx", "sites-enabled"),
+		func() error { return nil },
+		func(string) error { return nil },
+	)
 
 	if sc.StateDir == "" {
 		sc.StateDir = filepath.Join(dir, "state")

@@ -156,6 +156,11 @@ func (s *Server) adminAPIsHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
+		if err := s.nginxManager().WriteAndReload(cfg); err != nil {
+			adminWriteJSONError(w, http.StatusInternalServerError,
+				"config saved but nginx reload failed — run `apigw api reload` or `apigw doctor`: "+err.Error())
+			return
+		}
 		adminWriteJSON(w, http.StatusCreated, api)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -249,6 +254,17 @@ func (s *Server) adminAPIHandler(w http.ResponseWriter, r *http.Request) {
 			adminWriteJSONError(w, Status(err), err.Error())
 			return
 		}
+		// Regenerate nginx config so the toggle (Enabled flip) and any
+		// other shape changes actually take effect. Without this the
+		// admin API would save config.yaml but nginx keeps serving the
+		// old routing — the operator clicks "disable" in the dashboard,
+		// sees "✓ disabled" toast, but curl still gets 200 because the
+		// nginx location block is unchanged.
+		if err := s.nginxManager().WriteAndReload(cfg); err != nil {
+			adminWriteJSONError(w, http.StatusInternalServerError,
+				"config saved but nginx reload failed — run `apigw api reload` or `apigw doctor`: "+err.Error())
+			return
+		}
 		writeJSONWithETag(w, http.StatusOK, updated)
 	case http.MethodDelete:
 		if err := checkIfMatch(r, cfg.APIs[idx]); err != nil {
@@ -267,6 +283,11 @@ func (s *Server) adminAPIHandler(w http.ResponseWriter, r *http.Request) {
 			return cfg.Save()
 		}); err != nil {
 			adminWriteJSONError(w, Status(err), err.Error())
+			return
+		}
+		if err := s.nginxManager().WriteAndReload(cfg); err != nil {
+			adminWriteJSONError(w, http.StatusInternalServerError,
+				"config saved but nginx reload failed — run `apigw api reload` or `apigw doctor`: "+err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

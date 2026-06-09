@@ -32,6 +32,7 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/events"
 	"github.com/devevghenicernev-png/apigw/internal/metrics"
+	"github.com/devevghenicernev-png/apigw/internal/nginx"
 	"github.com/devevghenicernev-png/apigw/internal/paths"
 	"github.com/devevghenicernev-png/apigw/internal/rbac"
 	apitls "github.com/devevghenicernev-png/apigw/internal/tls"
@@ -80,6 +81,18 @@ type Server struct {
 	// deliveries picks the job up. nil = run-via-UI disabled, CLI still
 	// works (it uses an in-process deploy.JobQueue).
 	Queue *webhook.Queue
+
+	// Nginx applies admin-API config mutations (POST/PUT/DELETE on
+	// /api/admin/apis, /api/admin/streams, …). Without it the admin
+	// API would save config.yaml but never regenerate
+	// /etc/nginx/sites-available/apigw.conf — the bug surfaced as
+	// "UI says disabled, curl still returns 200" because the dashboard
+	// toggled Enabled in config but nginx kept proxying. nil =
+	// production default; admin handlers fall back to nginx.NewManager()
+	// so existing call sites that build a bare Server still get the
+	// real manager. Tests inject a NewManagerWithFS-built mock so
+	// unit tests don't shell out to `nginx -t`.
+	Nginx *nginx.Manager
 
 	// hmacNonces holds the per-API nonce LRU for HMAC replay protection.
 	// Lazily inited in New(); never nil after construction.
@@ -228,6 +241,19 @@ func (s *Server) SessionIdentity(r *http.Request) (rbac.Identity, bool) {
 	}
 	// Sessions carry the SSO-mapped role list in Session.Scopes.
 	return rbac.Identity{User: sess.Subject, Groups: append([]string(nil), sess.Scopes...)}, true
+}
+
+// nginxManager returns the nginx Manager admin handlers should call to
+// apply config changes. Falls back to nginx.NewManager() when Nginx
+// wasn't injected — matches the previous direct-construction pattern so
+// production installs keep working without API changes. Tests set
+// s.Nginx to a NewManagerWithFS-based mock before exercising mutating
+// admin handlers.
+func (s *Server) nginxManager() *nginx.Manager {
+	if s.Nginx != nil {
+		return s.Nginx
+	}
+	return nginx.NewManager()
 }
 
 // Routes wires the mux. Split out for testability so callers can mount

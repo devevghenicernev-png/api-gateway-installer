@@ -5,6 +5,66 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.6] — 2026-06-09
+
+Bugfix release. The admin API endpoints that mutate the API list
+(`POST` / `PUT` / `DELETE` on `/api/admin/apis*`) updated `config.yaml`
+but never regenerated the nginx site config. Operator clicked Disable
+on a card, saw "✓ disabled" in the toast, then noticed via curl that
+the API was still answering 200 because nginx kept proxying the old
+location.
+
+### Fixed
+
+- **Admin API mutations now call `WriteAndReload` after a successful
+  Guard.** Previously the handler chain was:
+  ```
+  Guard(action, func() error { cfg.APIs[idx] = updated; return cfg.Save() })
+  → respond 200
+  ```
+  Save persists to `config.yaml`; the running nginx config on disk
+  (`/etc/nginx/sites-available/apigw.conf`) was never re-rendered. The
+  next `apigw api reload` would fix it, but the operator had no way to
+  know that. v0.4.6 adds `s.nginxManager().WriteAndReload(cfg)` after
+  each successful Guard for POST (add), PUT (edit/toggle), and DELETE
+  (remove) on `/api/admin/apis`. The dashboard toggle button now
+  actually disables.
+
+  If the reload itself fails (nginx `-t` rejects the new config,
+  systemctl errors out), the handler returns HTTP 500 with the message
+  `"config saved but nginx reload failed — run \`apigw api reload\` or
+  \`apigw doctor\`: <err>"` so the operator can tell that the on-disk
+  state is correct but the live state is stale, and run the recovery
+  command.
+
+### Changed
+
+- **`dashboard.Server` gains a `Nginx *nginx.Manager` field.** Default
+  nil falls back to `nginx.NewManager()` so existing call sites that
+  build a bare `Server` keep working. Tests inject a
+  `NewManagerWithFS`-built mock (afero.MemMapFs + stub reload/validate)
+  so they exercise the apply path end-to-end without shelling out to
+  `nginx -t` — `newTestServer` in `admin_api_test.go` now sets the
+  mock by default.
+
+### Tests
+
+- `TestAdminAPI_PutTriggersNginxApply` and
+  `TestAdminAPI_DeleteTriggersNginxApply` in
+  `internal/dashboard/admin_apply_test.go`. Both assert via a reload
+  counter that the apply path fires, AND that the rendered site file
+  no longer contains the `location /api/<name>` block after disable /
+  delete. Without v0.4.6 either assertion would catch the regression.
+
+### Known scope
+
+This release only covers `/api/admin/apis*`. The same
+"save-without-reload" pattern likely affects `/api/admin/streams*`,
+`/api/admin/consumers*`, and similar endpoints — those have not been
+verified or fixed yet. If you mutate streams via the dashboard and see
+the same UI/curl desync, you'll need to run `apigw api reload`
+manually. A follow-up release will sweep the rest.
+
 ## [0.4.5] — 2026-06-09
 
 Bugfix release. Dashboard toggle / redeploy actions silently swallowed
