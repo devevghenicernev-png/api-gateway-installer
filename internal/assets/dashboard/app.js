@@ -38,6 +38,8 @@
   const elApprovals       = $("approvals-list");
   const elApprovalsCount  = $("approvals-count");
   const elApprovalsEmpty  = $("approvals-empty");
+  const elLogsEmpty       = $("logs-empty");
+  const elLogStatus       = $("log-status");
 
   // ---- state ----
   let currentDeploy = null;
@@ -165,6 +167,200 @@
     if (e.key === "Escape") $("token-cancel").click();
   });
 
+  // ---- TLS add-domain helper modal ----
+  // Just shows the CLI verb today — see comment on #tls-add-modal in
+  // index.html for why we don't POST a new domain from the UI yet.
+  const elTLSAddModal = $("tls-add-modal");
+  const tlsAddBtn     = $("tls-add-btn");
+  if (tlsAddBtn) {
+    tlsAddBtn.addEventListener("click", () => {
+      modalOpenedFrom = document.activeElement;
+      elTLSAddModal.hidden = false;
+    });
+  }
+  $("tls-add-close").addEventListener("click", () => {
+    elTLSAddModal.hidden = true;
+    if (modalOpenedFrom && typeof modalOpenedFrom.focus === "function") modalOpenedFrom.focus();
+    modalOpenedFrom = null;
+  });
+  elTLSAddModal.addEventListener("click", (e) => {
+    if (e.target === elTLSAddModal) $("tls-add-close").click();
+  });
+  elTLSAddModal.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") $("tls-add-close").click();
+  });
+
+  // ---- Add deployment modal ----
+  // Mirrors `apigw deploy add` CLI flags so the same Deploy struct lands
+  // in config.yaml regardless of which path the operator took. Submits
+  // POST /api/admin/deploys; admin handler runs cfg.AddDeploy + Save +
+  // (v0.4.6) WriteAndReload via Server.Nginx.
+  const elDeployModal = $("deploy-modal");
+  const elDeployForm  = $("deploy-form");
+  const dpAddBtn      = $("deploy-add-btn");
+  function openDeployModal() {
+    if (!token) { toast("Sign in first to add a deployment.", "warn"); return; }
+    elDeployForm.reset();
+    $("dp-branch").value = "main";
+    $("dp-runtime").value = "auto";
+    modalOpenedFrom = document.activeElement;
+    elDeployModal.hidden = false;
+    setTimeout(() => $("dp-name").focus(), 50);
+  }
+  function closeDeployModal() {
+    elDeployModal.hidden = true;
+    if (modalOpenedFrom && typeof modalOpenedFrom.focus === "function") {
+      modalOpenedFrom.focus();
+    }
+    modalOpenedFrom = null;
+  }
+  if (dpAddBtn) dpAddBtn.addEventListener("click", openDeployModal);
+  $("dp-cancel").addEventListener("click", closeDeployModal);
+  elDeployModal.addEventListener("click", (e) => {
+    if (e.target === elDeployModal) closeDeployModal();
+  });
+  elDeployModal.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDeployModal();
+  });
+  // ---- Webhook setup modal ----
+  // GET /api/admin/webhook-setup/<deploy> → {url, secret, ...} → render.
+  // Rotate button → POST /api/admin/webhook-rotate/<deploy>; refresh the
+  // displayed secret in place.
+  const elWebhookModal = $("webhook-modal");
+  let currentWebhookDeploy = null;
+  async function openWebhookSetup(name) {
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    currentWebhookDeploy = name;
+    $("wh-url").textContent = "loading…";
+    $("wh-secret").textContent = "loading…";
+    modalOpenedFrom = document.activeElement;
+    elWebhookModal.hidden = false;
+    try {
+      const res = await fetch(`api/admin/webhook-setup/${encodeURIComponent(name)}`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        $("wh-url").textContent = "—";
+        $("wh-secret").textContent = "—";
+        toast(`Setup load failed (HTTP ${res.status}): ${body.error || ""}`, "err");
+        return;
+      }
+      const j = await res.json();
+      $("wh-url").textContent = j.url || "—";
+      $("wh-secret").textContent = j.secret || "—";
+    } catch (e) {
+      toast("Setup load failed: " + e.message, "err");
+    }
+  }
+  function closeWebhookModal() {
+    elWebhookModal.hidden = true;
+    currentWebhookDeploy = null;
+    if (modalOpenedFrom && typeof modalOpenedFrom.focus === "function") {
+      modalOpenedFrom.focus();
+    }
+    modalOpenedFrom = null;
+  }
+  $("wh-close").addEventListener("click", closeWebhookModal);
+  elWebhookModal.addEventListener("click", (e) => {
+    if (e.target === elWebhookModal) closeWebhookModal();
+  });
+  elWebhookModal.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeWebhookModal();
+  });
+  async function copyValue(elId, label) {
+    const v = $(elId).textContent;
+    if (!v || v === "—" || v === "loading…") return;
+    try {
+      await navigator.clipboard.writeText(v);
+      toast(`Copied ${label}.`, "ok", { timeout: 2500 });
+    } catch {
+      toast("Copy failed — select and Cmd-C.", "warn");
+    }
+  }
+  $("wh-url-copy").addEventListener("click", () => copyValue("wh-url", "URL"));
+  $("wh-secret-copy").addEventListener("click", () => copyValue("wh-secret", "secret"));
+  $("wh-secret-rotate").addEventListener("click", async () => {
+    if (!currentWebhookDeploy) return;
+    const ok = await confirmModal({
+      title: "Rotate webhook secret",
+      body: `Rotate the secret for ${currentWebhookDeploy}?\n\nThe current secret stops working immediately — you'll need to paste the new one into GitHub.`,
+      ok: "Rotate",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      const res = await fetch(`api/admin/webhook-rotate/${encodeURIComponent(currentWebhookDeploy)}`, {
+        method: "POST",
+        headers: { ...authHeaders(), "X-CSRF-Token": csrf },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast(`Rotate refused (HTTP ${res.status}): ${body.error || ""}`, "err");
+        return;
+      }
+      const j = await res.json();
+      $("wh-secret").textContent = j.new_secret || "—";
+      toast("Secret rotated. Update GitHub now.", "ok", { timeout: 6000 });
+    } catch (e) {
+      toast("Rotate failed: " + e.message, "err");
+    }
+  });
+
+  elDeployForm.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (!token) { toast("Sign in first.", "warn"); return; }
+    const saveBtn = $("dp-save");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Registering…";
+    try {
+      const csrfRes = await fetch("api/admin/csrf", { headers: authHeaders() });
+      const csrf = (await csrfRes.json()).token;
+      // Field names match config.Deploy struct exactly (no JSON tags
+      // on the struct → Go's json.Unmarshal does case-insensitive match
+      // to PascalCase). Don't add CLI-only flags like --no-start here:
+      // they aren't persisted in config.yaml so the admin handler has
+      // no way to honor them.
+      const body = {
+        Name:        $("dp-name").value.trim(),
+        Repo:        $("dp-repo").value.trim(),
+        Branch:      $("dp-branch").value.trim() || "main",
+        Port:        parseInt($("dp-port").value, 10) || 0,
+        Path:        $("dp-path").value.trim(),
+        Runtime:     $("dp-runtime").value,
+        Build:       $("dp-build").value.trim(),
+        Start:       $("dp-start").value.trim(),
+        Description: $("dp-desc").value.trim(),
+        Enabled:     true,
+      };
+      const res = await fetch("api/admin/deploys", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok && res.status !== 202) {
+        const rb = await res.json().catch(() => ({}));
+        toast(`Add refused (HTTP ${res.status}): ${rb.error || res.statusText}`, "err");
+        return;
+      }
+      if (res.status === 202) {
+        const rb = await res.json().catch(() => ({}));
+        toast(`${body.name} parked for approvals — id: ${rb.id || "(see Pending approvals)"}`, "info", { timeout: 9000 });
+      } else {
+        toast(`Registered ${body.name}.`, "ok");
+      }
+      closeDeployModal();
+      refreshAdmin();
+    } catch (e) {
+      toast("Add failed: " + e.message, "err");
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Register";
+    }
+  });
+
   // ---- panel maximize ----
   // Click ⤢ on any panel header → that panel takes over the whole grid;
   // click again or press Esc → restore the 3×3 layout. State is kept on
@@ -234,7 +430,14 @@
     elDeploys.innerHTML = "";
     elLogSel.innerHTML = "";
     if (!s.deploys || s.deploys.length === 0) {
-      elDeploys.innerHTML = `<div class="muted">No deployments registered.</div>`;
+      elDeploys.innerHTML = `<div class="muted">No deployments registered. Add one via <code>apigw deploy add &lt;name&gt; --repo &lt;url&gt; --port &lt;n&gt;</code> or the <strong>+ Add deployment</strong> button (coming next).</div>`;
+      // Placeholder option so the <select> has visible content instead
+      // of rendering as a 0-width invisible widget.
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "no deployments";
+      opt.disabled = true;
+      elLogSel.appendChild(opt);
     }
     for (const d of (s.deploys || [])) {
       deployByName.set(d.name, d);
@@ -248,6 +451,13 @@
       currentDeploy = s.deploys[0].name;
       elLogSel.value = currentDeploy;
       loadHistoricalLogs(currentDeploy);
+    }
+    // Hide the empty-state explainer once at least one event has streamed
+    // through (set by enqueueLine + SSE handlers). On first render with
+    // no events yet, keep it visible so operators understand why the
+    // black <pre> is empty.
+    if (elLogsEmpty) {
+      elLogsEmpty.hidden = elLogs.childElementCount > 0;
     }
 
     elTLS.innerHTML = "";
@@ -274,6 +484,7 @@
       <span class="badge ${badgeCls}" data-role="badge">${esc(d.last_status || "idle")}</span>
       <button class="card-btn" data-role="redeploy" title="Redeploy ${esc(d.name)}" aria-label="Redeploy ${esc(d.name)}">↻</button>
       <button class="card-btn" data-role="rollback" title="Rollback ${esc(d.name)} to previous release" aria-label="Rollback ${esc(d.name)}">⤺</button>
+      <button class="card-btn" data-role="webhook" title="GitHub webhook setup for ${esc(d.name)} (URL + secret + instructions)" aria-label="Webhook setup for ${esc(d.name)}">🔗</button>
       <button class="card-btn" data-role="rotate" title="Rotate webhook secret for ${esc(d.name)}" aria-label="Rotate webhook secret">🔑</button>
       <button class="card-btn danger" data-role="delete" title="Delete ${esc(d.name)}" aria-label="Delete ${esc(d.name)}">🗑</button>
     `;
@@ -284,6 +495,10 @@
     el.querySelector('[data-role="rollback"]').addEventListener("click", (e) => {
       e.stopPropagation();
       rollbackDeploy(d.name, el);
+    });
+    el.querySelector('[data-role="webhook"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      openWebhookSetup(d.name);
     });
     el.querySelector('[data-role="rotate"]').addEventListener("click", (e) => {
       e.stopPropagation();
@@ -617,13 +832,41 @@
       const li = document.createElement("li");
       li.dataset.name = a.Name;
       const enabled = !!a.Enabled;
+      // Public URL: scheme + host of the dashboard + path the API is
+      // mounted at. The gateway and the dashboard share the same nginx
+      // server block, so window.location.host is correct for both.
+      const apiPath = a.Path || ("/api/" + a.Name);
+      const publicURL = `${window.location.protocol}//${window.location.host}${apiPath}`;
       li.innerHTML = `
         <span class="api-name">${esc(a.Name)}</span>
-        <span class="muted api-meta">${esc(a.Path || "/api/" + a.Name)} → :${a.Port}</span>
+        <span class="muted api-meta">${esc(apiPath)} → :${a.Port}</span>
         <span class="badge ${enabled ? "ok" : "idle"}">${enabled ? "enabled" : "disabled"}</span>
+        <a class="card-btn" data-role="open" href="${esc(publicURL)}" target="_blank" rel="noopener" title="Open ${esc(publicURL)} in a new tab" aria-label="Open ${esc(a.Name)} in a new tab">↗</a>
+        <button class="card-btn" data-role="copy" data-url="${esc(publicURL)}" title="Copy ${esc(publicURL)}" aria-label="Copy URL of ${esc(a.Name)}">⧉</button>
         <button class="card-btn" data-role="toggle" title="${enabled ? "Disable" : "Enable"} ${esc(a.Name)}" aria-label="${enabled ? "Disable" : "Enable"} ${esc(a.Name)}">${enabled ? "⏸" : "▶"}</button>
         <button class="card-btn danger" data-role="delete" title="Delete ${esc(a.Name)}" aria-label="Delete ${esc(a.Name)}">🗑</button>
       `;
+      li.querySelector('[data-role="copy"]').addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const url = e.currentTarget.dataset.url;
+        try {
+          await navigator.clipboard.writeText(url);
+          toast(`Copied: ${url}`, "ok", { timeout: 3000 });
+        } catch (err) {
+          // Older browsers / non-HTTPS contexts — fall back to a hidden
+          // textarea + execCommand. Clipboard API only works on https
+          // (which we have via the gateway) but stay robust anyway.
+          const ta = document.createElement("textarea");
+          ta.value = url;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand("copy"); toast(`Copied: ${url}`, "ok"); }
+          catch { toast("Copy failed — copy from address bar.", "warn"); }
+          ta.remove();
+        }
+      });
       li.querySelector('[data-role="toggle"]').addEventListener("click", (e) => {
         e.stopPropagation();
         toggleAPI(a, li);
@@ -806,11 +1049,13 @@
         li = document.createElement("li");
         li.className = "audit-row " + resultClass(e.result);
         li.dataset.key = key;
+        const inline = inlineDiff(e.before, e.after);
         li.innerHTML = `
           <span class="audit-ts">${fmtTsISO(e.timestamp)}</span>
           <span class="audit-actor">${esc(e.actor || "—")}</span>
           <span class="audit-action">${esc(e.action || "")}</span>
           <span class="audit-resource muted">${esc(e.resource || "")}</span>
+          ${inline ? `<span class="audit-diff muted">${inline}</span>` : ""}
           <span class="badge ${resultClass(e.result)}">${esc(e.result || "")}</span>
         `;
         li.addEventListener("click", (ev) => {
@@ -961,15 +1206,66 @@
     return "idle";
   }
 
+  // inlineDiff renders a one-line summary of what changed between before
+  // and after — the typical api.edit toggle ("Enabled: true → false")
+  // is the common case and is the whole reason we show it inline.
+  // Falls back to a count of fields when more than one changed so the
+  // row stays single-line; full diff lives in the expanded detail.
+  function inlineDiff(before, after) {
+    if (!before || !after || typeof before !== "object" || typeof after !== "object") {
+      // Add / delete have only one side — show "new" or "removed".
+      if (!before && after && typeof after === "object") return `<em>created</em>`;
+      if (before && !after && typeof before === "object") return `<em>removed</em>`;
+      return "";
+    }
+    const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+    const changes = [];
+    for (const k of keys) {
+      const b = before[k];
+      const a = after[k];
+      if (JSON.stringify(b) === JSON.stringify(a)) continue;
+      changes.push({ key: k, before: b, after: a });
+    }
+    if (changes.length === 0) return `<em>no-op</em>`;
+    if (changes.length === 1) {
+      const c = changes[0];
+      return `${esc(c.key)}: <s>${esc(diffVal(c.before))}</s> → <strong>${esc(diffVal(c.after))}</strong>`;
+    }
+    // > 1: name + count, full view in expand.
+    return `${esc(changes[0].key)} <span class="muted">+ ${changes.length - 1} more</span>`;
+  }
+  function diffVal(v) {
+    if (v === undefined || v === null) return "—";
+    if (typeof v === "string") return v.length > 24 ? v.slice(0, 21) + "…" : v;
+    if (typeof v === "boolean" || typeof v === "number") return String(v);
+    if (Array.isArray(v)) return `[${v.length}]`;
+    return "{…}";
+  }
+
   // ---- SSE ----
   function connectStream() {
     const url = "events?topic=webhook.recv&topic=tls.expiry&topic=status.deploy&topic=" +
                 "deploy.*.stdout&topic=deploy.*.state";
     const es = new EventSource(url, { withCredentials: false });
 
-    es.addEventListener("open", () => setConn("ok"));
-    es.addEventListener("error", () => setConn("warn"));
-    es.addEventListener("__reconnect", () => setConn("warn"));
+    // setLogStatus mirrors setConn (for the topbar dot) onto the logs
+    // panel header dot, so operators have an at-a-glance signal that
+    // "stream is live, panel is empty just because nothing fired yet"
+    // — not "stream is dead, that's why panel is empty".
+    const setLogStatus = (state) => {
+      if (!elLogStatus) return;
+      elLogStatus.classList.remove("dead", "warn");
+      if (state !== "ok") elLogStatus.classList.add(state);
+      elLogStatus.title = state === "ok"
+        ? "SSE connected — events appear here as they happen"
+        : state === "warn"
+          ? "SSE disconnected — reconnecting"
+          : "SSE dead — refresh the page";
+    };
+
+    es.addEventListener("open", () => { setConn("ok"); setLogStatus("ok"); });
+    es.addEventListener("error", () => { setConn("warn"); setLogStatus("warn"); });
+    es.addEventListener("__reconnect", () => { setConn("warn"); setLogStatus("warn"); });
 
     es.addEventListener("stdout", (ev) => {
       const data = safeParse(ev.data);
@@ -1087,6 +1383,9 @@
     }
     elLogs.appendChild(frag);
     logQueue.length = 0;
+    // First event landed — hide the explainer so it doesn't sit between
+    // the live <pre> and the bottom of the panel forever.
+    if (elLogsEmpty) elLogsEmpty.hidden = true;
     while (elLogs.childElementCount > 5000) elLogs.firstChild.remove();
     if (pinnedToBottom) elLogs.scrollTop = elLogs.scrollHeight;
   }

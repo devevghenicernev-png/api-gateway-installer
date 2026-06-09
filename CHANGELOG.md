@@ -5,6 +5,93 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.7] — 2026-06-09
+
+Major dashboard UX pass. v0.4.0 shipped a functional dashboard but
+every panel beyond APIs was visibly incomplete: Deployments / TLS / SSO
+had no UI for the matching CLI verbs, Webhook activity and Live logs
+sat empty without explaining why, the SSO entry-point dropped users on
+a bare "SSO not configured" 404, and the layout broke below ~1100px.
+v0.4.7 closes those gaps so the dashboard covers what the CLI covers.
+
+### Added — visible UI
+
+- **API card: open + copy URL.** Two new icons per row — `↗` opens the
+  API's public URL in a new tab, `⧉` copies it to the clipboard.
+  Useful for mobile testing (`https://<host><path>`) and for pasting
+  into READMEs / Postman.
+- **Audit log inline diff.** For `api.edit` (the single-field toggle
+  case) the changed field is rendered straight in the row as
+  `Enabled: true → false` — no need to expand for the common case. >1
+  field falls back to `Name + N more` and keeps the expand for the
+  full JSON. Diff column is hidden on mobile via the new breakpoint.
+- **Live logs panel: connection status + empty-state explainer.** A
+  green/yellow dot in the panel header mirrors the SSE state ("● live —
+  events appear as they happen" / "● reconnecting"). The empty `<pre>`
+  is now accompanied by a bullet-list explainer covering the four
+  event sources that populate it (deploy stdout, webhook recv, deploy
+  state, TLS expiry) — operators no longer think the panel is broken
+  on an install with no deploys yet.
+- **Webhook activity: empty-state explainer.** Was "No webhook
+  deliveries yet."; now explains what the receiver does, that nothing
+  fires without a registered deploy, and how to wire one up via
+  `apigw webhook setup <deploy>`.
+- **Deployments: `+ Add` modal.** Full form mirroring the CLI flags
+  on `apigw deploy add`: name, repo, branch, port, path, runtime,
+  build/start commands, description. Submits POST `/api/admin/deploys`;
+  the v0.4.6 reload pipeline picks up the change automatically.
+- **Per-deploy Webhook setup modal.** Each deploy card gains a `🔗`
+  button that opens a modal showing the public webhook URL + current
+  secret + a Rotate button. Backed by a new admin endpoint
+  `GET /api/admin/webhook-setup/<deploy>` that returns
+  `{url, secret, repo, content_type, events}` and is wired through the
+  same Guard as the rotate endpoint — `webhook.show` permission
+  required, idempotent on the secret (uses `webhook.EnsureSecret`).
+- **TLS panel: `+ Add` helper modal.** Renew already worked; the new
+  Add button opens a modal with copy-pasteable CLI snippets for
+  Let's Encrypt, DuckDNS DNS-01, and self-signed issuance. Adding a
+  domain still routes through the CLI today — the modal makes that
+  discoverable instead of leaving operators guessing.
+- **SSO entry-point: setup helper page replaces the bare 404.**
+  `GET /api/admin/sso/login` on an install with no `security.sso`
+  block used to render a single line of `http.Error` text. Now it
+  serves a styled HTML page with a config-snippet template for OIDC
+  (covering Keycloak, Okta, Google, Auth0, Azure AD), a field-by-field
+  walkthrough, and a link back to the dashboard. Status code stays 404
+  so programmatic probes still see "not configured".
+- **Adaptive layout: phones + tablets.** New `@media (max-width:720px)`
+  and `@media (max-width:480px)` blocks. Topbar wraps to two lines,
+  API card buttons stack below the meta line, audit-diff column hides
+  to free room for the badge, modal-form drops to single-column, and
+  the live-logs header reflows. Existing 1100px breakpoint stays for
+  the 3 → 2 column step.
+
+### Added — backend surface
+
+- `GET /api/admin/webhook-setup/<deploy>` — return webhook URL + current
+  secret. Idempotent (calls `webhook.EnsureSecret`, doesn't mint a
+  fresh one). Routed via `registerAdmin` so the `/api/v1/admin/`
+  alias works too.
+- `internal/dashboard/sso.go::writeSSOSetupHelper` — inline HTML page
+  replacing the bare `http.Error` 404 for the unconfigured-SSO case.
+  Kept in code rather than `assets/dashboard/` because it has to be
+  reachable without a bearer token.
+
+### Changed
+
+- **Empty states across panels.** Webhook activity, Deployments, TLS,
+  and Live logs all now carry inline help instead of a single line of
+  muted text. Pattern: a short headline ("No deployments registered."),
+  one sentence of context, and the exact CLI command to wire it up.
+- **CSS additions:** `.panel-add`, `.copy-row`, `.modal-form`,
+  `.modal-lg`, `.webhook-setup`, `.audit-diff`, `.log-status` plus
+  fall-through values for the new breakpoints.
+
+### Internal
+
+- All new code respects the v0.4.4 mount rule — `<base href="/dashboard/">`
+  + relative URLs. No new absolute `/api/admin/*` calls slipped in.
+
 ## [0.4.6] — 2026-06-09
 
 Bugfix release. The admin API endpoints that mutate the API list

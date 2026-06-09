@@ -100,7 +100,14 @@ func (s *Server) handleSSOLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	sso := cfg.Security.SSO
 	if sso == nil {
-		http.Error(w, "SSO not configured", http.StatusNotFound)
+		// Previous: plain `http.Error(w, "SSO not configured", 404)`.
+		// That's accurate but useless — operators clicked "Sign in with
+		// SSO" in the dashboard and hit a blank page that told them
+		// nothing about how to fix it. Now we render a small HTML
+		// helper with a copy-pasteable config snippet and a link back
+		// to the dashboard. Status code stays 404 so robots and any
+		// programmatic probes still see "not configured".
+		writeSSOSetupHelper(w, r)
 		return
 	}
 	switch strings.ToLower(sso.Provider) {
@@ -493,4 +500,87 @@ func (s *Server) ssoStates() *ssoStateStore {
 		s.ssoStateStoreInst = newSSOStateStore()
 	}
 	return s.ssoStateStoreInst
+}
+
+// writeSSOSetupHelper renders a self-contained HTML page that explains
+// how to wire SSO into config.yaml. Triggered when an operator clicks
+// "Sign in with SSO" on a dashboard install that has not configured
+// Security.SSO yet — the previous bare-text 404 left them stranded.
+//
+// We keep this in code (not assets/dashboard/) on purpose: the HTML has
+// to be reachable when the bearer token hasn't been issued yet, and
+// embedding it inline keeps it inside the same security boundary as
+// the SSO handler itself.
+func writeSSOSetupHelper(w http.ResponseWriter, _ *http.Request) {
+	const page = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SSO not configured — apigw</title>
+<style>
+:root { color-scheme: light dark; --fg:#111827; --bg:#fafafa; --code:#0f172a; --code-fg:#e2e8f0; --muted:#595F6A; --accent:#0B7285; --subtle:#E5E7EB; }
+@media (prefers-color-scheme:dark) { :root { --fg:#f1f5f9; --bg:#0a0a0a; --code:#000; --code-fg:#e2e8f0; --muted:#9CA3AF; --accent:#22D3EE; --subtle:#374151; } }
+* { box-sizing:border-box; }
+body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; color:var(--fg); background:var(--bg); margin:0; padding:32px 24px; line-height:1.55; }
+main { max-width:760px; margin:0 auto; }
+h1 { margin:0 0 8px; font-size:22px; }
+h2 { font-size:15px; margin:24px 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+p { margin:8px 0; }
+p.lead { color:var(--muted); margin-bottom:24px; }
+code, pre { font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace; }
+pre { background:var(--code); color:var(--code-fg); border-radius:6px; padding:14px 16px; overflow:auto; font-size:13px; line-height:1.5; }
+code { background:var(--subtle); padding:1px 5px; border-radius:3px; font-size:12px; }
+.back { display:inline-block; margin-top:24px; color:var(--accent); text-decoration:none; font-size:14px; }
+.back:hover { text-decoration:underline; }
+ul { padding-left:22px; }
+li { margin:4px 0; }
+.warn { color:var(--muted); font-size:13px; margin-top:16px; }
+</style>
+</head>
+<body>
+<main>
+<h1>SSO is not configured yet.</h1>
+<p class="lead">This dashboard install has no <code>security.sso</code> block in <code>config.yaml</code>, so the IdP login flow has nothing to redirect to. Two ways to fix it — copy the snippet that fits your IdP into <code>/etc/apigw/config.yaml</code> and run <code>apigw api reload</code>.</p>
+
+<h2>Generic OIDC (Google / Okta / Auth0 / Keycloak / Azure AD)</h2>
+<pre>security:
+  sso:
+    provider: oidc
+    issuer_url: https://YOUR-IDP/realms/main
+    client_id: apigw-dashboard
+    client_secret: REDACTED
+    redirect_url: https://YOUR-HOST/dashboard/api/admin/sso/callback
+    scopes: [openid, email, profile]
+    cookie_secret: <run: openssl rand -base64 32>
+    # Optional — map IdP groups claim onto apigw RBAC roles.
+    groups_claim: groups
+    allowed_groups: [apigw-admins]
+    session_ttl: 8h</pre>
+
+<h2>What each field does</h2>
+<ul>
+  <li><code>provider</code> — <code>oidc</code> (SAML returns 501 until a follow-up release).</li>
+  <li><code>issuer_url</code> — the IdP's OpenID-Connect discovery base. apigw fetches <code>{issuer_url}/.well-known/openid-configuration</code> at startup.</li>
+  <li><code>redirect_url</code> — paste this into your IdP's "redirect URIs" allow-list. Must match exactly, including <code>/dashboard/</code> prefix on installs where the dashboard is mounted there (v0.4.4+).</li>
+  <li><code>cookie_secret</code> — 32+ random bytes; rotate periodically.</li>
+  <li><code>allowed_groups</code> — optional gate: refuse sign-in unless the ID-token's <code>groups</code> claim contains one of these.</li>
+</ul>
+
+<h2>Three places to get the values from</h2>
+<ul>
+  <li><strong>Keycloak</strong> — issuer is <code>https://&lt;host&gt;/realms/&lt;realm&gt;</code>; create a client of type "OpenID Connect, Confidential", grab the secret from Credentials tab.</li>
+  <li><strong>Okta</strong> — issuer is <code>https://&lt;org&gt;.okta.com/oauth2/default</code>; create a "Web Application" in admin console.</li>
+  <li><strong>Google</strong> — issuer is <code>https://accounts.google.com</code>; create OAuth-client credentials in Google Cloud Console. <code>groups_claim</code> won't help — Google's tokens don't carry groups.</li>
+</ul>
+
+<p class="warn">In the meantime you can sign in with the bearer token that <code>apigw install</code> minted — go back to the dashboard and click <strong>Sign in</strong> (without SSO).</p>
+
+<a class="back" href="/dashboard/">← Back to dashboard</a>
+</main>
+</body>
+</html>`
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(page))
 }

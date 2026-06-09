@@ -50,6 +50,7 @@ func (s *Server) adminRoutes(mux *http.ServeMux) {
 	registerAdmin(mux, "/api/admin/deploy-rollback/", s.adminDeployRollbackHandler)
 	registerAdmin(mux, "/api/admin/tls-renew/", s.adminTLSRenewHandler)
 	registerAdmin(mux, "/api/admin/webhook-rotate/", s.adminWebhookRotateHandler)
+	registerAdmin(mux, "/api/admin/webhook-setup/", s.adminWebhookSetupHandler)
 	registerAdmin(mux, "/api/admin/cache-purge/", s.adminCachePurgeHandler)
 	registerAdmin(mux, "/api/admin/tls", s.adminTLSHandler)
 	registerAdmin(mux, "/api/admin/config", s.adminConfigHandler)
@@ -881,6 +882,75 @@ func (s *Server) adminWebhookRotateHandler(w http.ResponseWriter, r *http.Reques
 		"deploy":     name,
 		"new_secret": newSecret,
 		"note":       "Update the webhook secret in GitHub now — old secret is invalid.",
+	})
+}
+
+// adminWebhookSetupHandler is GET /api/admin/webhook-setup/<deploy>.
+// Returns the public webhook URL + the current HMAC secret so the
+// dashboard can render a "configure this in GitHub" panel without
+// forcing the operator to drop to a shell for `apigw webhook setup`.
+//
+// EnsureSecret is idempotent — first call mints, subsequent calls
+// return the existing one. That means re-opening the modal doesn't
+// invalidate a GitHub webhook the operator already configured. Use
+// /api/admin/webhook-rotate/<name> to explicitly cycle the secret.
+func (s *Server) adminWebhookSetupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		adminWriteJSONError(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/admin/webhook-setup/")
+	if name == "" || strings.ContainsAny(name, "/") {
+		adminWriteJSONError(w, http.StatusBadRequest, "deploy name required")
+		return
+	}
+	cfg, err := s.ConfigFn()
+	if err != nil {
+		adminWriteJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dep := cfg.FindDeploy(name)
+	if dep == nil {
+		adminWriteJSONError(w, http.StatusNotFound, "no such deploy")
+		return
+	}
+	// webhook.show permission gate. Idempotent secret read — no Guard
+	// callback needed because we're not mutating config.
+	if _, err := s.Sec.Guard(r, Action{
+		Permission: "webhook.show",
+		Resource:   "webhook/" + name,
+	}, nil); err != nil {
+		adminWriteJSONError(w, Status(err), err.Error())
+		return
+	}
+	secret, err := webhook.EnsureSecret(name)
+	if err != nil {
+		adminWriteJSONError(w, http.StatusInternalServerError, "ensure secret: "+err.Error())
+		return
+	}
+	// Public URL — scheme + host of the incoming request. The webhook
+	// receiver is mounted at /webhook on the gateway (see L-4 / install
+	// wizard). We could compute scheme+host from cfg.TLS but using the
+	// request's headers picks up X-Forwarded-Proto correctly when the
+	// dashboard sits behind another proxy.
+	scheme := "https"
+	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") != "https" {
+		scheme = "http"
+	}
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+	url := scheme + "://" + host + "/webhook"
+	adminWriteJSON(w, http.StatusOK, map[string]any{
+		"deploy":       name,
+		"repo":         dep.Repo,
+		"url":          url,
+		"secret":       secret,
+		"content_type": "application/json",
+		"events":       []string{"push"},
+		"note":         "Paste URL and Secret into the GitHub repo's webhook settings. Use Rotate to cycle the secret.",
 	})
 }
 

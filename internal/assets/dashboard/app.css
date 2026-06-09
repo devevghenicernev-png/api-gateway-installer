@@ -210,6 +210,91 @@ main {
 }
 .panel-max:hover { color: var(--primary); background: var(--subtle); }
 
+/* "+ Add" button on panel header — sits between title and panel-max
+   icon. Sized to match panel-max so the trio (title • + Add • ⤢) stays
+   visually balanced. */
+.panel-add {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--subtle);
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.panel-add:hover { color: var(--primary); border-color: var(--primary); }
+.panel-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* Empty-state styling for panels that explain WHY they are empty
+   (webhook activity, deployments). The default .empty rule is just
+   muted text; here we want a small paragraph layout with a code
+   sample. The deploy-panel and webhook-panel empty states use this. */
+.empty p {
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.empty code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--subtle);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Webhook setup modal — single-column rows of "label / value + copy
+   buttons", inherits .modal-form layout. Each value is wrapped in a
+   .copy-row so the code + buttons sit on one line. */
+.webhook-setup label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.webhook-setup label > span:first-child { font-weight: 600; color: var(--fg); }
+.copy-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.copy-row .value {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: auto;
+  white-space: nowrap;
+  background: transparent;
+  padding: 0;
+}
+
+/* Audit row inline diff. Sits between resource and result badge so the
+   operator can see what changed without expanding the row. The strike-
+   through + arrow + bold "after" reads like a git-blame-style edit. */
+.audit-diff {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 36ch;
+}
+.audit-diff s {
+  text-decoration: line-through;
+  color: var(--danger);
+  opacity: 0.65;
+}
+.audit-diff strong {
+  color: var(--success);
+  font-weight: 600;
+}
+.audit-diff em {
+  font-style: italic;
+  color: var(--muted);
+}
+
 /* When <main data-maxed="X"> is set, hide every panel except the one whose
    data-panel matches, and let it span the whole grid area. */
 main[data-maxed] > .panel { display: none; }
@@ -358,6 +443,30 @@ main[data-maxed] .panel-max::before { content: '↩ '; }
 }
 .log-btn:hover { color: var(--fg); border-color: var(--muted); }
 
+/* SSE connection dot — green when alive, red when dropped. */
+.log-status {
+  font-size: 11px;
+  line-height: 1;
+  margin-left: 4px;
+  color: var(--success);
+}
+.log-status.dead { color: var(--danger); }
+.log-status.warn { color: var(--warn); }
+
+/* Logs panel empty state — sits below the (still rendered) <pre>
+   when no stream events have arrived yet. Bullet list explains the
+   four event sources so operators don't think the panel is broken. */
+.logs-panel .empty {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.logs-panel .empty ul {
+  margin: 6px 0 0 0;
+  padding-left: 20px;
+}
+.logs-panel .empty li { margin-bottom: 2px; }
+
 .logs {
   flex: 1;
   margin: 0;
@@ -478,7 +587,11 @@ main[data-maxed] .panel-max::before { content: '↩ '; }
 
 .audit li.audit-row {
   display: grid;
-  grid-template-columns: auto auto 1fr 1fr auto;
+  /* ts | actor | action | resource | diff | badge.
+     diff column added in v0.4.7 for inline `Enabled: true → false`. It
+     gets a flexible min-content so it can wrap or be hidden on narrow
+     screens; the badge stays anchored at the right. */
+  grid-template-columns: auto auto auto 1fr minmax(0, auto) auto;
   gap: 8px;
   align-items: center;
   padding: 6px 10px;
@@ -703,10 +816,59 @@ main[data-maxed] .panel-max::before { content: '↩ '; }
   background: var(--bg);
   color: var(--fg);
 }
-.modal input:focus {
+.modal input:focus, .modal select:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18);
+}
+.modal select {
+  width: 100%;
+  font: inherit;
+  font-family: var(--font-mono);
+  padding: 10px 12px;
+  border: 1px solid var(--subtle);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* Larger modal for multi-field forms (Add deployment, Add domain, etc).
+   Two-column on wider screens for short fields (branch / port / runtime),
+   single-column on mobile. */
+.modal-lg { max-width: 600px; }
+.modal-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+.modal-form > label,
+.modal-form > .modal-actions {
+  grid-column: 1 / -1;
+}
+.modal-form > label.row {
+  grid-column: span 1;
+}
+.modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.modal-form label > span:first-child {
+  font-weight: 600;
+  color: var(--fg);
+}
+.modal-form label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.modal-form label.checkbox > span:first-child { font-weight: 400; color: var(--muted); }
+.modal-form .hint { font-size: 11px; }
+@media (max-width: 600px) {
+  .modal-form { grid-template-columns: 1fr; }
+  .modal-form > label.row { grid-column: 1 / -1; }
 }
 .modal-actions {
   display: flex;
@@ -764,10 +926,56 @@ main[data-maxed] .panel-max::before { content: '↩ '; }
   main {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto auto auto auto auto;
+    padding: 16px;
+    gap: 12px;
   }
   .apis-panel, .deploys-panel, .tls-panel,
   .audit-panel, .approvals-panel, .webhook-panel, .logs-panel {
     grid-column: 1;
     grid-row: auto;
   }
+  /* Topbar wraps onto two lines on a phone; stack brand and stats so
+     they don't collide. */
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .brand { width: 100%; }
+  .stats { gap: 8px; }
+  /* API cards: many small buttons get cramped at the right. Let the
+     <li> wrap so badge + action buttons drop to a second line below the
+     name/meta. */
+  .apis li {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    row-gap: 4px;
+  }
+  .apis li .api-name { grid-column: 1; }
+  .apis li .api-meta { grid-column: 1 / -1; grid-row: 2; }
+  .apis li .badge,
+  .apis li .card-btn { grid-row: 1; }
+  /* Audit row: drop the inline diff column on phones — it's too narrow
+     for a useful render. Operators can still expand the row for the
+     full before/after JSON. */
+  .audit-diff { display: none; }
+  /* Live logs header tries to fit dropdown + grep + 2 checkboxes + 4
+     buttons on one line; let it wrap. */
+  .logs-panel h2 {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+}
+
+/* Very small screens (phones <480px): final pass — collapse modal
+   forms to single column and shrink some font sizes. */
+@media (max-width: 480px) {
+  body { font-size: 13px; }
+  .modal { padding: 18px; }
+  .modal-form { grid-template-columns: 1fr; }
+  .modal-form > label.row { grid-column: 1; }
+  /* Stats line at top is a 5-column line on mobile (uptime + clients +
+     conn dot + sso + signin); abbreviate by hiding the muted "uptime"
+     and "clients" labels and showing only the numbers. */
+  .stats .muted { display: none; }
 }

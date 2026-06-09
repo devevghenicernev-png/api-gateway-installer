@@ -43,14 +43,25 @@
     </section>
 
     <section class="panel deploys-panel" data-panel="deploys">
-      <h2>Deployments<button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
+      <h2>
+        Deployments
+        <button class="panel-add" id="deploy-add-btn" title="Add a new deployment" aria-label="Add a new deployment">+ Add</button>
+        <button class="panel-max" title="Expand" aria-label="Expand">⤢</button>
+      </h2>
       <div id="deploys" class="deploys"></div>
     </section>
 
     <section class="panel tls-panel" data-panel="tls">
-      <h2>TLS<button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
+      <h2>
+        TLS
+        <button class="panel-add" id="tls-add-btn" title="How to add another TLS domain" aria-label="How to add another TLS domain">+ Add</button>
+        <button class="panel-max" title="Expand" aria-label="Expand">⤢</button>
+      </h2>
       <ul id="tls-list" class="tls"></ul>
-      <div class="empty muted" id="tls-empty">No certificates registered.</div>
+      <div class="empty muted" id="tls-empty">
+        <strong>No certificates registered.</strong>
+        <p>Issue one via <code>apigw tls enable letsencrypt --domain api.example.com --email me@example.com</code>, or DuckDNS DNS-01 with <code>apigw tls enable duckdns --domain mydomain.duckdns.org</code>. The renewal timer runs daily once issued.</p>
+      </div>
     </section>
 
     <section class="panel audit-panel" data-panel="audit">
@@ -78,24 +89,44 @@
     </section>
 
     <section class="panel webhook-panel" data-panel="webhook">
-      <h2>Webhook activity<button class="panel-max" title="Expand" aria-label="Expand">⤢</button></h2>
+      <h2>
+        Webhook activity
+        <button class="panel-max" title="Expand" aria-label="Expand">⤢</button>
+      </h2>
       <ul id="webhook-feed" class="feed"></ul>
-      <div class="empty muted" id="webhook-empty">No webhook deliveries yet.</div>
+      <div class="empty muted" id="webhook-empty">
+        <strong>No webhook deliveries yet.</strong>
+        <p>The webhook receiver listens at <code>/webhook</code> for GitHub push events. On a valid HMAC-signed payload it enqueues a deploy job (clone → build → swap symlink).</p>
+        <p>To wire up a GitHub repo, first register a deployment, then run <code>apigw webhook setup &lt;deploy&gt;</code> to mint the URL + secret to paste into GitHub repo → Settings → Webhooks.</p>
+      </div>
     </section>
 
     <section class="panel logs-panel" data-panel="logs">
       <h2>
         Live logs
-        <select id="log-deploy" class="select"></select>
+        <select id="log-deploy" class="select" aria-label="Filter logs by deployment">
+          <option value="">no deployments</option>
+        </select>
         <input class="filter-input log-search" id="log-search" placeholder="grep…" />
         <label class="log-toggle"><input type="checkbox" id="log-ts" /> ts</label>
         <label class="log-toggle"><input type="checkbox" id="log-hi" checked /> hi</label>
         <button class="log-btn" id="log-download" title="Download buffer as .log" aria-label="Download log buffer">⤓</button>
         <button class="log-btn" id="log-clear" title="Clear buffer" aria-label="Clear log buffer">⌫</button>
         <span class="muted" id="log-drop"></span>
+        <span class="log-status muted" id="log-status" title="SSE connection state">●</span>
         <button class="panel-max" title="Expand" aria-label="Expand">⤢</button>
       </h2>
       <pre id="logs" class="logs"></pre>
+      <div class="empty muted" id="logs-empty">
+        <strong>Waiting for events.</strong> Live logs stream over SSE — they fill in when something happens:
+        <ul>
+          <li>a deploy build prints to stdout / stderr</li>
+          <li>a webhook arrives (status: received / verified / dispatched)</li>
+          <li>a deploy status flips (queued → building → live)</li>
+          <li>a TLS cert is renewed or nears expiry</li>
+        </ul>
+        With zero deployments configured nothing fires — that's expected, not a bug. Add a deployment to start seeing logs.
+      </div>
     </section>
   </main>
 
@@ -109,6 +140,132 @@
         <button class="btn-secondary" id="confirm-modal-cancel">Cancel</button>
         <button class="btn-primary" id="confirm-modal-ok">OK</button>
       </div>
+    </div>
+  </div>
+
+  <!-- TLS add-domain helper modal — currently just a redirect to the
+       CLI. v0.4.7 doesn't surface a POST endpoint for adding a domain
+       (cfg.TLS.Domains is mutated by `apigw tls add-domain` which also
+       triggers cert issuance); UI-side add would need a new endpoint
+       wired to the ACME pipeline. The button shows the CLI verb so the
+       operator at least learns the path forward. -->
+  <div class="modal-bg" id="tls-add-modal" hidden>
+    <div class="modal" role="dialog" aria-labelledby="tls-add-modal-title" aria-modal="true">
+      <h3 id="tls-add-modal-title">Add a TLS domain</h3>
+      <p class="muted">Adding a domain triggers an ACME challenge (HTTP-01 / DNS-01) — apigw runs it via the CLI today. Pick the issuer your domain is on:</p>
+      <h4 style="margin:16px 0 6px;">Let's Encrypt (public domain, HTTP-01)</h4>
+      <pre style="margin:0 0 12px;">sudo apigw tls enable letsencrypt \
+  --domain api.example.com \
+  --email you@example.com</pre>
+      <h4 style="margin:16px 0 6px;">DuckDNS (DNS-01, free *.duckdns.org)</h4>
+      <pre style="margin:0 0 12px;">sudo apigw tls enable duckdns \
+  --domain mydomain.duckdns.org \
+  --token YOUR-DUCKDNS-TOKEN \
+  --email you@example.com</pre>
+      <h4 style="margin:16px 0 6px;">Self-signed (dev / staging)</h4>
+      <pre style="margin:0 0 12px;">sudo apigw tls enable selfsigned --domain my.local</pre>
+      <p class="muted hint">Already have one? Use <code>apigw tls add-domain &lt;domain&gt;</code> to expand the SAN on an existing certificate (Let's Encrypt only). Renewal happens automatically via the daily timer.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="tls-add-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Webhook setup modal — shows the GitHub-side configuration for a
+       deploy (URL + secret + content type + events). Populated on open
+       via GET /api/admin/webhook-setup/<deploy>. -->
+  <div class="modal-bg" id="webhook-modal" hidden>
+    <div class="modal modal-lg" role="dialog" aria-labelledby="webhook-modal-title" aria-modal="true">
+      <h3 id="webhook-modal-title">Webhook setup</h3>
+      <p class="muted">Paste these into your GitHub repository → Settings → Webhooks → Add webhook.</p>
+      <div class="webhook-setup">
+        <label>
+          <span>Payload URL</span>
+          <div class="copy-row"><code id="wh-url" class="value">—</code><button type="button" class="card-btn" id="wh-url-copy" title="Copy URL">⧉</button></div>
+        </label>
+        <label>
+          <span>Secret</span>
+          <div class="copy-row"><code id="wh-secret" class="value">—</code><button type="button" class="card-btn" id="wh-secret-copy" title="Copy secret">⧉</button><button type="button" class="card-btn danger" id="wh-secret-rotate" title="Rotate secret (invalidates the current one)">↻</button></div>
+        </label>
+        <label class="row">
+          <span>Content type</span>
+          <code class="value">application/json</code>
+        </label>
+        <label class="row">
+          <span>Events</span>
+          <code class="value">Just the push event</code>
+        </label>
+      </div>
+      <p class="muted hint">Once saved, GitHub will fire a <code>ping</code> event — it shows up in the Webhook activity panel within a few seconds. <strong>Rotating</strong> invalidates the current secret; remember to paste the new one into GitHub.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="wh-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add-deployment modal. Mirrors the `apigw deploy add` CLI flags so
+       config.yaml ends up with the same shape regardless of which path
+       the operator used. POST /api/admin/deploys. -->
+  <div class="modal-bg" id="deploy-modal" hidden>
+    <div class="modal modal-lg" role="dialog" aria-labelledby="deploy-modal-title" aria-modal="true">
+      <h3 id="deploy-modal-title">Add deployment</h3>
+      <p class="muted">apigw will clone the repo, detect / build the runtime, and start the upstream. Webhook auto-deploy is wired separately via <code>apigw webhook setup &lt;name&gt;</code>.</p>
+      <form id="deploy-form" class="modal-form">
+        <label>
+          <span>Name</span>
+          <input type="text" id="dp-name" placeholder="my-app" required pattern="[a-z0-9][a-z0-9_-]*" autocomplete="off">
+          <span class="muted hint">lowercase letters, digits, dashes; used as the path segment</span>
+        </label>
+        <label>
+          <span>Git repo</span>
+          <input type="text" id="dp-repo" placeholder="git@github.com:owner/repo.git" required autocomplete="off">
+        </label>
+        <label class="row">
+          <span>Branch</span>
+          <input type="text" id="dp-branch" value="main" autocomplete="off">
+        </label>
+        <label class="row">
+          <span>Port</span>
+          <input type="number" id="dp-port" min="0" max="65535" value="0">
+          <span class="muted hint">upstream port (0 = no listener, e.g. static or worker)</span>
+        </label>
+        <label>
+          <span>Mount path</span>
+          <input type="text" id="dp-path" placeholder="/apps/<name>" autocomplete="off">
+          <span class="muted hint">default <code>/apps/&lt;name&gt;</code>; override e.g. <code>/foodmanager</code></span>
+        </label>
+        <label class="row">
+          <span>Runtime</span>
+          <select id="dp-runtime">
+            <option value="auto">auto-detect</option>
+            <option value="node">node</option>
+            <option value="python">python</option>
+            <option value="go">go</option>
+            <option value="docker">docker</option>
+            <option value="static">static</option>
+          </select>
+        </label>
+        <label>
+          <span>Build command</span>
+          <input type="text" id="dp-build" placeholder="optional: e.g. npm ci && npm run build" autocomplete="off">
+        </label>
+        <label>
+          <span>Start command</span>
+          <input type="text" id="dp-start" placeholder="optional: e.g. node dist/server.js" autocomplete="off">
+        </label>
+        <label>
+          <span>Description</span>
+          <input type="text" id="dp-desc" placeholder="optional human-readable description" autocomplete="off">
+        </label>
+        <label class="row checkbox">
+          <input type="checkbox" id="dp-no-start" />
+          <span>Register only — don't clone/build now (<code>--no-start</code>)</span>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="dp-cancel">Cancel</button>
+          <button type="submit" class="btn-primary" id="dp-save">Register</button>
+        </div>
+      </form>
     </div>
   </div>
 
