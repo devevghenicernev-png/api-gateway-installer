@@ -5,6 +5,30 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-06-10
+
+Hotfix for the v0.5.0 first-boot crash.
+
+### Fixed
+
+- **React dashboard crashed on first load with `TypeError: a.map is not
+  a function`.** Go's `encoding/json` renders nil slices as JSON `null`
+  rather than `[]`. On a fresh install where `cfg.APIs`, `cfg.Deploys`,
+  `cfg.Streams`, etc. were all unset, the admin list endpoints returned
+  `null` and the React panels — built on the assumption that the
+  hooks always hand back an array — blew up rendering the
+  `EmptyState`. The bug was visible as a blank page with the console
+  error and a stack trace into the minified bundle.
+
+  All `useAdminQuery`-style list hooks (`useApis`, `useDeploys`,
+  `useTLS`, `useStreams`, `useConsumers`, `useApprovals`, `useAudit`,
+  `useWebhookActivity`, `useAdminTokens`, `useConfigHistory`) now run
+  the result through an `asArray()` helper that coalesces null to `[]`
+  before the data reaches the query cache. Components don't need a
+  per-call null check.
+
+  Bundle delta vs v0.5.0: +260 bytes raw / +70 bytes gz.
+
 ## [0.5.0] — 2026-06-10
 
 Dashboard ground-up rewrite. The vanilla HTML+CSS+JS embedded UI

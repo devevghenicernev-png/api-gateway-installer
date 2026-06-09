@@ -50,7 +50,18 @@ function useAuthedQuery<T>(
   const { isAuthed } = useAuth();
   return useQuery<T>({
     queryKey: key as unknown as string[],
-    queryFn: fn,
+    // Coerce null → [] for the common case where the admin API returns
+    // a JSON-marshalled nil slice (Go's encoding/json renders `var
+    // []T` as `null`, not `[]`). Without this every consumer would
+    // have to defend against `.map of null`; the crash from v0.5.0
+    // first-boot was exactly this missing guard.
+    queryFn: async () => {
+      const v = await fn();
+      if (v === null && Array.isArray((extra as { initialData?: unknown })?.initialData)) {
+        return [] as unknown as T;
+      }
+      return v;
+    },
     enabled: isAuthed,
     ...extra,
   });
@@ -68,33 +79,39 @@ export function useStatus() {
 }
 
 // ----- Read -----
+// asArray defends against the nil-slice → JSON-null wire shape that
+// Go's encoding/json emits when a cfg field has zero entries. Without
+// it the v0.5.0 first-boot crashed with "a.map is not a function"
+// before any panel could render.
+const asArray = <T>(v: T[] | null | undefined): T[] => v ?? [];
+
 export function useApis() {
   const api = useAdminAPI();
-  return useAuthedQuery(keys.apis, () => api.listApis());
+  return useAuthedQuery(keys.apis, async () => asArray(await api.listApis()));
 }
 export function useDeploys() {
   const api = useAdminAPI();
-  return useAuthedQuery(keys.deploys, () => api.listDeploys());
+  return useAuthedQuery(keys.deploys, async () => asArray(await api.listDeploys()));
 }
 export function useTLS() {
   const api = useAdminAPI();
-  return useAuthedQuery(keys.tls, () => api.listTLS());
+  return useAuthedQuery(keys.tls, async () => asArray(await api.listTLS()));
 }
 export function useStreams() {
   const api = useAdminAPI();
-  return useAuthedQuery(keys.streams, () => api.listStreams());
+  return useAuthedQuery(keys.streams, async () => asArray(await api.listStreams()));
 }
 export function useConsumers() {
   const api = useAdminAPI();
-  return useAuthedQuery(keys.consumers, () => api.listConsumers());
+  return useAuthedQuery(keys.consumers, async () => asArray(await api.listConsumers()));
 }
 export function useApprovals(status: string = "pending") {
   const api = useAdminAPI();
-  return useAuthedQuery(keys.approvals(status), () => api.listApprovals(status));
+  return useAuthedQuery(keys.approvals(status), async () => asArray(await api.listApprovals(status)));
 }
 export function useAudit(q?: { actor?: string; action?: string; result?: string; limit?: number }) {
   const api = useAdminAPI();
-  return useAuthedQuery(keys.audit(q), () => api.listAudit(q));
+  return useAuthedQuery(keys.audit(q), async () => asArray(await api.listAudit(q)));
 }
 export function useWebhookSetup(deploy: string | null) {
   const api = useAdminAPI();
@@ -107,11 +124,11 @@ export function useWebhookSetup(deploy: string | null) {
 }
 export function useWebhookActivity() {
   const api = useAdminAPI();
-  return useAuthedQuery<WebhookDelivery[]>(keys.webhookActivity, () => api.listWebhookActivity());
+  return useAuthedQuery<WebhookDelivery[]>(keys.webhookActivity, async () => asArray(await api.listWebhookActivity()));
 }
 export function useAdminTokens() {
   const api = useAdminAPI();
-  return useAuthedQuery<AdminToken[]>(keys.adminTokens, () => api.listAdminTokens());
+  return useAuthedQuery<AdminToken[]>(keys.adminTokens, async () => asArray(await api.listAdminTokens()));
 }
 export function useTuning() {
   const api = useAdminAPI();
@@ -123,7 +140,7 @@ export function useSSO() {
 }
 export function useConfigHistory() {
   const api = useAdminAPI();
-  return useAuthedQuery<ConfigSnapshot[]>(keys.configHistory, () => api.listConfigHistory());
+  return useAuthedQuery<ConfigSnapshot[]>(keys.configHistory, async () => asArray(await api.listConfigHistory()));
 }
 export function useDeploySSHKey() {
   const api = useAdminAPI();
