@@ -5,6 +5,56 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.9] — 2026-06-11
+
+Closes the "build failed: exit status 243 and nothing else" debugging
+black hole that bit every operator looking at their first failed
+webhook deploy. Two compounding bugs were responsible for the cryptic
+`exit status 243` failures themselves; one missing piece of plumbing
+made them invisible.
+
+### Fixed
+
+- **Webhook retries hit EACCES on `node_modules/`.** When a webhook
+  deploy failed (any reason) and was retried with the same SHA, the
+  worker re-ran the build inside the existing release dir. Clone's
+  idempotency short-circuit returned that pre-existing dir unchanged
+  — and if the *first* attempt had reached the post-build
+  `chownTree(RunUser)` step, the tree was now owned by apigw-run.
+  The build user (apigw-build) then couldn't `mkdir node_modules/`
+  and npm exploded with errno -13. Same trap fired on `apigw deploy
+  run` after any prior success — operators saw "exit status 243"
+  and assumed the build itself was broken. `PrepareRelease` now
+  chowns the release dir back to apigw-build before invoking
+  `runBuild` so retries are idempotent.
+
+### Added
+
+- **Persistent build log at `<release>/.apigw/build.log`.** Build
+  stdout/stderr previously went only to the events.Hub SSE topic —
+  if no browser tab was subscribed at build time the output
+  evaporated, leaving operators with just the exit code. Each build
+  now tees its output through to the per-release `build.log`; the
+  failure error wraps the *last 30 lines* of that file so the
+  reason surfaces in `apigw deploy run`, the worker's slog "apply
+  failed" line, the deploy panel's `LastError`, and the audit log.
+- **`apigw deploy logs <name> --build`.** New flag on the existing
+  logs command that dumps the persisted build log for the current
+  release. Pairs with the existing journalctl-fed runtime view —
+  use `--build` when triaging "why didn't this deploy come up?"
+  and the default view when triaging "why is the running service
+  misbehaving?".
+
+### Internal
+
+- `internal/deploy/build.go` — `PrepareRelease` chowns release dir
+  to `system.BuildUser` before build; tees `runBuild`'s sink
+  through a `build.log` writer; wraps the exit-status error with
+  `lastLinesFromFile(buildLogPath, 30)`.
+- `internal/deploy/paths.go` — new `BuildLogPath(name)` helper.
+- `internal/cmd/deploy/logs/logs.go` — `--build` flag dispatches
+  to a new `printBuildLog`.
+
 ## [0.5.8] — 2026-06-11
 
 Hotfix for the second seccomp foot-gun in this release sequence, plus

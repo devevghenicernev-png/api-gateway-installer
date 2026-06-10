@@ -80,8 +80,40 @@ func PrepareRelease(ctx context.Context, deployName string, spec BuildSpec, rele
 	}
 
 	if build != "" {
-		if err := runBuild(ctx, releaseDir, build, spec.Port, logsink); err != nil {
-			return "", fmt.Errorf("build failed: %w", err)
+		// Hand the tree back to BuildUser before running the build. On the
+		// first deploy of a SHA this is a no-op (clone.go already chowned
+		// it). On webhook retries where Clone short-circuited because the
+		// release dir already exists from a previous *successful* deploy,
+		// the tree is owned by RunUser (swap.go's post-build chown) and
+		// `npm install` / `cargo build` / etc. hit EACCES on the very
+		// first mkdir under node_modules/. Re-chowning here makes
+		// retries idempotent.
+		_ = chownTree(releaseDir, system.BuildUser)
+
+		// Tee build output to a per-release build.log so failures are
+		// debuggable after the fact. Before this, the build's stdout/stderr
+		// went only to the SSE hub — if no browser tab was subscribed at
+		// build time the output evaporated, and operators were stuck with
+		// "exit status 243" and nothing else to go on.
+		buildLogPath := filepath.Join(apigwDir, "build.log")
+		buildLog, _ := os.OpenFile(buildLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		var combinedSink io.Writer = logsink
+		if buildLog != nil {
+			defer buildLog.Close()
+			if logsink != nil {
+				combinedSink = io.MultiWriter(logsink, buildLog)
+			} else {
+				combinedSink = buildLog
+			}
+		}
+
+		if err := runBuild(ctx, releaseDir, build, spec.Port, combinedSink); err != nil {
+			tail := lastLinesFromFile(buildLogPath, 30)
+			if tail != "" {
+				return "", fmt.Errorf("build failed: %w — last 30 lines of %s:\n%s",
+					err, buildLogPath, tail)
+			}
+			return "", fmt.Errorf("build failed: %w (see %s for details)", err, buildLogPath)
 		}
 	}
 
@@ -234,4 +266,12 @@ func lastLines(s string, n int) string {
 		return s
 	}
 	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+func lastLinesFromFile(path string, n int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return lastLines(string(b), n)
 }

@@ -45,6 +45,14 @@ func CurrentSymlink(name string) string {
 // every Express/Rails/Django app that writes to disk on its first request.
 func SharedDir(name string) string { return filepath.Join(BaseDir(), name, "shared") }
 
+// BuildLogPath returns the path to the persisted build log for the current
+// release: <StateDir>/<name>/current/.apigw/build.log. Written each time
+// PrepareRelease runs the build command. Stays around per release dir so
+// historical builds remain readable after a rollback.
+func BuildLogPath(name string) string {
+	return filepath.Join(BaseDir(), name, "current", ".apigw", "build.log")
+}
+
 // EnvFile returns <ConfigDir>/<name>.env (owned by root, group apigw-run, 0600).
 // Read by the systemd unit via EnvironmentFile=-.
 func EnvFile(name string) string {

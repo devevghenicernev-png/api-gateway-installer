@@ -34,23 +34,26 @@ import (
 func NewCmdLogs(f *cmdutil.Factory) *cobra.Command {
 	var follow bool
 	var lines int
+	var build bool
 	cmd := &cobra.Command{
 		Use:   "logs <name>",
 		Short: "Show deployment logs (live via SSE when dashboard is running)",
 		Args:  cobra.ExactArgs(1),
 		Example: `  $ apigw deploy logs hello
   $ apigw deploy logs hello --follow
-  $ apigw deploy logs hello --lines 500`,
+  $ apigw deploy logs hello --lines 500
+  $ apigw deploy logs hello --build           # last successful build's stdout/stderr`,
 		RunE: func(c *cobra.Command, args []string) error {
-			return run(c.Context(), f, args[0], follow, lines)
+			return run(c.Context(), f, args[0], follow, lines, build)
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "stream new lines as they arrive")
 	cmd.Flags().IntVarP(&lines, "lines", "n", 100, "number of historical lines to show")
+	cmd.Flags().BoolVar(&build, "build", false, "show the persisted build log (.apigw/build.log) instead of runtime logs")
 	return cmd
 }
 
-func run(ctx context.Context, f *cmdutil.Factory, name string, follow bool, lines int) error {
+func run(ctx context.Context, f *cmdutil.Factory, name string, follow bool, lines int, build bool) error {
 	cfg, err := config.FromFactory(f)
 	if err != nil {
 		return err
@@ -58,6 +61,10 @@ func run(ctx context.Context, f *cmdutil.Factory, name string, follow bool, line
 	if cfg.FindDeploy(name) == nil {
 		return tui.NewError("deploy not found", fmt.Sprintf("no deployment named %q", name)).
 			WithDocs("E_DEPLOY_NOT_FOUND")
+	}
+
+	if build {
+		return printBuildLog(f, name)
 	}
 
 	dashboardPort := cfg.Dashboard.Port
@@ -69,6 +76,26 @@ func run(ctx context.Context, f *cmdutil.Factory, name string, follow bool, line
 		return followViaSSE(ctx, f, name, dashboardPort)
 	}
 	return tailViaJournal(f, name, follow, lines)
+}
+
+// printBuildLog dumps the persisted build log for the deploy's current
+// release. We keep build.log next to start.sh under .apigw/ in every
+// release dir so failures are debuggable after the fact — the live SSE
+// stream is only useful while a browser tab is subscribed.
+func printBuildLog(f *cmdutil.Factory, name string) error {
+	path := apideploy.BuildLogPath(name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return tui.NewError("no build log yet",
+				fmt.Sprintf("expected at %s — likely first deploy hasn't built yet, or runtime is static", path)).
+				WithFix("apigw deploy run "+name, "trigger a build").
+				WithDocs("E_BUILD_LOG_MISSING")
+		}
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	_, err = f.IOStreams.Out.Write(data)
+	return err
 }
 
 // followViaSSE streams build/stdout lines from the running dashboard.
