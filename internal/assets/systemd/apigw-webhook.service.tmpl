@@ -45,6 +45,10 @@ NoNewPrivileges=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @debug @mount @swap @reboot @raw-io
+# Re-add chown family (subtracted by ~@privileged) — the webhook worker
+# performs the same release-tree ownership transitions the dashboard
+# does, so it hits SIGSYS without this. Root already implies chown.
+SystemCallFilter=@chown
 
 # systemd creates and owns the state + log dirs BEFORE the namespace is
 # built, so we don't need to also list them in ReadWritePaths= (listing a

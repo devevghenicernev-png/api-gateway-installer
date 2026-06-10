@@ -66,6 +66,16 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 	// Dashboard HTTP server (owns the hub, serves UI + SSE + JSON API).
 	dash := dashboard.New(o.addr, hub, reloadConfig, logger, prom)
 
+	// Watch /etc/apigw/config.yaml so CLI-side writes (apigw deploy add,
+	// apigw api edit, apigw tls enable, …) trigger a `cfg.change` event
+	// on the dashboard's SSE hub. Without this, CLI mutations were
+	// invisible to open browser tabs until the React Query 60 s
+	// polling fallback hit. mtime polling beats fsnotify here because
+	// atomic-rename saves (the apigw config writer's pattern) fire a
+	// Remove+Create sequence that fsnotify users routinely mishandle;
+	// stat-mtime gives one event per real change with no debouncing.
+	startConfigWatcher(reloadConfig, hub)
+
 	publish := func(topic, evType string, data []byte) {
 		hub.Publish(topic, evType, data)
 		// Mirror webhook deliveries into the audit log so the dashboard's
@@ -389,4 +399,44 @@ func reloadConfig() (*config.Config, error) {
 		return nil, fmt.Errorf("config: unexpected type %T", c)
 	}
 	return cfg, nil
+}
+
+// startConfigWatcher polls the config file mtime every 2 seconds and
+// fires a `cfg.change` event on the hub whenever it advances. Lets open
+// dashboard tabs reflect CLI-driven mutations (`apigw deploy add`,
+// `apigw api edit`, …) inside ~2 seconds instead of waiting for the
+// 60 s React Query polling fallback.
+//
+// Polls rather than fsnotify: atomic-rename saves (apigw config writer's
+// pattern) fire Remove+Create on the directory, which fsnotify users
+// regularly mishandle. mtime gives one event per real change.
+func startConfigWatcher(reload func() (*config.Config, error), hub *events.Hub) {
+	cfg, err := reload()
+	if err != nil {
+		return
+	}
+	path := cfg.Path()
+	if path == "" {
+		return
+	}
+	var lastMTime int64
+	if st, err := os.Stat(path); err == nil {
+		lastMTime = st.ModTime().UnixNano()
+	}
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			st, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
+			m := st.ModTime().UnixNano()
+			if m == lastMTime {
+				continue
+			}
+			lastMTime = m
+			hub.Publish("cfg.change", "cfg", []byte(`{"section":"any"}`))
+		}
+	}()
 }

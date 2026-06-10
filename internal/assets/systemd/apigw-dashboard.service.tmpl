@@ -50,6 +50,14 @@ NoNewPrivileges=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @debug @mount @swap @reboot @raw-io
+# @privileged subtraction above also removes the chown family
+# (chown/fchown/fchownat/lchown), which the deploy worker needs to hand
+# ownership of release trees between apigw-build (build phase) and
+# apigw-run (runtime), plus to chown the persistent shared/ dirs. The
+# webhook-triggered deploy path lives inside this service, so without
+# the re-add the process gets SIGSYS'd on every deploy. We're already
+# running as root; allowing chown grants nothing root doesn't have.
+SystemCallFilter=@chown
 
 # systemd creates and owns the state + log dirs BEFORE the namespace is
 # built, so we don't need to also list them in ReadWritePaths= (listing a

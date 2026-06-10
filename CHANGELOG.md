@@ -5,6 +5,63 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.8] — 2026-06-11
+
+Hotfix for the second seccomp foot-gun in this release sequence, plus
+the long-standing CLI→dashboard auto-refresh gap.
+
+### Fixed
+
+- **`apigw-dashboard.service` crashed with SIGSYS during any
+  webhook-triggered deploy.** The unit ships
+  `SystemCallFilter=~@privileged`; the `@privileged` group includes the
+  whole chown family (`chown`, `fchown`, `fchownat`, `lchown`). v0.5.7
+  intensified the use of chown in the worker (clone → chown to
+  apigw-build, post-build chown to apigw-run, `linkSharedPaths` chown
+  to apigw-run on shared dirs), so the dashboard process started
+  hitting the filter on every push event — the result was a SIGSYS,
+  service restart, and the next retry blowing up the same way after a
+  short backoff. CLI-initiated deploys had no inherited filter and
+  worked. The unit template now re-adds `@chown` after the
+  `~@privileged` subtraction:
+  ```
+  SystemCallFilter=@system-service
+  SystemCallFilter=~@privileged @resources @debug @mount @swap @reboot @raw-io
+  SystemCallFilter=@chown
+  ```
+  Same one-line patch landed in `apigw-webhook.service.tmpl` for the
+  legacy split-process layout. Already-installed hosts can patch in
+  place with a drop-in override:
+  `/etc/systemd/system/apigw-dashboard.service.d/chown.conf` →
+  ```
+  [Service]
+  SystemCallFilter=@chown
+  ```
+  `apigw upgrade` swaps the binary but does NOT re-render the unit
+  file; the drop-in or a `sudo apigw dashboard start` re-install is
+  required to pick up the template change.
+- **Dashboard didn't auto-refresh on CLI-driven config changes.**
+  `apigw deploy add` / `apigw api edit` / `apigw tls enable` write
+  config.yaml from a separate process; the dashboard's `cfg.change`
+  SSE event is only emitted by admin-API handlers and the webhook
+  worker. Open browser tabs needed the 60 s React Query polling
+  fallback to catch up — the user-visible symptom was "I ran the
+  command and the dashboard sits stale for a minute". The dashboard
+  now polls `/etc/apigw/config.yaml`'s mtime every 2 s and emits
+  `cfg.change` with `section: "any"` whenever it advances. mtime
+  polling beats fsnotify here: the config saver does an atomic
+  rename, which fsnotify users routinely mishandle (Remove+Create
+  pair), and 30 stats/minute is invisible at any meaningful scale.
+
+### Internal
+
+- `internal/assets/systemd/apigw-dashboard.service.tmpl` — add
+  `SystemCallFilter=@chown`.
+- `internal/assets/systemd/apigw-webhook.service.tmpl` — same.
+- `internal/cmd/dashboard/serve/serve.go` — new
+  `startConfigWatcher(reload, hub)` goroutine; ticked from the same
+  serve setup that wires the SSE hub.
+
 ## [0.5.7] — 2026-06-10
 
 Closes the long-standing immutable-releases data-loss footgun: every
