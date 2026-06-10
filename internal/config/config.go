@@ -1247,6 +1247,16 @@ type Deploy struct {
 	// the legacy lenient TCP-only probe so existing apps don't regress.
 	HealthPath string `koanf:"health_path" yaml:"health_path,omitempty"`
 
+	// Shared lists paths (relative to the release root) that must survive
+	// across releases. apigw materialises each as
+	// <StateDir>/<name>/shared/<path> on first use and symlinks the
+	// release-local copy into the persistent location on every deploy.
+	// First-time migration copies any existing content already inside the
+	// release into shared/ so operators can flip a long-running deploy to
+	// shared dirs without losing data. Example:
+	//   shared: [backend/uploads, backend/logs, data/sqlite.db]
+	Shared []string `koanf:"shared" yaml:"shared,omitempty"`
+
 	// Recorded after each pass.
 	LastSHA    string `koanf:"last_sha" yaml:"last_sha"`
 	LastDeploy string `koanf:"last_deploy" yaml:"last_deploy"` // RFC3339

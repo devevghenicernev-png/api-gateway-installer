@@ -36,6 +36,15 @@ func CurrentSymlink(name string) string {
 	return filepath.Join(BaseDir(), name, "current")
 }
 
+// SharedDir returns <StateDir>/<name>/shared — a per-deploy directory that
+// outlives any single release. Paths listed in `config.Deploy.Shared` get
+// materialised as `<SharedDir>/<path>` and symlinked into every release's
+// tree, so app-written state (uploads/, SQLite files, build caches that
+// must survive between releases, etc.) persists across redeploys. Capistrano
+// has had this since 2008; without it the immutable-release pattern breaks
+// every Express/Rails/Django app that writes to disk on its first request.
+func SharedDir(name string) string { return filepath.Join(BaseDir(), name, "shared") }
+
 // EnvFile returns <ConfigDir>/<name>.env (owned by root, group apigw-run, 0600).
 // Read by the systemd unit via EnvironmentFile=-.
 func EnvFile(name string) string {

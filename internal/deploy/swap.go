@@ -2,12 +2,14 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/devevghenicernev-png/apigw/internal/system"
@@ -54,6 +56,11 @@ type ApplyRequest struct {
 	// (empty) keeps the legacy lenient TCP-only check so existing apps
 	// without a /health endpoint don't regress.
 	HealthPath string
+
+	// Shared lists release-relative paths that must persist across
+	// releases (uploads/, SQLite files, log dirs the app writes to
+	// directly). See config.Deploy.Shared + SharedDir().
+	Shared []string
 
 	// Metrics, when non-nil, receives Apply() count + duration.
 	Metrics ApplyMetrics
@@ -145,6 +152,13 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 		}
 	}
 
+	// Materialise shared/ paths AFTER the chown to RunUser so anything
+	// migrated from the fresh checkout (first-time setup) ends up owned
+	// by the runtime user too, not the build user.
+	if err := linkSharedPaths(req.Name, cl.Path, req.Shared, req.Logsink); err != nil {
+		return res, fmt.Errorf("shared dirs: %w", err)
+	}
+
 	previous, _ := os.Readlink(CurrentSymlink(req.Name)) // empty on first deploy
 
 	// Ensure the systemd template + per-deploy override exist before we try
@@ -184,6 +198,147 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 	res.Duration = time.Since(start)
 	status = "ok"
 	return res, nil
+}
+
+// linkSharedPaths wires each entry in `shared` (release-root-relative) into
+// a per-deploy persistent directory under SharedDir(name), so app-written
+// state survives across releases.
+//
+// For each `p` in shared:
+//  1. Ensure <shared>/<p> exists (mkdir + chown RunUser).
+//  2. If <release>/<p> exists AND is not already a symlink: this is the
+//     first deploy with `shared` set for this path. Copy its contents into
+//     <shared>/<p> (so we don't lose what the operator's app has been
+//     writing into the release tree), then rm -rf <release>/<p>.
+//  3. Symlink <release>/<p> → <shared>/<p>.
+//
+// Idempotent: subsequent deploys just see no <release>/<p> (it never
+// existed in the git checkout once shared/ was set up) and create the
+// symlink. If the operator removes a path from `shared`, the
+// <shared>/<p> tree is left intact on disk for safety — they can delete
+// it by hand.
+func linkSharedPaths(name, releasePath string, shared []string, sink io.Writer) error {
+	if len(shared) == 0 {
+		return nil
+	}
+	sharedRoot := SharedDir(name)
+	for _, raw := range shared {
+		p := filepath.Clean(strings.TrimSpace(raw))
+		if p == "" || p == "." || p == "/" || strings.HasPrefix(p, "..") || strings.HasPrefix(p, "/") {
+			if sink != nil {
+				fmt.Fprintf(sink, "warn: skipping invalid shared path %q (must be a relative path inside the release)\n", raw)
+			}
+			continue
+		}
+		sharedPath := filepath.Join(sharedRoot, p)
+		releaseTarget := filepath.Join(releasePath, p)
+
+		if err := os.MkdirAll(sharedPath, 0o755); err != nil {
+			return fmt.Errorf("mkdir shared %s: %w", sharedPath, err)
+		}
+		// Best-effort chown so the runtime user can read+write the
+		// persistent dir from inside the release.
+		_ = chownTree(sharedPath, RunUser)
+
+		// If the release dir already has this path (first deploy with
+		// the entry, or git tracks it), migrate its contents into shared
+		// and then replace it with a symlink.
+		st, err := os.Lstat(releaseTarget)
+		switch {
+		case err == nil && st.Mode()&os.ModeSymlink != 0:
+			// Already a symlink (left from a previous deploy). Remove
+			// and recreate to make sure it points at *our* shared dir.
+			_ = os.Remove(releaseTarget)
+		case err == nil:
+			// Plain file/dir from the git checkout — migrate then drop.
+			if err := mergeIntoShared(releaseTarget, sharedPath); err != nil {
+				return fmt.Errorf("migrate %s → %s: %w", releaseTarget, sharedPath, err)
+			}
+			if err := os.RemoveAll(releaseTarget); err != nil {
+				return fmt.Errorf("rm migrated %s: %w", releaseTarget, err)
+			}
+		case !errors.Is(err, os.ErrNotExist):
+			return fmt.Errorf("stat %s: %w", releaseTarget, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(releaseTarget), 0o755); err != nil {
+			return fmt.Errorf("mkdir parent of %s: %w", releaseTarget, err)
+		}
+		if err := os.Symlink(sharedPath, releaseTarget); err != nil {
+			return fmt.Errorf("symlink %s → %s: %w", releaseTarget, sharedPath, err)
+		}
+	}
+	return nil
+}
+
+// mergeIntoShared copies every entry from `src` (a directory or file in the
+// release tree) into `dst` (the persistent shared dir), preserving anything
+// already in `dst`. We never overwrite — the persistent copy wins, since
+// it's what the running app has been mutating. If `src` is a file, it's
+// treated as a single-entry sibling.
+func mergeIntoShared(src, dst string) error {
+	sInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !sInfo.IsDir() {
+		// A plain file in the checkout — only copy if dst doesn't have
+		// it yet (treat dst as a directory holding it).
+		base := filepath.Base(src)
+		out := filepath.Join(dst, base)
+		if _, err := os.Stat(out); err == nil {
+			return nil
+		}
+		return copyFile(src, out)
+	}
+	return filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		out := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(out, info.Mode().Perm())
+		}
+		if _, err := os.Lstat(out); err == nil {
+			return nil // preserve persistent copy
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(target, out)
+		}
+		return copyFile(path, out)
+	})
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	si, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, si.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	return out.Close()
 }
 
 // flipSymlink atomically points `link` at `target`.

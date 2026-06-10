@@ -5,6 +5,64 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.7] — 2026-06-10
+
+Closes the long-standing immutable-releases data-loss footgun: every
+Express/Rails/Django/Payload app that writes to disk on its first
+request was silently losing the data on the next deploy, because each
+`apigw deploy run` cloned to a fresh `releases/<sha>/` and the previous
+release's `uploads/` (or `logs/`, or SQLite file) sat there orphaned.
+Operators were finding out the hard way after their first `git push`.
+
+### Added
+
+- **`shared:` list on Deploys.** New field on `config.Deploy` —
+  release-root-relative paths that must persist across releases.
+  Capistrano has had this since 2008 (`linked_dirs`); the v1 Phase-3
+  scope ("immutable releases under `releases/<sha>/`") never got the
+  matching shared-state primitive, and every operator running a real
+  Node / Rails / Payload app hit the same data-loss footgun on their
+  first `git push`. On each deploy `apigw` now:
+
+  1. Ensures `<StateDir>/<name>/shared/<path>` exists (created
+     0755, chowned to `apigw-run`).
+  2. **First time only** — if `<release>/<path>` already exists from
+     the git checkout (or from a long-running deploy that was using
+     the in-release directory), copies its contents into shared/
+     preserving anything that's already there, then removes the
+     in-release copy. Apps writing into a stale release tree before
+     the operator opted in don't lose data on the cutover.
+  3. Symlinks `<release>/<path>` → `<shared>/<path>` so the app
+     keeps using its original relative path.
+
+  Idempotent on subsequent deploys (the release tree never contains
+  the path anymore — it's a symlink immediately). Operators set:
+
+  ```yaml
+  deployments:
+    - name: myapp
+      shared:
+        - backend/uploads
+        - data/sqlite.db
+        - logs
+  ```
+
+  Adding a path after a deploy is live triggers the first-time
+  migration on the very next `apigw deploy run`. Removing a path
+  leaves the persistent dir on disk for safety — delete it by hand
+  if you really mean it.
+
+### Internal
+
+- `internal/config/config.go` — `Deploy.Shared []string` field.
+- `internal/deploy/paths.go` — `SharedDir(name)` helper returning
+  `<StateDir>/<name>/shared`.
+- `internal/deploy/swap.go` — new `linkSharedPaths`,
+  `mergeIntoShared`, `copyFile`; called between the chown-to-RunUser
+  and the `current` symlink flip; rejects absolute / `..` paths.
+- `internal/cmd/deploy/run/run.go` + `internal/webhook/worker.go`
+  thread `d.Shared` into `ApplyRequest.Shared`.
+
 ## [0.5.6] — 2026-06-10
 
 Hotfix for two regressions introduced by v0.5.5 that only surfaced once

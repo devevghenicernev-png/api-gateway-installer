@@ -196,6 +196,7 @@ func (w *Worker) processOne(ctx context.Context, logger *slog.Logger) {
 		Build:       d.Build,
 		Start:       d.Start,
 		HealthPath:  d.HealthPath,
+		Shared:      d.Shared,
 		Logsink:     logsink,
 		Metrics:     w.ApplyMetrics,
 	}, job.SHA)
