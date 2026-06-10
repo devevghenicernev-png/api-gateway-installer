@@ -112,7 +112,7 @@ func Clone(ctx context.Context, req CloneRequest) (CloneResult, error) {
 
 	if _, err := os.Stat(finalPath); err == nil {
 		if req.Force {
-			if err := os.RemoveAll(finalPath); err != nil {
+			if err := forceRemoveAll(finalPath); err != nil {
 				return CloneResult{}, fmt.Errorf("force-remove existing release %s: %w", finalPath, err)
 			}
 		} else {
@@ -143,6 +143,26 @@ func Clone(ctx context.Context, req CloneRequest) (CloneResult, error) {
 	_ = chownTree(finalPath, system.BuildUser)
 	cleanupStaging = false
 	return CloneResult{SHA: sha, Path: finalPath}, nil
+}
+
+// forceRemoveAll is os.RemoveAll plus a pre-pass that makes every directory
+// in the tree writable+executable+readable by its owner. plain
+// os.RemoveAll fails on release dirs where npm / cargo / pip dropped a
+// 0555 directory (read-only by design) — the entries inside are
+// reachable but `unlinkat` can't remove them because we lack write on the
+// parent. shell `rm -rf` does the same chmod under the hood; we emulate
+// it explicitly to keep dependencies pure-Go.
+func forceRemoveAll(root string) error {
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // best-effort; RemoveAll's pass will report any real failure
+		}
+		if info.IsDir() {
+			_ = os.Chmod(path, 0o700)
+		}
+		return nil
+	})
+	return os.RemoveAll(root)
 }
 
 // chownTree recursively chowns `root` to the given system user (and their

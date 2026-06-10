@@ -5,6 +5,25 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.10] — 2026-06-11
+
+### Fixed
+
+- **`apigw deploy run --force` failed to wipe an existing release dir
+  with `unlinkat … : directory not empty`.** `os.RemoveAll` can't
+  delete entries inside a 0555 directory — npm/cargo/pip drop these
+  intentionally (deprecated mode marker, generated source), and any
+  retry of `--force` on a previously-built release tree tripped over
+  them. The Force path now walks the tree once, restoring 0700 on
+  every directory, then runs `os.RemoveAll`. Mirrors what shell
+  `rm -rf` does under the hood; pure Go keeps the dependency surface
+  flat.
+
+### Internal
+
+- `internal/deploy/clone.go` — new `forceRemoveAll` helper; the
+  Force branch calls it in place of bare `os.RemoveAll`.
+
 ## [0.5.9] — 2026-06-11
 
 Closes the "build failed: exit status 243 and nothing else" debugging
