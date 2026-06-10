@@ -104,7 +104,11 @@ func PrepareRelease(ctx context.Context, deployName string, spec BuildSpec, rele
 // caller's own identity if even the user-switch isn't possible. The
 // degradation is loud — operators see the "su" fallback in journald.
 func runBuild(ctx context.Context, cwd, cmdStr string, port int, sink io.Writer) error {
-	cmd, err := system.SandboxedCommand(ctx, "/bin/sh", "-c", cmdStr)
+	// SandboxedCommandIn threads cwd into systemd-run as
+	// --working-directory=, which is the only way to influence the
+	// transient service's CWD; cmd.Dir on the systemd-run process itself
+	// would only affect systemd-run, not the spawned child.
+	cmd, err := system.SandboxedCommandIn(ctx, cwd, "/bin/sh", "-c", cmdStr)
 	if err != nil {
 		return err
 	}

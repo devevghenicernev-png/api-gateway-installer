@@ -5,6 +5,45 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.6] — 2026-06-10
+
+Hotfix for two regressions introduced by v0.5.5 that only surfaced once
+a real `git push` ran through the webhook → worker path (the v0.5.5
+verification was CLI-only and slipped past both):
+
+### Fixed
+
+- **Webhook-driven deploys failed with `signal: bad system call`.**
+  v0.5.5's build sandbox used `systemd-run --scope --uid=apigw-build`,
+  which makes systemd-run perform the `setresuid()` *in its own
+  process*. The apigw-dashboard systemd unit ships
+  `RestrictSUIDSGID=true`; that seccomp filter is inherited by every
+  child, so systemd-run trapped SIGSYS on syscall 147 (aarch64
+  `setresuid`). Root-on-tty CLI deploys had no inherited filter and
+  worked; webhook-triggered deploys never could. Switched to a
+  transient *service* (no `--scope`, plus `--wait --pipe
+  --service-type=exec`) so PID1 performs the privilege drop — PID1
+  is outside our seccomp scope. Also threaded the release dir
+  through as `--working-directory=<cwd>` since transient services
+  don't inherit the caller's `cmd.Dir`.
+- **Dashboard didn't auto-refresh after webhook-triggered deploy.**
+  Admin-handler mutations publish `cfg.change` events; the webhook
+  worker bypasses the admin layer entirely and only emitted
+  `deploy.<name>.state`. The Deployments / APIs / Audit panels
+  needed a manual reload to show the new SHA / status. `emitState`
+  now also publishes `cfg.change` with `section: "deploys"` after
+  each apply so the React Query cache invalidates and the UI
+  reflects the deploy within ~10 ms.
+
+### Internal
+
+- `internal/system/sandbox.go` — new `SandboxedCommandIn(ctx,
+  workdir, args...)`; `SandboxedCommand` kept as a back-compat alias.
+- `internal/deploy/build.go` — `runBuild` switched to
+  `SandboxedCommandIn` and passes the release dir as workdir.
+- `internal/webhook/worker.go` — `emitState` emits `cfg.change`
+  alongside the existing `deploy.<name>.state` event.
+
 ## [0.5.5] — 2026-06-10
 
 End-to-end deploy bring-up release: the SSH-backed git deploy flow

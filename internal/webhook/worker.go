@@ -267,6 +267,12 @@ func (w *Worker) processOne(ctx context.Context, logger *slog.Logger) {
 
 // emitState publishes a deploy state transition on the hub. No-op when the
 // worker isn't wired to a hub.
+//
+// Also emits a `cfg.change` event with section="deploys" so the dashboard's
+// React Query cache invalidates and the Deployments panel refreshes
+// immediately. Without this the UI required a manual reload after a
+// webhook-triggered deploy (the admin handlers fire cfg.change themselves
+// for UI-initiated mutations, but the worker bypasses them entirely).
 func (w *Worker) emitState(deployName, status, sha, errMsg string) {
 	if w.Publish == nil {
 		return
@@ -279,6 +285,7 @@ func (w *Worker) emitState(deployName, status, sha, errMsg string) {
 		"ts":     time.Now().Unix(),
 	})
 	w.Publish("deploy."+deployName+".state", "state", payload)
+	w.Publish("cfg.change", "cfg", []byte(`{"section":"deploys"}`))
 }
 
 // pickBranch returns the configured branch when set, otherwise the payload's.

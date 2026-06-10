@@ -20,18 +20,28 @@ const BuildUser = "apigw-build"
 // CPUQuota/MemoryHigh instead of starving siblings.
 const BuildSlice = "apigw-builds.slice"
 
-// SandboxedCommand wraps `args` with `systemd-run --scope --uid=apigw-build
-// --slice=apigw-builds.slice` when systemd-run is on PATH; otherwise falls
-// back to a plain exec.Command (which the caller may still want to su to a
-// non-root user — see EnsureSystemUser).
-//
-// Returns the exec.Cmd ready to Start(). The caller still sets Dir / Env /
-// stdout / stderr.
-//
-// The brief from ARCHITECTURE.md §"Build sandboxing" says: "build runs
-// in a transient scope inheriting our .slice budget. systemd's
-// systemd-analyze security will score it the same as a long-running unit."
+// SandboxedCommand is a backward-compatible alias for
+// SandboxedCommandIn("", args...). Prefer SandboxedCommandIn when you can —
+// in transient-service mode the caller's cmd.Dir is NOT propagated to the
+// child; only systemd-run's --working-directory= is.
 func SandboxedCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	return SandboxedCommandIn(ctx, "", args...)
+}
+
+// SandboxedCommandIn wraps `args` with `systemd-run --uid=apigw-build
+// --slice=apigw-builds.slice` running as a transient service under PID1
+// (so setresuid happens in PID1, not in our seccomp-filtered process —
+// see the long comment inside). When `workdir` is non-empty it's threaded
+// through as --working-directory=<workdir>; cmd.Dir set on the returned
+// exec.Cmd applies only to systemd-run itself, NOT to the child.
+//
+// Falls back to su / plain exec when systemd-run isn't available
+// (containers, Alpine without systemd, dev hosts).
+//
+// The brief from ARCHITECTURE.md §"Build sandboxing": "build runs in a
+// transient unit inheriting our .slice budget; systemd-analyze security
+// will score it the same as a long-running unit."
+func SandboxedCommandIn(ctx context.Context, workdir string, args ...string) (*exec.Cmd, error) {
 	if len(args) == 0 {
 		return nil, errors.New("SandboxedCommand: empty args")
 	}
@@ -40,22 +50,37 @@ func SandboxedCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	if _, err := exec.LookPath("systemd-run"); err == nil {
 		// Ensure the build user exists. Cheap when it already does.
 		_ = EnsureSystemUser(BuildUser)
-		// --scope makes the child inherit our stdio directly, so --pipe
-		// would be both redundant and rejected by systemd ≥250
-		// ("--pty/--pipe is not compatible in timer or --scope mode" —
-		// surfaced on Debian trixie / Armbian rolling).
-		wrapped := append([]string{
+		// Run as a *transient service* (no --scope) so PID1 performs the
+		// setresuid() into BuildUser. With --scope, systemd-run runs the
+		// privilege drop in its OWN process; that inherits the caller's
+		// seccomp filter, and the apigw-dashboard unit ships
+		// `RestrictSUIDSGID=true`, so setresuid traps SIGSYS ("signal:
+		// bad system call"). CLI-initiated deploys (root, no inherited
+		// filter) used to slip through; webhook-driven ones from the
+		// dashboard hit the wall.
+		//
+		// --wait blocks until the service exits; --pipe wires its stdio
+		// back to us (--pipe is allowed in service mode — only --scope
+		// rejects it on systemd ≥250). --service-type=exec gives us the
+		// child's real exit code instead of a constant 0.
+		wrapped := []string{
 			"systemd-run",
 			"--quiet",
 			"--collect",
-			"--scope",
+			"--wait",
+			"--pipe",
+			"--service-type=exec",
 			"--uid=" + BuildUser,
 			"--slice=" + BuildSlice,
 			"--property=CPUQuota=200%",
 			"--property=MemoryHigh=2G",
 			"--property=MemoryMax=3G",
 			"--property=TasksMax=1024",
-		}, args...)
+		}
+		if workdir != "" {
+			wrapped = append(wrapped, "--working-directory="+workdir)
+		}
+		wrapped = append(wrapped, args...)
 		return exec.CommandContext(ctx, wrapped[0], wrapped[1:]...), nil
 	}
 	// Best-effort fallback: try to drop to apigw-build via `su` if it's a
@@ -65,10 +90,18 @@ func SandboxedCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	if _, err := exec.LookPath("su"); err == nil {
 		if _, lerr := lookupUser(BuildUser); lerr == nil {
 			joined := joinShellQuoted(args)
-			return exec.CommandContext(ctx, "su", "-s", "/bin/sh", "-c", joined, BuildUser), nil
+			cmd := exec.CommandContext(ctx, "su", "-s", "/bin/sh", "-c", joined, BuildUser)
+			if workdir != "" {
+				cmd.Dir = workdir
+			}
+			return cmd, nil
 		}
 	}
-	return exec.CommandContext(ctx, args[0], args[1:]...), nil
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
+	return cmd, nil
 }
 
 // lookupUser wraps os/user without pulling it into other files.
