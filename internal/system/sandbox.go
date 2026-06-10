@@ -40,9 +40,12 @@ func SandboxedCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	if _, err := exec.LookPath("systemd-run"); err == nil {
 		// Ensure the build user exists. Cheap when it already does.
 		_ = EnsureSystemUser(BuildUser)
+		// --scope makes the child inherit our stdio directly, so --pipe
+		// would be both redundant and rejected by systemd ≥250
+		// ("--pty/--pipe is not compatible in timer or --scope mode" —
+		// surfaced on Debian trixie / Armbian rolling).
 		wrapped := append([]string{
 			"systemd-run",
-			"--pipe",
 			"--quiet",
 			"--collect",
 			"--scope",

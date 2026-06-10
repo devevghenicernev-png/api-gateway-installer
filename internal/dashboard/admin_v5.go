@@ -36,6 +36,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -451,28 +452,74 @@ func (s *Server) adminWebhookActivityHandler(w http.ResponseWriter, r *http.Requ
 		adminWriteJSONError(w, Status(err), err.Error())
 		return
 	}
-	// Pull recent webhook.* audit entries — that's the canonical
-	// audit-trail. We don't keep a separate in-memory ring buffer.
-	if s.Sec == nil || s.Sec.Audit == nil {
-		adminWriteJSON(w, http.StatusOK, []any{})
-		return
+	// Merge two sources so the panel shows a useful history:
+	//  - queue (RecentDeliveries): live picture of pending / dead-letter
+	//    jobs. Successful jobs get deleted from here as soon as the
+	//    deploy completes, so on its own this surface is "always empty
+	//    when things work" — useless as an activity feed.
+	//  - audit log: every accepted delivery is mirrored here from the
+	//    Publish hook in cmd/dashboard/serve/serve.go. This is the
+	//    durable history.
+	// We dedupe by (deploy, ts) so a job that's currently failing in the
+	// queue doesn't double-print against its earlier "received" audit row.
+	type row struct {
+		Deploy string `json:"deploy"`
+		TS     string `json:"ts"`
+		Result string `json:"result"`
+		Reason string `json:"reason,omitempty"`
+		SHA    string `json:"sha,omitempty"`
+		Event  string `json:"event,omitempty"`
+		sort   int64
 	}
-	out := make([]map[string]any, 0)
-	f := auditFilter()
-	f.Limit = 200
-	_ = s.Sec.Audit.Query(f, func(e auditEntry) bool {
-		if !strings.HasPrefix(e.Action, "webhook.") {
-			return true
+	seen := map[string]struct{}{}
+	rows := make([]row, 0, 64)
+
+	if s.Queue != nil {
+		if jobs, err := s.Queue.RecentDeliveries(200); err == nil {
+			for _, j := range jobs {
+				result := "queued"
+				if j.LastError != "" {
+					result = "failed"
+				}
+				ts := j.EnqueuedAt.Format("2006-01-02T15:04:05Z07:00")
+				key := j.Deploy + "|" + ts
+				seen[key] = struct{}{}
+				rows = append(rows, row{
+					Deploy: j.Deploy, TS: ts, Result: result,
+					Reason: j.LastError, SHA: j.SHA, Event: j.Event,
+					sort: j.EnqueuedAt.UnixNano(),
+				})
+			}
 		}
-		out = append(out, map[string]any{
-			"deploy": strings.TrimPrefix(e.Resource, "webhook/"),
-			"ts":     e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-			"result": e.Result,
-			"reason": e.Reason,
+	}
+	if s.Sec != nil && s.Sec.Audit != nil {
+		f := auditFilter()
+		f.Limit = 200
+		_ = s.Sec.Audit.Query(f, func(e auditEntry) bool {
+			if e.Action != "webhook.recv" {
+				return true
+			}
+			ts := e.Timestamp.Format("2006-01-02T15:04:05Z07:00")
+			key := strings.TrimPrefix(e.Resource, "webhook/") + "|" + ts
+			if _, ok := seen[key]; ok {
+				return true
+			}
+			rows = append(rows, row{
+				Deploy: strings.TrimPrefix(e.Resource, "webhook/"),
+				TS:     ts,
+				Result: e.Result, // "received"
+				Reason: e.Reason, // "<event> <delivery>"
+				sort:   e.Timestamp.UnixNano(),
+			})
+			return true
 		})
-		return true
-	})
-	adminWriteJSON(w, http.StatusOK, out)
+	}
+	// Newest first.
+	sort.Slice(rows, func(i, j int) bool { return rows[i].sort > rows[j].sort })
+	if len(rows) > 200 {
+		rows = rows[:200]
+	}
+	adminWriteJSON(w, http.StatusOK, rows)
 }
 
 // auditFilter returns a zero-value filter — every Query in this file

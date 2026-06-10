@@ -149,8 +149,13 @@ func writeStartScript(path, releaseDir, start string, port int) error {
 	if start == "" {
 		return fmt.Errorf("start script: empty start command (set with --start)")
 	}
-	// `exec` so the shell is replaced by the actual server process — systemd
-	// sees the binary as the leaf instead of /bin/sh.
+	// For simple commands ("node server.js", "./app") `exec <cmd>` is best
+	// — systemd sees the binary as the unit's leaf. For shell-construct
+	// starts ("cd backend && npm start") we have to fall back to
+	// `exec /bin/sh -c '<start>'` since `exec` only accepts an executable
+	// path, not builtins or operators. Slight cost: extra /bin/sh in the
+	// process tree; systemd's cgroup tracking still kills the whole tree
+	// on stop.
 	body := strings.Builder{}
 	body.WriteString("#!/bin/sh\n")
 	body.WriteString("set -e\n")
@@ -163,13 +168,37 @@ func writeStartScript(path, releaseDir, start string, port int) error {
 	body.WriteString("export PORT=")
 	body.WriteString(itoa(port))
 	body.WriteString("\n")
-	body.WriteString("exec ")
-	body.WriteString(start)
-	body.WriteString("\n")
+	if needsShellWrap(start) {
+		body.WriteString("exec /bin/sh -c '")
+		body.WriteString(strings.ReplaceAll(start, "'", `'\''`))
+		body.WriteString("'\n")
+	} else {
+		body.WriteString("exec ")
+		body.WriteString(start)
+		body.WriteString("\n")
+	}
 	if err := os.WriteFile(path, []byte(body.String()), 0o755); err != nil {
 		return err
 	}
 	return nil
+}
+
+// needsShellWrap returns true if `start` contains shell metacharacters or
+// starts with a builtin — anything `exec` can't handle directly.
+func needsShellWrap(start string) bool {
+	if strings.ContainsAny(start, "&|;<>()`$\"") {
+		return true
+	}
+	// Builtins exec can't resolve.
+	first := start
+	if i := strings.IndexByte(first, ' '); i > 0 {
+		first = first[:i]
+	}
+	switch first {
+	case "cd", "set", "export", "unset", "source", ".", "eval", "alias":
+		return true
+	}
+	return false
 }
 
 func itoa(i int) string {

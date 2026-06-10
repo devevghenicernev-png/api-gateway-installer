@@ -5,6 +5,132 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.5] — 2026-06-10
+
+End-to-end deploy bring-up release: the SSH-backed git deploy flow
+(`apigw deploy add <name> --repo git@github.com:…`) didn't actually
+work top-to-bottom on a fresh Debian trixie / Armbian rolling host.
+Eight bugs along the clone → build-sandbox → systemd-handoff →
+health-probe chain each masked the next; surfacing them required
+deploying a real Payload + Express backend (FoodManager) end-to-end.
+This release fixes all of them, adds rewrites on Deploys (so they
+can serve apps that listen on `/api/*` behind an `/api/<name>/*`
+mount), and rewires the dashboard's Webhook activity panel so it
+keeps a history instead of going blank after every successful
+deploy.
+
+### Added
+
+- **Rewrites on Deploys.** `config.Deploy` gained a `Rewrites
+  []RewriteRule` field mirroring the one on `config.API`; the nginx
+  generator pipes them through the same `applyMiddleware` path. Lets
+  a deploy listening on `/api/users` be mounted at
+  `/api/<name>/users` and have nginx strip the prefix per rule.
+  Previously you needed a parallel `apigw api add` entry pointing at
+  the same upstream, which collided on the generated `upstream
+  apigw_<name>` block and broke `nginx -t`.
+- **APIs panel merges Deploys.** The dashboard's APIs panel now
+  shows both proxy-only APIs and git-backed Deploys in one list, each
+  row tagged with its kind. Deploys carry a `deploy` badge and link
+  to the Deployments panel for management actions (operators still
+  manage build / SSH / secrets there). The panel header count is the
+  sum of both. Closes the "where did my service go after `deploy
+  add`?" UX gap.
+- **Webhook activity history.** `cmd/dashboard/serve/serve.go`'s
+  publish callback now mirrors every accepted `webhook.recv` into the
+  audit log; `admin_v5.go` merges that history with the live
+  `Queue.RecentDeliveries` view and dedupes on `(deploy, ts)`.
+  Successful deliveries previously got deleted from the bbolt queue
+  on completion, which made the panel "always empty unless something
+  failed" — useless as an activity feed.
+- **Auto-seed `known_hosts` on first SSH clone.** `authFor` calls
+  `ensureKnownHost(url)` before handing the `HostKeyCallback` to
+  go-git; on first miss it shells out to `ssh-keyscan -t
+  rsa,ecdsa,ed25519 <host>` and appends every offered key. Idempotent
+  on subsequent clones. Fresh installs no longer need a manual
+  `ssh-keyscan github.com > /var/lib/apigw/.ssh/known_hosts` step,
+  and pinning all three key types avoids the "key mismatch" failure
+  when GitHub's offered algorithm doesn't match the single ed25519
+  line that operators usually copy in.
+
+### Fixed
+
+- **Build sandbox: `systemd-run --pipe + --scope` rejected on
+  systemd ≥250.** `system/sandbox.go` was passing both flags;
+  systemd on Debian trixie / Armbian rolling exits with `--pty/--pipe
+  is not compatible in timer or --scope mode.` Dropped `--pipe` —
+  `--scope` already makes the child inherit stdio from the caller.
+- **Release dir created with mode 0700.** `os.MkdirTemp` defaults to
+  0700, and clone never chmod'd back after the rename — the
+  sandboxed build (`apigw-build` user) couldn't even `cd` into its
+  own release dir. Now `os.Chmod(finalPath, 0o755)` immediately
+  after the staging-to-release rename.
+- **Release tree owned by `root` for the build user.** Even with the
+  mode fixed, every file under the release dir was `root:root` so
+  `npm install` failed EACCES on `mkdir node_modules`. Added
+  `chownTree(finalPath, system.BuildUser)` in clone, with a matching
+  recursive chown to `apigw-run` in swap so the runtime user can
+  write `uploads/`, log files, and on-first-request SQLite paths.
+- **`apigw deploy run --force` short-circuited on an existing release
+  SHA.** `CloneRequest.Force` is now respected — when set, the
+  existing release dir is removed before staging the new clone, so
+  the build user owns a fresh tree instead of inheriting a stale
+  ownership / partial-build state.
+- **`apigw-build` had no writable home directory.** `useradd` was
+  invoked with `--no-create-home`; systemd-run sets `$HOME` from
+  `/etc/passwd` on `--uid=`, and npm / cargo / pip then tried to
+  `mkdir` caches under `/home/apigw-build` and crashed EACCES.
+  `EnsureSystemUser` now uses `--create-home` and backfills missing
+  home dirs (mkdir + chown) on existing users for in-place upgrades.
+- **`exec cd backend && npm start` failed: cd is a shell
+  builtin.** `build.go writeStartScript` blindly prefixed `exec ` —
+  fine for `node server.js`, broken for any custom start with shell
+  constructs. Now detects shell metacharacters / builtins and falls
+  back to `exec /bin/sh -c '<start>'` only when needed.
+- **Health probe gave up at 10 s.** Payload CMS on ARM needs
+  ~9–12 s to bind (Spring / Rails apps similar); a perfectly healthy
+  deploy was being rolled back on the first attempt and
+  intermittently after. Deadline lifted to 30 s / 60 iterations.
+- **`apigw-run` race on first deploy.** `chownTree` to `apigw-run`
+  ran before `InstallTemplateUnit()` — the function that lazily
+  creates the user — so on fresh installs the chown silently failed
+  (user lookup error → discarded). The runtime then booted with
+  files still owned by `apigw-build` and hit EACCES on first write.
+  Both system users are now ensured up front at the top of `Apply()`.
+- **Webhook clone failed with "no valid known_hosts file" from the
+  dashboard process.** go-git's default `HostKeyCallback` walks
+  `$HOME/.ssh/known_hosts`; the dashboard / webhook worker runs from
+  a systemd unit with no `HOME`, so SSH clone exploded even when the
+  CLI path worked. `authFor` now pins verification to the
+  apigw-managed file (`SSHKnownHosts()`) and seeds it on demand (see
+  Added).
+
+### Compatibility
+
+- `config.Deploy` gained `Rewrites []RewriteRule` (yaml:`rewrites`).
+  Existing configs are unaffected — empty omits the field. Configs
+  written by this version remain readable by 0.5.4 (the field is
+  ignored on the way back in).
+
+### Internal
+
+- `internal/system/users.go` — `EnsureSystemUser` now calls a new
+  `ensureHome` helper that mkdirs `u.HomeDir` 0750 and chowns to the
+  user, covering both new (`--create-home`) and pre-existing users.
+- `internal/deploy/clone.go` — new `chownTree`, `ensureKnownHost`,
+  `sshHostOf` helpers; `CloneRequest.Force` field.
+- `internal/deploy/swap.go` — `system.EnsureSystemUser(BuildUser /
+  RunUser)` at the top of `Apply()`; chownTree to `RunUser` after
+  `PrepareRelease` returns; `Clone(... Force: req.ForceClone)`.
+- `internal/dashboard/admin_v5.go` — webhook activity handler reads
+  from `Queue.RecentDeliveries` (live) + `Audit.Query` (history),
+  dedupes on `(deploy, ts)`.
+- `internal/cmd/dashboard/serve/serve.go` — publish hook mirrors
+  `webhook.recv` events into the audit log with `Result: "received"`.
+- `web/src/components/apis/ApisPanel.tsx` — `useDeploys()` joined
+  the data source; rows are a discriminated `Row` union with
+  per-kind action rendering.
+
 ## [0.5.4] — 2026-06-10
 
 The v0.5.3 "resizable layout" commit actually shipped the old CSS-grid

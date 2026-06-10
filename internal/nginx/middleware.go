@@ -257,6 +257,7 @@ func applyMiddlewareDeploy(
 		ForwardAuth: d.ForwardAuth,
 		HealthCheck: d.HealthCheck,
 		Retry:       d.Retry,
+		Rewrites:    d.Rewrites,
 	}
 	if err := applyMiddleware(&tmp, syntheticAPI, globalMaxBody, rlZones, corsOriginsSeen, corsOrigins); err != nil {
 		return err
@@ -277,6 +278,7 @@ func applyMiddlewareDeploy(
 	out.NextUpstreamTries = tmp.NextUpstreamTries
 	out.NextUpstreamTimeout = tmp.NextUpstreamTimeout
 	out.ReadTimeout = tmp.ReadTimeout
+	out.Rewrites = tmp.Rewrites
 	return nil
 }
 

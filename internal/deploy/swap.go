@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/devevghenicernev-png/apigw/internal/system"
 )
 
 // ApplyResult is the outcome of a single deploy pass. Empty SHA means we
@@ -78,10 +80,20 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 		}
 	}()
 
+	// Ensure both apigw system users exist before anything that depends
+	// on them: Clone chowns the release dir to BuildUser, the build runs
+	// as BuildUser, and the runtime swap chowns to RunUser. On a fresh
+	// install neither user exists yet, and silent lookup failures inside
+	// chownTree would leave the release owned by root → first build fails
+	// with EACCES. Cheap + idempotent so we don't gate on runtime hint.
+	_ = system.EnsureSystemUser(system.BuildUser)
+	_ = system.EnsureSystemUser(RunUser)
+
 	cl, err := Clone(ctx, CloneRequest{
 		Name:   req.Name,
 		Repo:   req.Repo,
 		Branch: req.Branch,
+		Force:  req.ForceClone,
 	})
 	if err != nil {
 		return res, fmt.Errorf("clone: %w", err)
@@ -119,6 +131,18 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 	}
 	if _, err := PrepareRelease(ctx, req.Name, spec, cl.Path, req.Logsink); err != nil {
 		return res, fmt.Errorf("prepare release: %w", err)
+	}
+
+	// Hand the release tree off from the build user (apigw-build) to the
+	// runtime user (apigw-run). Without this, the systemd unit — which runs
+	// as apigw-run — can read but not write into its own working tree, so
+	// any app that mkdir's uploads/, writes logs, or creates a SQLite file
+	// on first request will hit EACCES. Both users were ensured up front
+	// (see the EnsureSystemUser block before Clone).
+	if det.Runtime != RuntimeStatic {
+		if err := chownTree(cl.Path, RunUser); err != nil && req.Logsink != nil {
+			fmt.Fprintf(req.Logsink, "warn: chown release to %s failed: %v\n", RunUser, err)
+		}
 	}
 
 	previous, _ := os.Readlink(CurrentSymlink(req.Name)) // empty on first deploy
@@ -208,9 +232,13 @@ func healthProbe(ctx context.Context, port int, healthPath string) error {
 		return nil
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	deadline := time.Now().Add(10 * time.Second)
+	// 30s deadline accommodates frameworks with non-trivial boot cost
+	// (Payload CMS + MongoDB connection ~9-12s on ARM, Rails / Spring
+	// apps similar). The earlier 10s was tight enough to race a healthy
+	// startup and roll back a perfectly fine deploy.
+	deadline := time.Now().Add(30 * time.Second)
 	var lastErr error
-	for i := 0; i < 20 && time.Now().Before(deadline); i++ {
+	for i := 0; i < 60 && time.Now().Before(deadline); i++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

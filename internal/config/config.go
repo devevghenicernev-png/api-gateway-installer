@@ -1259,17 +1259,18 @@ type Deploy struct {
 	GRPC        bool       `koanf:"grpc" yaml:"grpc,omitempty"`
 
 	// Middleware mirror of API. See API field comments for semantics.
-	MaxBodySize string       `koanf:"max_body_size" yaml:"max_body_size,omitempty"`
-	Headers     *Headers     `koanf:"headers" yaml:"headers,omitempty"`
-	IPRules     *IPRules     `koanf:"ip_rules" yaml:"ip_rules,omitempty"`
-	CORS        *CORS        `koanf:"cors" yaml:"cors,omitempty"`
-	BasicAuth   *BasicAuth   `koanf:"basic_auth" yaml:"basic_auth,omitempty"`
-	RateLimit   *RateLimit   `koanf:"rate_limit" yaml:"rate_limit,omitempty"`
-	ForwardAuth *ForwardAuth `koanf:"forward_auth" yaml:"forward_auth,omitempty"`
-	HealthCheck *HealthCheck `koanf:"health_check" yaml:"health_check,omitempty"`
-	Retry       *Retry       `koanf:"retry" yaml:"retry,omitempty"`
-	JWT         *JWT         `koanf:"jwt" yaml:"jwt,omitempty"`
-	MTLS        *MTLS        `koanf:"mtls" yaml:"mtls,omitempty"`
+	MaxBodySize string        `koanf:"max_body_size" yaml:"max_body_size,omitempty"`
+	Headers     *Headers      `koanf:"headers" yaml:"headers,omitempty"`
+	IPRules     *IPRules      `koanf:"ip_rules" yaml:"ip_rules,omitempty"`
+	CORS        *CORS         `koanf:"cors" yaml:"cors,omitempty"`
+	BasicAuth   *BasicAuth    `koanf:"basic_auth" yaml:"basic_auth,omitempty"`
+	RateLimit   *RateLimit    `koanf:"rate_limit" yaml:"rate_limit,omitempty"`
+	ForwardAuth *ForwardAuth  `koanf:"forward_auth" yaml:"forward_auth,omitempty"`
+	HealthCheck *HealthCheck  `koanf:"health_check" yaml:"health_check,omitempty"`
+	Retry       *Retry        `koanf:"retry" yaml:"retry,omitempty"`
+	JWT         *JWT          `koanf:"jwt" yaml:"jwt,omitempty"`
+	MTLS        *MTLS         `koanf:"mtls" yaml:"mtls,omitempty"`
+	Rewrites    []RewriteRule `koanf:"rewrites" yaml:"rewrites,omitempty"`
 
 	CustomLocation string `koanf:"custom_location" yaml:"custom_location,omitempty"`
 	CustomServer   string `koanf:"custom_server" yaml:"custom_server,omitempty"`

@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -13,6 +16,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/devevghenicernev-png/apigw/internal/system"
 )
 
 // CloneRequest captures everything Clone() needs.
@@ -20,6 +26,12 @@ type CloneRequest struct {
 	Name   string // deploy name, used to namespace the release dir
 	Repo   string // https://... or git@github.com:... or ssh://...
 	Branch string // "" → repo default
+	// Force, when true, removes any pre-existing release dir for the
+	// resolved SHA before staging the new clone. Without this, --force
+	// at the Apply layer still hits Clone's idempotent short-circuit
+	// (and a stale build-artifact tree from the previous attempt may
+	// be owned by the wrong user, breaking the re-build).
+	Force bool
 }
 
 // CloneResult is what Clone returns.
@@ -99,8 +111,14 @@ func Clone(ctx context.Context, req CloneRequest) (CloneResult, error) {
 	finalPath := ReleaseDir(req.Name, sha)
 
 	if _, err := os.Stat(finalPath); err == nil {
-		// Already have this commit; the staged copy is redundant.
-		return CloneResult{SHA: sha, Path: finalPath}, nil
+		if req.Force {
+			if err := os.RemoveAll(finalPath); err != nil {
+				return CloneResult{}, fmt.Errorf("force-remove existing release %s: %w", finalPath, err)
+			}
+		} else {
+			// Already have this commit; the staged copy is redundant.
+			return CloneResult{SHA: sha, Path: finalPath}, nil
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return CloneResult{}, fmt.Errorf("stat %s: %w", finalPath, err)
 	}
@@ -114,8 +132,41 @@ func Clone(ctx context.Context, req CloneRequest) (CloneResult, error) {
 		}
 		return CloneResult{}, fmt.Errorf("rename %s → %s: %w", staging, finalPath, err)
 	}
+	// MkdirTemp defaults to 0700 — without this the apigw-build user that
+	// the sandboxed build runs as can't even cd into the release dir, and
+	// `npm install`/custom build commands fail with "can't cd".
+	_ = os.Chmod(finalPath, 0o755)
+	// The sandboxed build runs as system.BuildUser (apigw-build). It needs
+	// write access inside the release dir to drop node_modules, dist/,
+	// .next, target/, etc. Without this chown, npm install fails with
+	// EACCES even though it can read sources.
+	_ = chownTree(finalPath, system.BuildUser)
 	cleanupStaging = false
 	return CloneResult{SHA: sha, Path: finalPath}, nil
+}
+
+// chownTree recursively chowns `root` to the given system user (and their
+// primary group). Best-effort — silent on lookup failure so dev / CI hosts
+// without the apigw-build user keep working (the build there runs as root).
+func chownTree(root, username string) error {
+	u, err := user.Lookup(username)
+	if err != nil {
+		return err
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return err
+	}
+	return filepath.Walk(root, func(path string, _ os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		return os.Lchown(path, uid, gid)
+	})
 }
 
 // authFor returns the transport.AuthMethod for the URL, or nil for anonymous
@@ -131,11 +182,115 @@ func authFor(url string) (transport.AuthMethod, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ssh public keys: %w", err)
 		}
+		// Pin host-key verification to the apigw-managed known_hosts file
+		// rather than relying on go-git's default lookup (which walks
+		// $HOME/.ssh/known_hosts). The dashboard/webhook worker runs from
+		// a systemd unit with no HOME set, so the default lookup fails
+		// outright with "unable to find any valid known_hosts file"; the
+		// CLI happened to inherit a HOME and was fine. Forcing the path
+		// here makes both paths behave the same.
+		if err := ensureKnownHost(url); err != nil {
+			return nil, fmt.Errorf("seed known_hosts: %w", err)
+		}
+		cb, kherr := knownhosts.New(SSHKnownHosts())
+		if kherr != nil {
+			return nil, fmt.Errorf("known_hosts %s: %w", SSHKnownHosts(), kherr)
+		}
+		auth.HostKeyCallback = cb
 		return auth, nil
 	}
 	// HTTPS with embedded credentials (https://user:token@…) is honoured by
 	// go-git automatically — no extra wiring needed.
 	return nil, nil
+}
+
+// ensureKnownHost makes sure SSHKnownHosts() contains an entry for the host
+// referenced by `url`. On fresh installs the file doesn't exist at all (no
+// upstream tool ever seeded it); the lazy alternative — "tell the operator
+// to run ssh-keyscan manually" — is a footgun the deploy flow shouldn't
+// require. So we shell out to ssh-keyscan ourselves on the first clone per
+// host and append the result. Idempotent: re-runs are no-ops once the host
+// has any line.
+//
+// Uses -t rsa,ecdsa,ed25519 so go-git's negotiation finds a match regardless
+// of which type the server offers first (GitHub rotates; pinning a single
+// type causes "key mismatch" failures).
+func ensureKnownHost(repoURL string) error {
+	host := sshHostOf(repoURL)
+	if host == "" {
+		return nil
+	}
+	khPath := SSHKnownHosts()
+	if err := os.MkdirAll(filepath.Dir(khPath), 0o700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(khPath), err)
+	}
+	// Already present? cheap check via grep-like scan.
+	if data, err := os.ReadFile(khPath); err == nil {
+		// hashed entry (starts with |1|) won't match a plain prefix
+		// check, but if anything at all is in the file we assume an
+		// operator/installer seeded it intentionally and don't pile on.
+		if len(data) > 0 {
+			for _, line := range splitLines(string(data)) {
+				if line == "" || line[0] == '#' {
+					continue
+				}
+				if strings.HasPrefix(line, host+" ") || strings.HasPrefix(line, "|1|") {
+					return nil
+				}
+			}
+		}
+	}
+	if _, err := exec.LookPath("ssh-keyscan"); err != nil {
+		return fmt.Errorf("ssh-keyscan not on PATH (install openssh-client) — cannot seed %s for %s", khPath, host)
+	}
+	cmd := exec.Command("ssh-keyscan", "-T", "10", "-t", "rsa,ecdsa,ed25519", host)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("ssh-keyscan %s: %w", host, err)
+	}
+	if len(out) == 0 {
+		return fmt.Errorf("ssh-keyscan %s returned no keys", host)
+	}
+	f, err := os.OpenFile(khPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(out)
+	return err
+}
+
+// sshHostOf extracts the hostname from an SSH URL. Handles both forms:
+//   - git@github.com:owner/repo.git → "github.com"
+//   - ssh://git@github.com:22/owner/repo → "github.com"
+func sshHostOf(s string) string {
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexByte(s, '@'); i >= 0 {
+		s = s[i+1:]
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' || s[i] == '/' {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+func splitLines(s string) []string {
+	out := []string{}
+	last := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			out = append(out, s[last:i])
+			last = i + 1
+		}
+	}
+	if last < len(s) {
+		out = append(out, s[last:])
+	}
+	return out
 }
 
 func isSSHURL(url string) bool {

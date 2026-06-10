@@ -23,7 +23,7 @@ import { WebhookActivityPanel } from "./components/webhook/WebhookActivityPanel"
 import { WebhookSetupDialog } from "./components/webhook/WebhookSetupDialog";
 import { LogsPanel } from "./components/logs/LogsPanel";
 import { Badge } from "./components/ui/badge";
-import { useApis, useApprovals } from "./hooks/useAdminQueries";
+import { useApis, useApprovals, useDeploys } from "./hooks/useAdminQueries";
 import { useSSE, type SSEStatus } from "./hooks/useSSE";
 import { TooltipProvider } from "./components/ui/tooltip";
 
@@ -113,6 +113,7 @@ export function Dashboard() {
 
   useStatus();
   const { data: apis } = useApis();
+  const { data: deploys } = useDeploys();
   const { data: approvals } = useApprovals("pending");
 
   // SSE-driven cache invalidation. The backend publishes a `cfg.change`
@@ -154,7 +155,7 @@ export function Dashboard() {
   // ---- Panel renderers ----
   const apisPanel = (
     <Panel area="apis" title="APIs"
-      badge={apis ? <Badge variant="muted">{apis.length}</Badge> : null}
+      badge={<Badge variant="muted">{(apis?.length ?? 0) + (deploys?.length ?? 0)}</Badge>}
       add={{ label: "Add", onClick: () => setApiAddOpen(true) }}
       maxed={maxed === "apis"} onMaxToggle={onMaxToggle("apis")}
     >
@@ -212,45 +213,50 @@ export function Dashboard() {
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex min-h-screen flex-col bg-background text-foreground">
         <TopBar sseStatus={sseStatus} onOpenSignIn={() => setSignInOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
 
-        <main id="main" className="flex-1 min-h-0 overflow-hidden p-3">
+        {/* p-3 padding around the panel area. The PanelGroup container
+            below uses `h-[calc(100vh-...)] min-h-[720px]` so that on a
+            tall viewport the dashboard fits in one screen exactly, but
+            on a short one (laptop folded, devtools open) the body grows
+            beyond viewport and the page scrolls — instead of clipping
+            the bottom panel. Internal panel scrolling still works via
+            Panel.tsx's overflow-auto body, so very long audit/log
+            content scrolls inside its own panel. */}
+        <main id="main" className="flex-1 p-3">
           {maxed ? (
-            // flex chain so Panel's overflow-auto body clips correctly.
-            // The wrapper takes full main height, Panel takes 100% of
-            // wrapper via flex-1; Panel's inner scroll container
-            // bounded → audit list scrolls inside the panel instead of
-            // pushing past viewport.
-            <div className="flex h-full min-h-0 overflow-hidden">
+            <div className="flex h-[calc(100vh-80px)] min-h-[600px]">
               <div className="flex-1 min-h-0">{single[maxed]}</div>
             </div>
           ) : (
-            <PanelGroup direction="vertical" autoSaveId={RESIZE_VERTICAL_ID} className="h-full">
-              <RPanel defaultSize={32} minSize={15} className="min-h-0">
-                <PanelGroup direction="horizontal" autoSaveId={RESIZE_ROW1_ID}>
-                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full pr-1">{apisPanel}</div></RPanel>
-                  <VHandle />
-                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full px-1">{deploysPanel}</div></RPanel>
-                  <VHandle />
-                  <RPanel defaultSize={34} minSize={15} className="min-h-0"><div className="h-full pl-1">{tlsPanel}</div></RPanel>
-                </PanelGroup>
-              </RPanel>
-              <HHandle />
-              <RPanel defaultSize={32} minSize={15} className="min-h-0">
-                <PanelGroup direction="horizontal" autoSaveId={RESIZE_ROW2_ID}>
-                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full pr-1">{auditPanel}</div></RPanel>
-                  <VHandle />
-                  <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full px-1">{approvalsPanel}</div></RPanel>
-                  <VHandle />
-                  <RPanel defaultSize={34} minSize={15} className="min-h-0"><div className="h-full pl-1">{webhookPanel}</div></RPanel>
-                </PanelGroup>
-              </RPanel>
-              <HHandle />
-              <RPanel defaultSize={36} minSize={15} className="min-h-0">
-                <div className="h-full">{logsPanel}</div>
-              </RPanel>
-            </PanelGroup>
+            <div className="h-[calc(100vh-80px)] min-h-[720px]">
+              <PanelGroup direction="vertical" autoSaveId={RESIZE_VERTICAL_ID} className="h-full">
+                <RPanel defaultSize={32} minSize={15} className="min-h-0">
+                  <PanelGroup direction="horizontal" autoSaveId={RESIZE_ROW1_ID}>
+                    <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full pr-1">{apisPanel}</div></RPanel>
+                    <VHandle />
+                    <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full px-1">{deploysPanel}</div></RPanel>
+                    <VHandle />
+                    <RPanel defaultSize={34} minSize={15} className="min-h-0"><div className="h-full pl-1">{tlsPanel}</div></RPanel>
+                  </PanelGroup>
+                </RPanel>
+                <HHandle />
+                <RPanel defaultSize={32} minSize={15} className="min-h-0">
+                  <PanelGroup direction="horizontal" autoSaveId={RESIZE_ROW2_ID}>
+                    <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full pr-1">{auditPanel}</div></RPanel>
+                    <VHandle />
+                    <RPanel defaultSize={33} minSize={15} className="min-h-0"><div className="h-full px-1">{approvalsPanel}</div></RPanel>
+                    <VHandle />
+                    <RPanel defaultSize={34} minSize={15} className="min-h-0"><div className="h-full pl-1">{webhookPanel}</div></RPanel>
+                  </PanelGroup>
+                </RPanel>
+                <HHandle />
+                <RPanel defaultSize={36} minSize={15} className="min-h-0">
+                  <div className="h-full">{logsPanel}</div>
+                </RPanel>
+              </PanelGroup>
+            </div>
           )}
         </main>
 

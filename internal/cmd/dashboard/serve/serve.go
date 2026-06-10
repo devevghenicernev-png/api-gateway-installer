@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/devevghenicernev-png/apigw/internal/audit"
 	"github.com/devevghenicernev-png/apigw/internal/cmdutil"
 	"github.com/devevghenicernev-png/apigw/internal/config"
 	"github.com/devevghenicernev-png/apigw/internal/dashboard"
@@ -61,12 +62,32 @@ func run(ctx context.Context, f *cmdutil.Factory, o *opts) error {
 
 	hub := events.New()
 	hub.Metrics = prom
-	publish := func(topic, evType string, data []byte) {
-		hub.Publish(topic, evType, data)
-	}
 
 	// Dashboard HTTP server (owns the hub, serves UI + SSE + JSON API).
 	dash := dashboard.New(o.addr, hub, reloadConfig, logger, prom)
+
+	publish := func(topic, evType string, data []byte) {
+		hub.Publish(topic, evType, data)
+		// Mirror webhook deliveries into the audit log so the dashboard's
+		// Webhook activity panel keeps a history — the bbolt job queue
+		// deletes entries on successful deploy, which made the panel
+		// effectively always-empty unless something failed.
+		if topic == "webhook.recv" && dash.Sec != nil && dash.Sec.Audit != nil {
+			var d struct {
+				Deploy   string `json:"deploy"`
+				Event    string `json:"event"`
+				Delivery string `json:"delivery"`
+			}
+			_ = json.Unmarshal(data, &d)
+			_, _ = dash.Sec.Audit.Log(audit.Entry{
+				Actor:    "github-webhook",
+				Action:   "webhook.recv",
+				Resource: "webhook/" + d.Deploy,
+				Result:   "received",
+				Reason:   d.Event + " " + d.Delivery,
+			})
+		}
+	}
 
 	// Wire the integrated security layer (RBAC + audit + policy + approvals
 	// + tenants + alerts). Done lazily so legacy installs without a

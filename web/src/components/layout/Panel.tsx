@@ -26,7 +26,11 @@ export function Panel({ area, title, badge, add, maxed, onMaxToggle, headerExtra
   return (
     <Card
       style={{ gridArea: area }}
-      className={cn("flex min-h-0 flex-col overflow-hidden", className)}
+      // h-full is load-bearing: without it Card collapses to its
+      // content size, the `flex-1 min-h-0 overflow-auto` body has no
+      // "remaining space" to claim, and long content (43-row audit log,
+      // streaming logs) renders past the panel with no scrollbar.
+      className={cn("flex h-full min-h-0 flex-col overflow-hidden", className)}
     >
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         <h3 className="text-sm font-semibold leading-none tracking-tight">{title}</h3>
