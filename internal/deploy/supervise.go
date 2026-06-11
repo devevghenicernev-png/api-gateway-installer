@@ -11,14 +11,13 @@ import (
 	"github.com/devevghenicernev-png/apigw/internal/system/svcmgr"
 )
 
-// RunUser is the dedicated system user every apigw deployment runs under.
-//
-// One user (not per-deploy) keeps StateDirectory ownership stable across
-// `apigw deploy add` calls. UID churn from DynamicUser=yes thrashes journald
-// log ownership.
+// RunUser is the dedicated system user every apigw deployment runs under —
+// the same identity the build runs as (see system.DeployUser). One user (not
+// per-deploy) keeps StateDirectory ownership stable across `apigw deploy add`
+// calls; sharing it with the build phase removes the chown handoff entirely.
 const (
-	RunUser  = "apigw-run"
-	RunGroup = "apigw-run"
+	RunUser  = system.DeployUser
+	RunGroup = system.DeployUser
 )
 
 // UnitDir is kept for callers that surface it in messages or doctor output.

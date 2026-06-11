@@ -87,13 +87,12 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 		}
 	}()
 
-	// Ensure both apigw system users exist before anything that depends
-	// on them: Clone chowns the release dir to BuildUser, the build runs
-	// as BuildUser, and the runtime swap chowns to RunUser. On a fresh
-	// install neither user exists yet, and silent lookup failures inside
-	// chownTree would leave the release owned by root → first build fails
-	// with EACCES. Cheap + idempotent so we don't gate on runtime hint.
-	_ = system.EnsureSystemUser(system.BuildUser)
+	// Ensure the single apigw deploy user exists before anything depends on
+	// it: Clone chowns the release dir to it, the build runs as it, and the
+	// runtime systemd unit runs as it. On a fresh install it doesn't exist
+	// yet, and a silent lookup failure inside chownTree would leave the
+	// release owned by root → first build fails with EACCES. Cheap +
+	// idempotent so we don't gate on runtime hint.
 	_ = system.EnsureSystemUser(RunUser)
 
 	cl, err := Clone(ctx, CloneRequest{
@@ -140,21 +139,15 @@ func Apply(ctx context.Context, req ApplyRequest) (ApplyResult, error) {
 		return res, fmt.Errorf("prepare release: %w", err)
 	}
 
-	// Hand the release tree off from the build user (apigw-build) to the
-	// runtime user (apigw-run). Without this, the systemd unit — which runs
-	// as apigw-run — can read but not write into its own working tree, so
-	// any app that mkdir's uploads/, writes logs, or creates a SQLite file
-	// on first request will hit EACCES. Both users were ensured up front
-	// (see the EnsureSystemUser block before Clone).
-	if det.Runtime != RuntimeStatic {
-		if err := chownTree(cl.Path, RunUser); err != nil && req.Logsink != nil {
-			fmt.Fprintf(req.Logsink, "warn: chown release to %s failed: %v\n", RunUser, err)
-		}
-	}
+	// No post-build chown: Clone already chowned the whole tree to the
+	// deploy user, and the build ran as that same user, so the runtime unit
+	// (also that user) can write into uploads/, logs, SQLite files, etc.
+	// The only root-owned files are .apigw/{start.sh,build.log}, which the
+	// runtime reads/executes but never writes.
 
-	// Materialise shared/ paths AFTER the chown to RunUser so anything
-	// migrated from the fresh checkout (first-time setup) ends up owned
-	// by the runtime user too, not the build user.
+	// Materialise shared/ paths. linkSharedPaths chowns the persistent dirs
+	// to the deploy user (they're created by the root worker), so migrated
+	// first-run content ends up owned by the runtime user.
 	if err := linkSharedPaths(req.Name, cl.Path, req.Shared, req.Logsink); err != nil {
 		return res, fmt.Errorf("shared dirs: %w", err)
 	}

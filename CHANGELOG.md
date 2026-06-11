@@ -5,6 +5,35 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.12] — 2026-06-11
+
+### Changed
+
+- **Collapsed the two-user build/run split into a single `apigw-run`
+  identity.** The build previously ran as `apigw-build` and the runtime
+  as `apigw-run`, which forced a chown "dance" — clone → build user,
+  build → run user, re-chown on retry — that was the root cause of a
+  long run of self-inflicted failures (`exit status 243`, `EACCES` on
+  rebuild, `@chown` SIGSYS, EROFS on `/home`) for no real isolation
+  gain: a poisoned `npm install` postinstall already lands in the tree
+  the app then runs from. Now `clone` chowns the release tree to
+  `apigw-run` once, the build runs as `apigw-run` (still non-root, via
+  `systemd-run --uid=apigw-run`), and the systemd unit runs as the same
+  user — ownership never changes hands. Build artifacts (`node_modules/`
+  etc.) are written directly as the runtime user.
+
+### Internal
+
+- `internal/system/sandbox.go` — `BuildUser` → `DeployUser = "apigw-run"`.
+- `internal/deploy/clone.go` — chown release tree to `DeployUser` at clone.
+- `internal/deploy/build.go` — removed the retry re-chown to the build user.
+- `internal/deploy/swap.go` — dropped the second `EnsureSystemUser` and the
+  post-build release chown (tree is already runtime-owned).
+- `internal/deploy/supervise.go` — `RunUser`/`RunGroup` now alias
+  `system.DeployUser` to prevent drift.
+- systemd templates / `users.go` comments updated; `apigw-build` is no
+  longer provisioned (existing accounts are harmless and can be removed).
+
 ## [0.5.11] — 2026-06-11
 
 ### Fixed

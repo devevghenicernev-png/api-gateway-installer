@@ -132,15 +132,16 @@ func Clone(ctx context.Context, req CloneRequest) (CloneResult, error) {
 		}
 		return CloneResult{}, fmt.Errorf("rename %s → %s: %w", staging, finalPath, err)
 	}
-	// MkdirTemp defaults to 0700 — without this the apigw-build user that
-	// the sandboxed build runs as can't even cd into the release dir, and
-	// `npm install`/custom build commands fail with "can't cd".
+	// MkdirTemp defaults to 0700 — without this a non-root caller can't even
+	// cd into the release dir, and `npm install`/custom build commands fail
+	// with "can't cd".
 	_ = os.Chmod(finalPath, 0o755)
-	// The sandboxed build runs as system.BuildUser (apigw-build). It needs
-	// write access inside the release dir to drop node_modules, dist/,
-	// .next, target/, etc. Without this chown, npm install fails with
-	// EACCES even though it can read sources.
-	_ = chownTree(finalPath, system.BuildUser)
+	// Chown the tree to the single deploy user once, here. Both the build
+	// (systemd-run --uid=apigw-run) and the runtime systemd unit run as this
+	// user, so nothing ever hands ownership back — no chown dance, no EACCES
+	// on rebuild. Without it, npm install / the running app would hit EACCES
+	// writing node_modules, uploads/, SQLite files, etc.
+	_ = chownTree(finalPath, system.DeployUser)
 	cleanupStaging = false
 	return CloneResult{SHA: sha, Path: finalPath}, nil
 }
@@ -167,7 +168,7 @@ func forceRemoveAll(root string) error {
 
 // chownTree recursively chowns `root` to the given system user (and their
 // primary group). Best-effort — silent on lookup failure so dev / CI hosts
-// without the apigw-build user keep working (the build there runs as root).
+// without the apigw-run user keep working (the build there runs as root).
 func chownTree(root, username string) error {
 	u, err := user.Lookup(username)
 	if err != nil {

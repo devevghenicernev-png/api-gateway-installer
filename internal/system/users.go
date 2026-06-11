@@ -12,11 +12,11 @@ import (
 // exist, and ensures its home directory exists + is owned by the user.
 // Idempotent.
 //
-// Used to provision `apigw-run` for deployments (one shared identity across
-// all deploys) and — Phase 3.1 — `apigw-build` for build sandboxing.
+// Used to provision `apigw-run` — the single identity every deploy uses for
+// both the build phase and the runtime systemd unit.
 //
-// Home dir matters: even though apigw-build never logs in interactively,
-// `systemd-run --uid=apigw-build` sets $HOME from /etc/passwd before the
+// Home dir matters: even though apigw-run never logs in interactively,
+// `systemd-run --uid=apigw-run` sets $HOME from /etc/passwd before the build
 // command runs. Tools like npm/cargo/pip then try to mkdir caches under that
 // path; if the dir doesn't exist + isn't writable by the user, the build
 // fails with EACCES on the very first dependency install.

@@ -7,16 +7,22 @@ import (
 	"os/exec"
 )
 
-// BuildUser is the dedicated unprivileged user every deploy build runs as.
-// Created lazily on first use via EnsureSystemUser.
+// DeployUser is the single unprivileged identity every deploy uses — the
+// build runs as it AND the systemd unit runs as it. Created lazily on first
+// use via EnsureSystemUser.
 //
-// One user (not per-deploy) keeps the systemd-run scope hierarchy simple.
-// A poisoned `npm install` postinstall still can't touch root-owned files,
-// the running deploy's StateDirectory, or the systemd unit files we own.
-const BuildUser = "apigw-build"
+// We deliberately collapsed the old two-user (apigw-build + apigw-run) split:
+// running the build under a different uid than the runtime forced a chown
+// "dance" (clone→build user, build→run user, re-chown on retry) that was the
+// root cause of a long string of EACCES / exit-243 / SIGSYS failures for no
+// real isolation gain — a poisoned `npm install` postinstall already lands in
+// the very tree the app then runs from. One uid keeps ownership stable: clone
+// chowns to DeployUser once and nothing hands it back. Build is still
+// non-root (defense in depth) but no longer fights itself.
+const DeployUser = "apigw-run"
 
 // BuildSlice scopes per-build resource limits. systemd-run --slice attaches
-// every transient scope here, so a runaway build inherits the slice's
+// every transient service here, so a runaway build inherits the slice's
 // CPUQuota/MemoryHigh instead of starving siblings.
 const BuildSlice = "apigw-builds.slice"
 
@@ -28,7 +34,7 @@ func SandboxedCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	return SandboxedCommandIn(ctx, "", args...)
 }
 
-// SandboxedCommandIn wraps `args` with `systemd-run --uid=apigw-build
+// SandboxedCommandIn wraps `args` with `systemd-run --uid=apigw-run
 // --slice=apigw-builds.slice` running as a transient service under PID1
 // (so setresuid happens in PID1, not in our seccomp-filtered process —
 // see the long comment inside). When `workdir` is non-empty it's threaded
@@ -48,10 +54,10 @@ func SandboxedCommandIn(ctx context.Context, workdir string, args ...string) (*e
 	// Try systemd-run; fall through if missing (CI / containers without
 	// systemd-run binary even though systemd is PID 1).
 	if _, err := exec.LookPath("systemd-run"); err == nil {
-		// Ensure the build user exists. Cheap when it already does.
-		_ = EnsureSystemUser(BuildUser)
+		// Ensure the deploy user exists. Cheap when it already does.
+		_ = EnsureSystemUser(DeployUser)
 		// Run as a *transient service* (no --scope) so PID1 performs the
-		// setresuid() into BuildUser. With --scope, systemd-run runs the
+		// setresuid() into DeployUser. With --scope, systemd-run runs the
 		// privilege drop in its OWN process; that inherits the caller's
 		// seccomp filter, and the apigw-dashboard unit ships
 		// `RestrictSUIDSGID=true`, so setresuid traps SIGSYS ("signal:
@@ -70,7 +76,7 @@ func SandboxedCommandIn(ctx context.Context, workdir string, args ...string) (*e
 			"--wait",
 			"--pipe",
 			"--service-type=exec",
-			"--uid=" + BuildUser,
+			"--uid=" + DeployUser,
 			"--slice=" + BuildSlice,
 			"--property=CPUQuota=200%",
 			"--property=MemoryHigh=2G",
@@ -83,14 +89,13 @@ func SandboxedCommandIn(ctx context.Context, workdir string, args ...string) (*e
 		wrapped = append(wrapped, args...)
 		return exec.CommandContext(ctx, wrapped[0], wrapped[1:]...), nil
 	}
-	// Best-effort fallback: try to drop to apigw-build via `su` if it's a
+	// Best-effort fallback: try to drop to DeployUser via `su` if it's a
 	// real user; otherwise the caller's identity (probably root for the
-	// webhook worker) runs the build directly. Loud warning so operators
-	// see this in journald.
+	// webhook worker) runs the build directly.
 	if _, err := exec.LookPath("su"); err == nil {
-		if _, lerr := lookupUser(BuildUser); lerr == nil {
+		if _, lerr := lookupUser(DeployUser); lerr == nil {
 			joined := joinShellQuoted(args)
-			cmd := exec.CommandContext(ctx, "su", "-s", "/bin/sh", "-c", joined, BuildUser)
+			cmd := exec.CommandContext(ctx, "su", "-s", "/bin/sh", "-c", joined, DeployUser)
 			if workdir != "" {
 				cmd.Dir = workdir
 			}

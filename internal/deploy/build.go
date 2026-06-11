@@ -80,15 +80,11 @@ func PrepareRelease(ctx context.Context, deployName string, spec BuildSpec, rele
 	}
 
 	if build != "" {
-		// Hand the tree back to BuildUser before running the build. On the
-		// first deploy of a SHA this is a no-op (clone.go already chowned
-		// it). On webhook retries where Clone short-circuited because the
-		// release dir already exists from a previous *successful* deploy,
-		// the tree is owned by RunUser (swap.go's post-build chown) and
-		// `npm install` / `cargo build` / etc. hit EACCES on the very
-		// first mkdir under node_modules/. Re-chowning here makes
-		// retries idempotent.
-		_ = chownTree(releaseDir, system.BuildUser)
+		// No chown needed here: clone.go chowned the tree to the single
+		// deploy user (apigw-run), the build runs as that same user, and
+		// nothing hands ownership away — so a rebuild of an existing release
+		// dir is already writable. (This used to re-chown to a separate
+		// build user, which was the source of the EACCES-on-retry bug.)
 
 		// Tee build output to a per-release build.log so failures are
 		// debuggable after the fact. Before this, the build's stdout/stderr
@@ -126,15 +122,14 @@ func PrepareRelease(ctx context.Context, deployName string, spec BuildSpec, rele
 
 // runBuild executes the build command in `cwd` with APIGW_PORT exported.
 //
-// Wraps the invocation with `systemd-run --scope --uid=apigw-build
-// --slice=apigw-builds.slice` when systemd-run is available — that gives
-// us cgroup-enforced CPU/memory limits and prevents a poisoned `npm
-// install` postinstall from touching root state.
+// Wraps the invocation as a `systemd-run --uid=apigw-run
+// --slice=apigw-builds.slice` transient service when systemd-run is
+// available — that gives us cgroup-enforced CPU/memory limits and runs the
+// build non-root (same uid as the runtime, so no ownership handoff).
 //
 // On hosts without systemd-run (some CI images), system.SandboxedCommand
-// falls back to `su -s /bin/sh -c <cmd> apigw-build`, then finally to the
-// caller's own identity if even the user-switch isn't possible. The
-// degradation is loud — operators see the "su" fallback in journald.
+// falls back to `su -s /bin/sh -c <cmd> apigw-run`, then finally to the
+// caller's own identity if even the user-switch isn't possible.
 func runBuild(ctx context.Context, cwd, cmdStr string, port int, sink io.Writer) error {
 	// SandboxedCommandIn threads cwd into systemd-run as
 	// --working-directory=, which is the only way to influence the
