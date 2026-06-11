@@ -5,6 +5,35 @@ All notable changes to `apigw` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.11] — 2026-06-11
+
+### Fixed
+
+- **Webhook/UI deploys failed with `mkdir /home/apigw-run:
+  read-only file system` even though the host `/home` is writable.**
+  The deploy worker runs inside the hardened `apigw-dashboard` unit
+  (`ProtectHome=true`), where `/home` is read-only/invisible. Every
+  deploy re-ran `EnsureSystemUser(apigw-run)` → `mkdir` on the run
+  user's home and tripped over the sandbox. The run user doesn't need
+  a home at all; home backfill for an already-existing user is now
+  best-effort and no longer aborts the deploy.
+- **Live logs panel never showed build output or deploy state.** The
+  events hub matched topics by exact string, so the dashboard's
+  `deploy.*.stdout` / `deploy.*.state` subscriptions matched nothing
+  the worker published (`deploy.<name>.stdout`). The hub now supports
+  `*` wildcards matching a single dot-delimited segment, across live
+  delivery, ring replay (in ID order), and snapshot. Build failures
+  now stream to the panel with the error highlighted.
+
+### Internal
+
+- `internal/events/hub.go` — `topicMatch` + `classify`; `Subscription`
+  splits exact vs wildcard topics. `internal/events/hub_test.go` added.
+- `internal/system/users.go` — best-effort home backfill for existing
+  users.
+- `web/src/components/logs/LogsPanel.tsx` — render the `error` field on
+  failed state events.
+
 ## [0.5.10] — 2026-06-11
 
 ### Fixed

@@ -13,6 +13,7 @@
 package events
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -103,7 +104,7 @@ func (h *Hub) Publish(topic, typ string, data []byte) uint64 {
 	}
 
 	for sub := range h.subs {
-		if _, want := sub.topics[topic]; !want {
+		if !sub.wants(topic) {
 			continue
 		}
 		deliver(sub, e)
@@ -114,11 +115,32 @@ func (h *Hub) Publish(topic, typ string, data []byte) uint64 {
 
 // Subscription is the consumer-side handle. Ch is the event channel;
 // close it via Cancel(). Drops reports cumulative dropped count.
+//
+// Topics may contain `*` wildcards matching a single dot-delimited segment,
+// e.g. `deploy.*.stdout` matches `deploy.foodmanager.stdout` but not
+// `deploy.foo.bar.stdout`. The dashboard relies on this to follow every
+// deploy's build output without enumerating names. Non-wildcard topics stay
+// in an O(1) exact-match set; only patterns containing `*` walk the slice.
 type Subscription struct {
-	topics map[string]struct{}
-	ch     chan Event
-	drops  atomic.Uint64
-	closed atomic.Bool
+	exact    map[string]struct{}
+	patterns []string
+	ch       chan Event
+	drops    atomic.Uint64
+	closed   atomic.Bool
+}
+
+// wants reports whether this subscription is interested in `topic` — exact
+// match first (O(1)), then any wildcard pattern.
+func (s *Subscription) wants(topic string) bool {
+	if _, ok := s.exact[topic]; ok {
+		return true
+	}
+	for _, p := range s.patterns {
+		if topicMatch(p, topic) {
+			return true
+		}
+	}
+	return false
 }
 
 // Ch returns the channel events are delivered on. Closed when the
@@ -137,27 +159,33 @@ func (s *Subscription) Drops() uint64 { return s.drops.Load() }
 // Returns the Subscription and a cancel func. Always defer cancel() in the
 // caller.
 func (h *Hub) Subscribe(topics []string, sinceID uint64) (*Subscription, func()) {
+	exact, patterns := classify(topics)
 	s := &Subscription{
-		topics: setOf(topics),
-		ch:     make(chan Event, h.SubChanCap),
+		exact:    exact,
+		patterns: patterns,
+		ch:       make(chan Event, h.SubChanCap),
 	}
 
 	h.mu.Lock()
 	// Replay first, while holding the lock — guarantees no gap between
-	// "what was in the ring" and "what's live".
-	for _, t := range topics {
-		r, ok := h.rings[t]
-		if !ok {
+	// "what was in the ring" and "what's live". With wildcards a single
+	// pattern can hit multiple rings, so collect all matching events and
+	// replay them in ID order (chronological) rather than per-topic.
+	var replay []Event
+	for t, r := range h.rings {
+		if !s.wants(t) {
 			continue
 		}
-		for _, e := range r.since(sinceID) {
-			select {
-			case s.ch <- e:
-			default:
-				// Sub's channel is already full from a giant backlog;
-				// fall through, the live loop will drop-oldest.
-				s.drops.Add(1)
-			}
+		replay = append(replay, r.since(sinceID)...)
+	}
+	sortByIDAsc(replay)
+	for _, e := range replay {
+		select {
+		case s.ch <- e:
+		default:
+			// Sub's channel is already full from a giant backlog;
+			// fall through, the live loop will drop-oldest.
+			s.drops.Add(1)
 		}
 	}
 	h.subs[s] = struct{}{}
@@ -178,12 +206,13 @@ func (h *Hub) Subscribe(topics []string, sinceID uint64) (*Subscription, func())
 // first). Used by the dashboard's "/api/logs/<deploy>?lines=N" historical
 // endpoint and by `apigw deploy logs --lines N` initial dump.
 func (h *Hub) Snapshot(topics []string, n int) []Event {
-	want := setOf(topics)
+	exact, patterns := classify(topics)
+	want := &Subscription{exact: exact, patterns: patterns}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	out := make([]Event, 0, n)
 	for t, r := range h.rings {
-		if _, ok := want[t]; !ok {
+		if !want.wants(t) {
 			continue
 		}
 		out = append(out, r.all()...)
@@ -226,19 +255,58 @@ func deliver(s *Subscription, e Event) {
 	}
 }
 
-func setOf(topics []string) map[string]struct{} {
-	m := make(map[string]struct{}, len(topics))
+// classify splits requested topics into an exact-match set and a slice of
+// wildcard patterns (those containing `*`). Keeping them apart lets the hot
+// delivery path do an O(1) map lookup before falling back to pattern walks.
+func classify(topics []string) (map[string]struct{}, []string) {
+	exact := make(map[string]struct{}, len(topics))
+	var patterns []string
 	for _, t := range topics {
-		m[t] = struct{}{}
+		if strings.IndexByte(t, '*') >= 0 {
+			patterns = append(patterns, t)
+			continue
+		}
+		exact[t] = struct{}{}
 	}
-	return m
+	return exact, patterns
 }
 
-// sortByIDDesc is a tiny in-place sort — avoids pulling in sort + a closure
-// for the only call site.
+// topicMatch reports whether `topic` matches `pattern`, where a `*` segment
+// in the pattern matches exactly one dot-delimited segment of the topic.
+// Both sides must have the same number of segments. `deploy.*.stdout`
+// matches `deploy.foo.stdout`, not `deploy.a.b.stdout`.
+func topicMatch(pattern, topic string) bool {
+	for {
+		pi := strings.IndexByte(pattern, '.')
+		ti := strings.IndexByte(topic, '.')
+		if pi < 0 || ti < 0 {
+			// Last segment on at least one side.
+			if pi >= 0 || ti >= 0 {
+				return false // segment counts differ
+			}
+			return pattern == "*" || pattern == topic
+		}
+		pseg, tseg := pattern[:pi], topic[:ti]
+		if pseg != "*" && pseg != tseg {
+			return false
+		}
+		pattern, topic = pattern[pi+1:], topic[ti+1:]
+	}
+}
+
+// sortByIDDesc / sortByIDAsc are tiny in-place insertion sorts — avoid
+// pulling in sort + a closure for the only call sites.
 func sortByIDDesc(s []Event) {
 	for i := 1; i < len(s); i++ {
 		for j := i; j > 0 && s[j-1].ID < s[j].ID; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
+}
+
+func sortByIDAsc(s []Event) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1].ID > s[j].ID; j-- {
 			s[j-1], s[j] = s[j], s[j-1]
 		}
 	}

@@ -54,9 +54,10 @@ export function LogsPanel({ onSSEStatus }: { onSSEStatus: (s: SSEStatus) => void
         push(d.line || "", d.stream || "stdout");
       },
       state: (data) => {
-        const d = data as { deploy: string; status: string };
+        const d = data as { deploy: string; status: string; error?: string };
         if (current && d.deploy !== current) return;
-        push(`[state] ${d.deploy}: ${d.status}`, "system");
+        push(`[state] ${d.deploy}: ${d.status}`, d.status === "failed" ? "stderr" : "system");
+        if (d.error) push(d.error, "stderr");
       },
       "webhook.recv": (data) => {
         const d = data as { deploy?: string; result?: string };

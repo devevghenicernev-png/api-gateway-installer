@@ -28,7 +28,14 @@ func EnsureSystemUser(name string) error {
 	if err == nil {
 		// User exists — backfill the home dir if it's missing (covers
 		// installs created by older apigw versions that used --no-create-home).
-		return ensureHome(u)
+		//
+		// Best-effort: the home was already created at useradd time on the
+		// host. The webhook/UI deploy path re-runs this from inside the
+		// hardened apigw-dashboard unit (ProtectHome=true), where /home is
+		// read-only/invisible — a failed mkdir there is a sandbox artifact,
+		// not a real error, and must not kill an otherwise-fine deploy.
+		_ = ensureHome(u)
+		return nil
 	}
 	if _, err := exec.LookPath("useradd"); err != nil {
 		return errors.New("useradd not found — create the user manually: `useradd --system --create-home --shell /usr/sbin/nologin " + name + "`")
